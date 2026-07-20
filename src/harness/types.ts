@@ -1,6 +1,9 @@
 /**
  * Core types for the Harness layer (src/harness/*), docs/DESIGN.md §7 +
- * PRD §5 (docs/feature/a2-harness-provider-router-litellm-adapter/PRD.md).
+ * PRD §5 (docs/feature/a2-harness-provider-router-litellm-adapter/PRD.md,
+ * A2's `ModelAdapter`/`InvokeRequest`/`InvokeResult`/`AvailabilityResult`;
+ * docs/feature/a3-cli-bridge/PRD.md §5, A3's real `ToolCallRecord`/
+ * `ToolExecChecked` shapes replacing A2's placeholder).
  *
  * This file is interface/type declarations only — no implementation. It's
  * the contract that `ProviderRouter`, `AdapterRegistry`, every concrete
@@ -59,21 +62,37 @@ export interface InvokeRequest {
 }
 
 /**
+ * `ToolExecVerifier`'s verdict (`checkToolExecution()`, `src/harness/
+ * tool-exec-verifier.ts`, A3 PRD §5): `"pass"` — a claim asserted
+ * `verifiedBy: "tool_execution"` and the adapter's trace really shows at
+ * least one tool call; `"fail"` — a claim asserted it but the trace is
+ * empty (the "声称≠行为" case this whole verifier exists to catch);
+ * `"na"` — nothing to verify (no claim asserted tool_execution, or
+ * `content` couldn't even be parsed as a claims-bearing shape).
+ */
+export type ToolExecChecked = "pass" | "fail" | "na";
+
+/**
  * PRD §5 / DESIGN §8.5#4: `provider`/`model` must always be populated (not
  * optional, not empty-string) — this is what lets audit/logging answer
  * "who actually responded" instead of Verity's M3 gap where `InvokeResult`
  * only carried `content`/`httpStatus`.
  *
- * `toolExecChecked` is an A3 field. A2 adapters never set it — leaving it
- * `undefined` is the honest signal ("not checked, because this adapter
- * can't check"), not a stand-in value like `"na"` that would need a reader
- * to already know the A2/A3 distinction to interpret correctly.
+ * `toolExecChecked` is an A3 field. A2's `LiteLLMAdapter` (`kind:
+ * "direct-api"`) never sets it — leaving it `undefined` is the honest
+ * signal ("not checked, because this adapter can't check"). A3's
+ * `ClaudeCliAdapter`/`CodexCliAdapter` (`kind: "cli-bridge"`) *do* set it,
+ * including the explicit value `"na"` when there's simply nothing to
+ * verify — that's a different, stronger claim than `undefined` ("I have
+ * verification capability, and I used it: there was nothing to check"),
+ * so a cli-bridge adapter must never leave this field `undefined` the way
+ * a direct-api adapter does (A3 PRD §4).
  */
 export interface InvokeResult {
   content: string;
   provider: string;
   model: string;
-  toolExecChecked?: "pass" | "fail" | "na";
+  toolExecChecked?: ToolExecChecked;
 }
 
 export interface AvailabilityResult {
@@ -83,11 +102,44 @@ export interface AvailabilityResult {
 }
 
 /**
- * Minimal placeholder — A3 (`ClaudeCliAdapter`/`CodexCliAdapter` +
- * `ToolExecVerifier`) defines the real shape. A2 only needs
- * `ModelAdapter#toolTrace`'s return type to exist and typecheck; no A2
- * adapter implements `toolTrace()` or constructs a `ToolCallRecord`.
+ * One real tool-call event, extracted from a cli-bridge adapter's raw CLI
+ * output (A3 PRD §5) — the uniform shape `CodexCliAdapter`/
+ * `ClaudeCliAdapter` both normalize their very different native event
+ * streams into, and the only thing `ToolExecVerifier` ever looks at
+ * (`trace.length`, never `raw`'s contents).
  */
 export interface ToolCallRecord {
-  [key: string]: unknown;
+  /**
+   * Uniform tool identifier. `CodexCliAdapter` fixes this to `"shell"` —
+   * codex's `--json` stream only exposes shell-level `command_execution`,
+   * it can't distinguish which logical tool ran (spike-findings.md §3.1).
+   * `ClaudeCliAdapter` uses the real tool name (`"Bash"`, `"Read"`, ...)
+   * straight from its `tool_use` events, which do carry that distinction.
+   */
+  toolName: string;
+  /**
+   * 0-based position of this record within the trace collected during one
+   * `invoke()` call, in emission order. Establishes "this tool call
+   * happened before the final `content` was emitted" — both CLIs' non-
+   * interactive event streams are strictly chronological with the final
+   * answer always last, so every record collected during one invoke
+   * necessarily precedes that invoke's `content` (spike-findings.md §1.4 /
+   * A3 PRD §5's "ToolExecVerifier" note on why no extra timestamp
+   * comparison is needed).
+   */
+  sequenceIndex: number;
+  /**
+   * Did this specific call report success? `CodexCliAdapter`:
+   * `exit_code === 0`. `ClaudeCliAdapter`: `tool_result.is_error === false`.
+   * `undefined` when the underlying CLI never gave an unambiguous
+   * success/failure signal for this call (e.g. a `tool_use` with no
+   * matching `tool_result`) — left honestly unknown rather than guessed.
+   */
+  succeeded?: boolean;
+  /**
+   * The raw underlying event object(s) this record was built from, kept
+   * for debugging/audit only. `ToolExecVerifier` never reads into this —
+   * v1's check is existence-only (A3 PRD §0 decision 1 / §9.4).
+   */
+  raw: Record<string, unknown>;
 }
