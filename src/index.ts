@@ -11,3 +11,5 @@ export * from "./profile/errors.js";
 export * from "./context/types.js";
 export * from "./context/errors.js";
 export * from "./context/store.js";
+export * from "./context/config.js";
+export * from "./context/staleness.js";
