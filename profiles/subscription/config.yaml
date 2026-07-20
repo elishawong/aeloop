@@ -1,11 +1,11 @@
-# profiles/helix/config.yaml — personal overlay for the "helix" profile.
+# profiles/subscription/config.yaml — personal overlay for the "subscription" profile.
 #
 # Structure per docs/DESIGN.md §7. This is a minimal example: the loader
 # (src/profile/loader.ts) only needs to parse this into a usable shape in
 # this increment — real provider invocation (claude-cli / codex-cli) is
 # built in a later increment (A3).
 
-profile: helix
+profile: subscription
 
 providers:
   claude-cli:

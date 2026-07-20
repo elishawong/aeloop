@@ -37,7 +37,7 @@ import { SchemaValidator } from "./harness/schema-validator.js";
 import type { AvailabilityResult, InvokeRequest, InvokeResult, ModelAdapter } from "./harness/types.js";
 
 const NOW = "2026-07-20T00:00:00.000Z";
-const HELIX_PERSONAS_DIR = path.join(resolveProfileDir("helix"), "personas");
+const SUBSCRIPTION_PERSONAS_DIR = path.join(resolveProfileDir("subscription"), "personas");
 
 /**
  * The one test double in this file (see file header). Represents "not
@@ -115,7 +115,7 @@ describe("Prompt -> Harness vertical slice (real MemoryStore -> real ContextInje
     const injector = new ContextInjector(store, staleness);
     const injected = injector.inject(task, new Date(NOW));
 
-    const composer = new PromptComposer(HELIX_PERSONAS_DIR);
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
     const prompt = composer.compose("coder", injected, task);
 
     // Sanity: this really is a composed prompt string, not a stub.

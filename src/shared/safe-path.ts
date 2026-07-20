@@ -10,7 +10,7 @@
  * collapses `..` segments — `role = "../../../CLAUDE"` resolves to the repo
  * root's `CLAUDE.md`, fully outside `profiles/<x>/personas/`. Real-world
  * repro (pre-fix, this increment): `loadPersona("../../../CLAUDE",
- * "./profiles/helix/personas")` returned the *repo's own* `CLAUDE.md`
+ * "./profiles/subscription/personas")` returned the *repo's own* `CLAUDE.md`
  * content.
  *
  * Two independent layers, both required:
@@ -20,7 +20,7 @@
  *    `path.join`.
  * 2. **Containment** (`isContainedRealpath`): even a name that passes (1)
  *    could still resolve outside the root through a symlink planted inside
- *    it (e.g. `profiles/helix/personas/leaked.md` symlinked to a file
+ *    it (e.g. `profiles/subscription/personas/leaked.md` symlinked to a file
  *    elsewhere on disk) — (1) only inspects the *name*, not what the
  *    resulting path *is* on disk. This resolves both the root and the
  *    candidate path through `fs.realpathSync` (which follows symlinks) and

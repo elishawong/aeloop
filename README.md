@@ -2,7 +2,7 @@
 
 **Model-agnostic, governance-first coder/tester engine.**
 
-Four nested layers — **Prompt ⊂ Context ⊂ Harness ⊂ Loop** — plus a profile overlay, so one engine powers two faces: **Helix** (personal subscription, claude/codex CLI) and **Verity** (company LiteLLM proxy). Neither is a submodule; both are *profiles* on aeloop.
+Four nested layers — **Prompt ⊂ Context ⊂ Harness ⊂ Loop** — plus a profile overlay, so one engine powers two faces: **Helix** (personal subscription, claude/codex CLI) and **Verity** (company LiteLLM proxy) — corresponding to the `subscription` and `apikey` profiles, respectively. Neither is a submodule; both are *profiles* on aeloop.
 
 ## Why
 

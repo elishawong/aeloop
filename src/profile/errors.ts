@@ -6,7 +6,7 @@
  * A profile has no usable `config.yaml` (its directory is absent, or the
  * directory exists but doesn't contain a config.yaml).
  *
- * This is a normal, expected state — e.g. `AI_AGENT_PROFILE=verity` on a
+ * This is a normal, expected state — e.g. `AI_AGENT_PROFILE=apikey` on a
  * machine that doesn't have the company overlay checked out. `loadProfile()`
  * therefore never *throws* this error; it constructs one and returns it as
  * data inside a `{ ok: false, error }` result (see `ProfileLoadResult` in

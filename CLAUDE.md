@@ -5,7 +5,7 @@
 
 ## 1. 这是什么
 aeloop = **模型无关、治理优先的 coder/tester 引擎**(四层嵌套 Prompt⊂Context⊂Harness⊂Loop + 一层 profile overlay)。
-一套引擎两张脸:**Helix**(私人订阅,claude/codex CLI)和 **Verity**(公司 LiteLLM 代理)都是长在它上面的 **profile overlay**,**不是** aeloop 的子模块。aeloop 中立,不属于任何一边。
+一套引擎两张脸:**Helix**(私人订阅,claude/codex CLI)和 **Verity**(公司 LiteLLM 代理)都是长在它上面的 **profile overlay**(分别对应 `subscription`/`apikey` profile),**不是** aeloop 的子模块。aeloop 中立,不属于任何一边。
 > 设计权威:[docs/DESIGN.md](./docs/DESIGN.md)。战略判断在 Helix 侧 `ai-agent/docs/verity-port/UNIFIED-ARCHITECTURE-JUDGMENT.md`(不在本仓)。
 
 ## 2. 技术栈(真实,非计划)
@@ -19,18 +19,20 @@ aeloop = **模型无关、治理优先的 coder/tester 引擎**(四层嵌套 Pro
 | 测试 | vitest |
 | 包管理 | pnpm |
 | 部署 | CLI 工具(`pnpm add -g`),**非 server** |
-| env | `LITELLM_BASE_URL` / `LITELLM_TOKEN`(仅 verity profile);无统一前缀 |
-> A0+A1(`src/prompt/` `src/context/` `src/profile/` `src/shared/`)已 merge 到 main(PR #3,139/139 测试绿),详见 `docs/feature/a0-a1-engine-scaffold-context-prompt/`。`better-sqlite3` 已装并实测(含 FTS5)。`langgraph`/`checkpoint-sqlite` 是 A4(Loop)才需要的依赖,`package.json` 尚未引入,不代表已验证可装。`ajv` 经 A2(#6)评估**不用**(SchemaValidator 直接对 schema-registry 的 zod 对象 `safeParse`,避免双真源),是否 A4 需要待定 —— 见 DESIGN §8 里程碑 A0-A6。
+| env | `LITELLM_BASE_URL` / `LITELLM_TOKEN`(仅 apikey profile);无统一前缀 |
+> A0+A1(`src/prompt/` `src/context/` `src/profile/` `src/shared/`)已 merge 到 main(PR #3,139/139 测试绿),详见 `docs/feature/a0-a1-engine-scaffold-context-prompt/`。A2(`src/harness/` 的 ProviderRouter/AdapterRegistry/LiteLLMAdapter/SchemaValidator)已 merge 到 main(PR #7,171/171 测试绿,四轮 Zorro 对抗审 + Codex 跨模型二签 PASS),详见 `docs/feature/a2-harness-provider-router-litellm-adapter/`。A3(`src/harness/adapters/` 的 ClaudeCliAdapter/CodexCliAdapter + `tool-exec-verifier.ts` + `cli-exec.ts`)已完成、228/228 测试绿,**Zorro 两轮对抗审 PASS(R1 FAIL→返工→R2 PASS)+ Codex 跨模型二签,待指挥官终批 merge**,详见 `docs/feature/a3-cli-bridge/`。`better-sqlite3` 已装并实测(含 FTS5)。`langgraph`/`checkpoint-sqlite` 是 A4(Loop)才需要的依赖,`package.json` 尚未引入,不代表已验证可装。`ajv` 经 A2(#6)评估**不用**(SchemaValidator 直接对 schema-registry 的 zod 对象 `safeParse`,避免双真源),是否 A4 需要待定 —— 见 DESIGN §8 里程碑 A0-A6。
 
-## 3. 目录结构(现状 · A0-A2 已建 prompt/context/profile/shared/harness,loop/cli 待 A3+)
+## 3. 目录结构(现状 · A0-A3 已建 prompt/context/profile/shared/harness(含 cli-bridge),loop/cli 待 A4+)
 ```
 aeloop/
 ├── CLAUDE.md / README.md / CHANGELOG.md / .gitignore
 ├── docs/  (README 索引 / DESIGN 权威 / BACKLOG / PROGRESS / ROADMAP)
 ├── .claude/skills/  (aigit / run)
-├── src/  (prompt / context / profile / shared / harness 已建 —— A0-A2;loop / cli 待建 —— A3+)
+├── src/  (prompt / context / profile / shared / harness 已建 —— A0-A3;harness 含 cli-bridge:
+│         adapters/{claude-cli,codex-cli}-adapter.ts + tool-exec-verifier.ts + cli-exec.ts,
+│         A3 build 完成待 Zorro 审;loop / cli 待建 —— A4+)
 ├── workflows/  (coder-tester-loop.json) ← 待建(A4 才有消费方)
-└── profiles/  (helix/ 私人 overlay;verity/ 只在公司内部 git,.gitignore 屏蔽)
+└── profiles/  (subscription/ 私人 overlay;apikey/ 只在公司内部 git,.gitignore 屏蔽)
 ```
 
 ## 4. 命名 / 约定(焊死)
@@ -39,8 +41,8 @@ aeloop/
 - 输出契约用 zod schema;**跨层无反向依赖**(prompt/context 不 import harness/loop)。
 
 ## 5. 这里 NEVER 出现的东西(0 侵入 / 不越界)
-- ❌ 引擎 `src/` 里**不放** Helix 的魂/companion/私人记忆 —— 那些属 `profiles/helix/` overlay,不属引擎。
-- ❌ **`profiles/verity/` 永不进本仓**(公司内容,只在公司内部 git);`.gitignore` 已屏蔽。
+- ❌ 引擎 `src/` 里**不放** Helix 的魂/companion/私人记忆 —— 那些属 `profiles/subscription/` overlay,不属引擎。
+- ❌ **`profiles/apikey/` 永不进本仓**(公司内容,只在公司内部 git);`.gitignore` 已屏蔽。
 - ❌ 不硬编码任何 provider/model / 厂商专属语法(模型无关是立身之本)。
 - ❌ 不提交秘密(config 只放 `${ENV}` 指针,真值在环境变量)。
 - **跨 repo 边界**:引擎**单一著作源 = 个人机 → GitHub**;Helix(ai-agent)是**消费方 / overlay-parent**,不是上游。要动 ai-agent → 去那个 repo。公司侧只 pull 不 push(单向阀,见 DESIGN §4)。

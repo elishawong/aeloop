@@ -9,7 +9,7 @@ import { PromptComposer } from "../composer.js";
 import { PersonaNotFoundError } from "../personas.js";
 import { DEFAULT_OUTPUT_SCHEMAS, SchemaNotRegisteredError } from "../schema-registry.js";
 
-const HELIX_PERSONAS_DIR = path.join(resolveProfileDir("helix"), "personas");
+const SUBSCRIPTION_PERSONAS_DIR = path.join(resolveProfileDir("subscription"), "personas");
 
 const tmpDirs: string[] = [];
 function makeTmpPersonasDir(): string {
@@ -50,9 +50,9 @@ function makeContext(
   };
 }
 
-describe("PromptComposer — coder role (real committed helix persona + real CoderOutput schema)", () => {
+describe("PromptComposer — coder role (real committed subscription persona + real CoderOutput schema)", () => {
   it("includes the persona text, the CoderOutput schema, the task, and injected memories", () => {
-    const composer = new PromptComposer(HELIX_PERSONAS_DIR);
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
     const context = makeContext([{ title: "House rule", content: "prefer smallest correct change", warning: null }]);
 
     const prompt = composer.compose("coder", context, "Implement the widget resize handler.");
@@ -66,7 +66,7 @@ describe("PromptComposer — coder role (real committed helix persona + real Cod
   });
 
   it("does not include a warning tag for a memory with warning: null", () => {
-    const composer = new PromptComposer(HELIX_PERSONAS_DIR);
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
     const context = makeContext([{ title: "Fresh fact", content: "no issues", warning: null }]);
 
     const prompt = composer.compose("coder", context, "task");
@@ -75,7 +75,7 @@ describe("PromptComposer — coder role (real committed helix persona + real Cod
   });
 
   it("includes a visible warning tag for a stale memory", () => {
-    const composer = new PromptComposer(HELIX_PERSONAS_DIR);
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
     const context = makeContext([{ title: "Old fact", content: "may be outdated", warning: "stale" }]);
 
     const prompt = composer.compose("coder", context, "task");
@@ -84,7 +84,7 @@ describe("PromptComposer — coder role (real committed helix persona + real Cod
   });
 
   it("includes a visible warning tag for an unconfirmed memory", () => {
-    const composer = new PromptComposer(HELIX_PERSONAS_DIR);
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
     const context = makeContext([{ title: "Unreviewed fact", content: "not yet confirmed", warning: "unconfirmed" }]);
 
     const prompt = composer.compose("coder", context, "task");
@@ -93,9 +93,9 @@ describe("PromptComposer — coder role (real committed helix persona + real Cod
   });
 });
 
-describe("PromptComposer — tester role (real committed helix persona + real TesterOutput schema)", () => {
+describe("PromptComposer — tester role (real committed subscription persona + real TesterOutput schema)", () => {
   it("includes the tester persona text and the TesterOutput schema", () => {
-    const composer = new PromptComposer(HELIX_PERSONAS_DIR);
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
     const context = makeContext([]);
 
     const prompt = composer.compose("tester", context, "Review the diff for the resize handler.");
@@ -107,7 +107,7 @@ describe("PromptComposer — tester role (real committed helix persona + real Te
   });
 
   it("renders '(no memories injected)' when the context has none", () => {
-    const composer = new PromptComposer(HELIX_PERSONAS_DIR);
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
     const prompt = composer.compose("tester", makeContext([]), "task");
 
     expect(prompt).toContain("(no memories injected)");
@@ -173,7 +173,7 @@ describe("PromptComposer — does not re-filter by confidenceState (PRD: rejecte
     // which already drops rejected memories) injection result, to prove this
     // layer has no confidence-based filtering logic of its own to accidentally
     // duplicate or contradict the injector's.
-    const composer = new PromptComposer(HELIX_PERSONAS_DIR);
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
     const context = makeContext([
       { title: "Smuggled rejected content", content: "should still render, composer does not filter", warning: null, confidenceState: "rejected" },
     ]);
