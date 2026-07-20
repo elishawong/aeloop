@@ -10,15 +10,15 @@ description: 启动 / 跑起 aeloop,用来看一个改动真的 work。当被要
 > ⚠️ 当前状态:src/ 引擎尚未建(项目自带层刚接入)。以下命令是 A0 脚手架落地后的目标形态;A0 前只有 docs。
 
 ## 前置
-- 包管理器:npm。没装依赖先 `npm install`。
+- 包管理器:pnpm。没装依赖先 `pnpm install`。
 - 环境:复制 `.env.example` → 按 profile 填。
   - **helix profile**:无需 apikey,走本机 `claude` / `codex` CLI 登录态。
   - **verity profile**:填 `LITELLM_BASE_URL` / `LITELLM_TOKEN`。
 
 ## 跑(默认)
 ```sh
-npm install
-AI_AGENT_PROFILE=helix npm run dev        # 或 verity
+pnpm install
+AI_AGENT_PROFILE=helix pnpm dev        # 或 verity
 ```
 
 ## 验证清单(改了什么看什么)
@@ -30,9 +30,9 @@ AI_AGENT_PROFILE=helix npm run dev        # 或 verity
 
 ## 类型 / 构建 / 测试门
 ```sh
-npm run typecheck   # 必须 PASS(strict + noUncheckedIndexedAccess)
-npm run test        # vitest 全绿
-npm run build       # 部署前能过
+pnpm typecheck   # 必须 PASS(strict + noUncheckedIndexedAccess)
+pnpm test        # vitest 全绿
+pnpm build       # 部署前能过
 ```
 
 ## 排错

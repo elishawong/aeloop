@@ -17,8 +17,8 @@ aeloop = **模型无关、治理优先的 coder/tester 引擎**(四层嵌套 Pro
 | 编排 | `@langchain/langgraph` + `checkpoint-sqlite`(官方 SqliteSaver) |
 | 配置 | js-yaml(config.yaml)+ `${ENV}` 占位替换 |
 | 测试 | vitest |
-| 包管理 | npm |
-| 部署 | CLI 工具(`npm i -g`),**非 server** |
+| 包管理 | pnpm |
+| 部署 | CLI 工具(`pnpm add -g`),**非 server** |
 | env | `LITELLM_BASE_URL` / `LITELLM_TOKEN`(仅 verity profile);无统一前缀 |
 > M0-M3 相关依赖(langgraph/checkpoint-sqlite/better-sqlite3)已在开发机验证可装。src/ 代码尚未建(由 `/spec`→build 起,见 DESIGN §8 里程碑 A0-A6)。
 
