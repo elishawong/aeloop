@@ -136,6 +136,8 @@ flowchart LR
 - 加角色 = persona.md + schema + config 绑定;加流程 = 加一份 workflow `.json`;真 plugin = `{role,persona,schema,adapter}` 注册进 registry;自定义 workflow **UI**(类 ruflo)= 后加上层,数据模型已支持。
 - **纪律**:MVP 只一条 coder-tester loop。**留口子,别现在建 plugin 系统/UI**——那正是 ruflo 变臃肿处;等 2-3 个真实 workflow 需求再硬化(YAGNI)。
 
+> **未来最外层「Conductor / 对话协调层」(排期 A6 后,issue #2,现在只留注记别建)**:四层 `Prompt ⊂ Context ⊂ Harness ⊂ Loop` 再往外一圈 —— 决定「进不进 loop / 何时打断正在跑的 loop / 还是自由讨论头脑风暴」。**profile 差异**:Helix profile 是**薄壳/直通**(军师 + Claude Code 交互 + `/spec` 头脑风暴已天然承担这层,别重造),Verity profile 才建真 orchestrator(开发者直接对着产品说话,没有别的东西在路由)。案例来源 = Verity v2 的 orchestrator 计划,但要带**修正版**落地(否则继承它的洞):① 开发者控制命令 approve/reject/stop/confirm 走**确定性代码解析**、不经 LLM;② 打断走**真 checkpoint**、不留悬空路由;③ 对话历史**落 Context 层**、不另造内存持久化;④ 角色 schema 走**动态 registry**(= 本 A0+A1 已落的 `schema-registry.ts`)。详见 issue #2。
+
 ---
 
 ## 2. Use Case 图
@@ -244,6 +246,8 @@ flowchart TD
 ## 5. DB Schema(SQLite 单文件 · 每 profile 独立一份)`[verity-proven]` M2 已实现
 
 > 引擎定义 schema(同一套);**数据每 profile 独立**(Helix 记忆 ≠ Verity 记忆,各自 db 文件)。相对 Verity M2 实现补齐:`confirmed_at/confirmed_by`(memories)、`actor`(confirmations)、`updated_at`(system_config)—— M2 审查发现这三处缺列,aeloop 一次补上。
+
+> **ContextInjector 的「core memory」定义(权威,Zorro R2 #4 落笔)**:注入时**无条件全量加载**的核心 `type` = `identity` / `constraint` / `decision`(身份内核 + 硬约束 + 已定决策,「醒来」永远要看到);其余类型(`snapshot`/`active_task`/`idea`/`postmortem`/`map`/`agent_spec`/`requirement`/`relation`/`project_registry` 等)**只在 FTS5 关键词召回命中时**才进上下文。这条「core 全量 + 召回 union」的区分让 FTS 召回真正起作用 —— A1 Zorro R1 blocker #3 正是早期 `core = 全表` 使 FTS 成死代码。⚠️ **待重估**:`agent_spec`/`map`/`relation`/`project_registry` 也偏「常要」,A2+ 真消费 memory 时回来重估是否纳入 core 集合(现集合定义在 `injector.ts:CORE_MEMORY_TYPES`)。
 
 ```mermaid
 erDiagram
