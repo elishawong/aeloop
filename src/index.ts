@@ -6,3 +6,5 @@
  * (see docs/DESIGN.md §8 milestones A2-A5).
  */
 export * from "./shared/types.js";
+export * from "./profile/loader.js";
+export * from "./profile/errors.js";
