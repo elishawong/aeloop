@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveProfileDir } from "../profile/loader.js";
-import { InvalidRoleNameError, loadPersona, PersonaNotFoundError, resolvePersonaPath } from "./personas.js";
+import { resolveProfileDir } from "../../profile/loader.js";
+import { InvalidRoleNameError, loadPersona, PersonaNotFoundError, resolvePersonaPath } from "../personas.js";
 
 const HELIX_PERSONAS_DIR = path.join(resolveProfileDir("helix"), "personas");
 

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { isContainedRealpath, isSinglePathSegment } from "./safe-path.js";
+import { isContainedRealpath, isSinglePathSegment } from "../safe-path.js";
 
 const tmpDirs: string[] = [];
 function makeTmpDir(prefix: string): string {

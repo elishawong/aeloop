@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { MemoryStore } from "./store.js";
-import { SystemConfig } from "./config.js";
+import { MemoryStore } from "../store.js";
+import { SystemConfig } from "../config.js";
 
 const NOW = "2026-07-20T00:00:00.000Z";
 const LATER = "2026-07-20T01:00:00.000Z";

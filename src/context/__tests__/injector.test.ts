@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { MemoryStore } from "./store.js";
-import { SystemConfig } from "./config.js";
-import { StalenessEngine } from "./staleness.js";
-import { ContextInjector, CORE_MEMORY_TYPES } from "./injector.js";
-import { RecallError } from "./errors.js";
+import { MemoryStore } from "../store.js";
+import { SystemConfig } from "../config.js";
+import { StalenessEngine } from "../staleness.js";
+import { ContextInjector, CORE_MEMORY_TYPES } from "../injector.js";
+import { RecallError } from "../errors.js";
 
 const NOW = "2026-07-20T00:00:00.000Z";
 

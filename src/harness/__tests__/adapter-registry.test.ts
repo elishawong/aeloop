@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { AdapterRegistry } from "./adapter-registry.js";
-import type { AvailabilityResult, InvokeRequest, InvokeResult, ModelAdapter } from "./types.js";
+import { AdapterRegistry } from "../adapter-registry.js";
+import type { AvailabilityResult, InvokeRequest, InvokeResult, ModelAdapter } from "../types.js";
 
 /**
  * Minimal fake adapter — enough shape to prove `AdapterRegistry` treats

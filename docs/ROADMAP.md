@@ -33,7 +33,7 @@
 ### A2. Harness —— B0-B7 全部完成,详见 `docs/feature/a2-harness-provider-router-litellm-adapter/`
 - [x] ProviderRouter(角色→provider→adapter 纯查找,零 I/O)+ AdapterRegistry + LiteLLMAdapter(direct-api,401/403/429/5xx/尾斜线/缺key/非法JSON/真探活全覆盖)+ SchemaValidator(重试喂回错误)+ config.ts(buildAdapterRegistry)—— B0-B5(`8080f8f`/`e085e04`/`2830f68`)
 - [x] 硬性垂直切片测试(Prompt→Harness 真接通:真实 MemoryStore/ContextInjector/PromptComposer/AdapterRegistry/ProviderRouter/SchemaValidator,唯一替身 FakeAdapter)—— B6
-- [x] 文档回写(本文件/PROGRESS/CHANGELOG/根 CLAUDE.md)—— B7;165/165 测试绿,待 Zorro 独立审(`/verify`)
+- [x] 文档回写(本文件/PROGRESS/CHANGELOG/根 CLAUDE.md)—— B7;171/171 测试绿,已 Zorro 四轮对抗审 + Codex `gpt-5.6-sol` 跨模型二签 PASS(R1-R3 FAIL 返工,R4 PASS,双模型同判,详见 `docs/feature/a2-harness-provider-router-litellm-adapter/test-report.md`),merge→main PR#7(`c9c22aa`)
 
 ### A3. CLI 桥接 + 真核实(aeloop 特有)
 - [ ] ClaudeCliAdapter + CodexCliAdapter(先跑 codex exec spike)

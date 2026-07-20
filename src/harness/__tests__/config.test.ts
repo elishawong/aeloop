@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildAdapterRegistry } from "./config.js";
-import { LiteLLMAdapter } from "./adapters/litellm-adapter.js";
-import { InvalidProviderConfigError } from "./errors.js";
-import { loadProfile } from "../profile/loader.js";
-import type { ProfileConfig, ProviderConfig } from "../profile/loader.js";
+import { buildAdapterRegistry } from "../config.js";
+import { LiteLLMAdapter } from "../adapters/litellm-adapter.js";
+import { InvalidProviderConfigError } from "../errors.js";
+import { loadProfile } from "../../profile/loader.js";
+import type { ProfileConfig, ProviderConfig } from "../../profile/loader.js";
 
 describe("buildAdapterRegistry — direct-api provider", () => {
   it("constructs and registers a LiteLLMAdapter for a direct-api provider entry", () => {

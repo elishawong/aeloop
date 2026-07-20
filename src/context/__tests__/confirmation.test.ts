@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoryStore } from "./store.js";
-import { ConfirmationService } from "./confirmation.js";
-import { MemoryNotFoundError } from "./errors.js";
+import { MemoryStore } from "../store.js";
+import { ConfirmationService } from "../confirmation.js";
+import { MemoryNotFoundError } from "../errors.js";
 
 const NOW = "2026-07-20T00:00:00.000Z";
 const LATER = "2026-07-20T01:00:00.000Z";
