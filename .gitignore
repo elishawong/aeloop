@@ -1,0 +1,21 @@
+# deps / build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# 运行态(每 profile 独立记忆库,不入 git)
+*.db
+*.db-journal
+*.db-wal
+memory.db
+
+# 公司 overlay 永不进本仓(只在公司内部 git)
+profiles/verity/
+
+# 环境
+.env
+.env.local
+
+# 杂
+.DS_Store
+*.log
