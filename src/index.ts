@@ -8,3 +8,6 @@
 export * from "./shared/types.js";
 export * from "./profile/loader.js";
 export * from "./profile/errors.js";
+export * from "./context/types.js";
+export * from "./context/errors.js";
+export * from "./context/store.js";
