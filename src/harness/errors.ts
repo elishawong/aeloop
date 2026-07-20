@@ -75,6 +75,29 @@ export class AdapterNotRegisteredError extends Error {
 }
 
 /**
+ * `buildAdapterRegistry()` (`harness/config.ts`) found a malformed entry in
+ * `ProfileConfig.providers[id]` — not an object shape a `ProviderConfig`
+ * can be, a `base_url` that isn't a string, or a `kind` that isn't one of
+ * the two dispatch cases `buildAdapterRegistry` knows how to build.
+ * `src/profile/loader.ts:147`'s docstring explicitly punts full schema
+ * validation of `providers`' nested shapes to "the layer that actually
+ * consumes those nested shapes (the Harness layer, A2+)" — `config.ts` is
+ * that layer, and this is that validation: thrown as a typed error instead
+ * of letting a raw `TypeError` escape later (e.g. a non-string `base_url`
+ * blowing up inside `LiteLLMAdapter`'s `.replace()` at invoke time) or an
+ * unrecognized `kind` being silently skipped with no signal at all.
+ */
+export class InvalidProviderConfigError extends Error {
+  readonly providerId: string;
+
+  constructor(providerId: string, reason: string) {
+    super(`Provider "${providerId}" has an invalid config: ${reason}`);
+    this.name = "InvalidProviderConfigError";
+    this.providerId = providerId;
+  }
+}
+
+/**
  * `SchemaValidator.validate()` retried once (PRD §5/§8.5#3 — feeding the
  * prior validation failure back into the retry prompt) and still failed to
  * produce output matching the schema. Carries both attempts' raw `content`

@@ -156,7 +156,11 @@ export function loadProfile(
  * field inside `providers`/`roles` is well-formed. Full schema validation
  * belongs to the layer that actually consumes those nested shapes (the
  * Harness layer, A2+, per PRD §5's note that this loader "只需解析出结
- * 构"), not this loader.
+ * 构"), not this loader — confirmed implemented as of A2's Zorro round-1
+ * fix: `harness/config.ts`'s `assertValidProviderConfig()` is that
+ * validation for `providers[id]` entries (null/non-object entries,
+ * non-string `base_url`, unrecognized `kind` all throw typed
+ * `InvalidProviderConfigError` there, not here).
  */
 function assertProfileConfigShape(
   config: Record<string, unknown>,

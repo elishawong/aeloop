@@ -154,6 +154,52 @@ describe("LiteLLMAdapter", () => {
     expect(recorded?.headers.authorization).toBeUndefined();
   });
 
+  it("invoke(): a response body that dies mid-read (connection reset after headers) is thrown as AdapterInvokeError, not a raw TypeError (Zorro round-1 blocker 1)", async () => {
+    activeServer = await startFakeServer((_req, res) => {
+      // Announce a body far longer than what's actually written, then
+      // destroy the socket — this makes undici's `response.text()` reject
+      // with a bare `TypeError` ("terminated"), the exact failure mode
+      // that was previously uncaught (line 129 was outside the
+      // try/catch, only `JSON.parse` was covered).
+      res.writeHead(200, { "Content-Type": "application/json", "Content-Length": "10000" });
+      res.write('{"model":"gpt-4o-mini","choices":[{"message":{"content":"partial');
+      res.socket?.destroy();
+    });
+
+    const adapter = new LiteLLMAdapter("litellm", {
+      base_url: activeServer.baseUrl,
+      api_key: "sk-test",
+      model: "gpt-4o-mini",
+    });
+
+    const invokePromise = adapter.invoke(fakeRequest);
+
+    await expect(invokePromise).rejects.toBeInstanceOf(AdapterInvokeError);
+    await expect(invokePromise).rejects.not.toBeInstanceOf(TypeError);
+  });
+
+  it("invoke(): a successful response with \"model\": \"\" falls back to the configured model — InvokeResult.model is never empty-string (Zorro round-1 blocker 2)", async () => {
+    activeServer = await startFakeServer((_req, res) => {
+      sendJson(res, 200, {
+        model: "",
+        choices: [{ message: { content: "hi" } }],
+      });
+    });
+
+    const adapter = new LiteLLMAdapter("litellm", {
+      base_url: activeServer.baseUrl,
+      api_key: "sk-test",
+      model: "gpt-4o-mini",
+    });
+
+    const result = await adapter.invoke(fakeRequest);
+
+    expect(result.model).toBe("gpt-4o-mini");
+    expect(result.model).not.toBe("");
+    expect(result.provider).toBe("litellm");
+    expect(result.provider).not.toBe("");
+  });
+
   it("invoke(): a non-JSON response body is thrown as AdapterInvokeError, not a raw SyntaxError", async () => {
     activeServer = await startFakeServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "text/plain" });

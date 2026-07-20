@@ -57,7 +57,19 @@ describe("SchemaValidator — first attempt fails schema, second succeeds (PRD �
     // first prompt, and contains the first attempt's error information.
     expect(secondReq?.prompt).not.toBe(firstReq?.prompt);
     expect(secondReq?.prompt.startsWith(baseRequest.prompt)).toBe(true);
-    expect(secondReq?.prompt).toContain("ok");
+    // Zorro round-1 blocker 3: a bare `toContain("ok")` here is a weak
+    // assertion — "ok" is itself a schema field name, so almost any
+    // hardcoded retry-prompt suffix (even one that never actually echoes
+    // `firstOutcome.error` back) would coincidentally satisfy it. Assert
+    // instead on `schema-validator.ts`'s own error-formatting literal
+    // ("response did not match schema", `tryValidate()` line 110 —
+    // mirrors the parse-error branch's `toContain("valid JSON")` pattern
+    // below), plus the "note" field name, which only appears here because
+    // it came from the real zod issue path for the *missing* field (it
+    // isn't the original prompt, the schema's own field name being
+    // exercised, or any other test string).
+    expect(secondReq?.prompt).toContain("response did not match schema");
+    expect(secondReq?.prompt).toContain("note");
   });
 });
 

@@ -9,6 +9,7 @@
 
 import { AdapterRegistry } from "./adapter-registry.js";
 import { LiteLLMAdapter } from "./adapters/litellm-adapter.js";
+import { InvalidProviderConfigError } from "./errors.js";
 import type { ProfileConfig, ProviderConfig } from "../profile/loader.js";
 
 /**
@@ -21,6 +22,40 @@ import type { ProfileConfig, ProviderConfig } from "../profile/loader.js";
 function extractModel(providerConfig: ProviderConfig): string | undefined {
   const model = providerConfig["model"];
   return typeof model === "string" ? model : undefined;
+}
+
+function describeType(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "an array";
+  return typeof value;
+}
+
+/**
+ * Runtime guard for one `config.providers[id]` entry (Zorro round-1 🟡:
+ * `profile/loader.ts:147` explicitly leaves nested-shape validation of
+ * `providers` to this layer — `loadProfile()`'s `assertProfileConfigShape`
+ * only checks that `providers` itself is *a* mapping, not that each entry
+ * inside it is well-formed). Statically `providerConfig` is already typed
+ * `ProviderConfig` by `ProfileConfig`, but that's an optimistic cast over
+ * parsed YAML (`loader.ts:142-144`) — a real `config.yaml` can still hand
+ * this `null`, a scalar, or a `base_url` that isn't a string, and none of
+ * that should reach `LiteLLMAdapter` un-checked.
+ */
+function assertValidProviderConfig(
+  id: string,
+  providerConfig: unknown,
+): asserts providerConfig is ProviderConfig {
+  if (typeof providerConfig !== "object" || providerConfig === null || Array.isArray(providerConfig)) {
+    throw new InvalidProviderConfigError(
+      id,
+      `expected an object with a "kind" field, got ${describeType(providerConfig)}`,
+    );
+  }
+
+  const baseUrl = (providerConfig as Record<string, unknown>)["base_url"];
+  if (baseUrl !== undefined && typeof baseUrl !== "string") {
+    throw new InvalidProviderConfigError(id, `"base_url" must be a string, got ${describeType(baseUrl)}`);
+  }
 }
 
 /**
@@ -43,6 +78,8 @@ export function buildAdapterRegistry(config: ProfileConfig): AdapterRegistry {
   const registry = new AdapterRegistry();
 
   for (const [id, providerConfig] of Object.entries(config.providers)) {
+    assertValidProviderConfig(id, providerConfig);
+
     switch (providerConfig.kind) {
       case "direct-api":
         registry.register(
@@ -57,6 +94,16 @@ export function buildAdapterRegistry(config: ProfileConfig): AdapterRegistry {
         // A3 补 ClaudeCliAdapter/CodexCliAdapter 的构造分支于此 —— 本增量
         // 显式跳过,不报错、不造一个假 adapter (PRD §5)。
         break;
+      default:
+        // Unrecognized `kind` used to fall through this switch silently —
+        // no adapter registered, no error, no log: an invisible no-op a
+        // misspelled `kind: "direct-apu"` in config.yaml would sail
+        // through. Now surfaced as a typed error instead (Zorro round-1 🟡).
+        throw new InvalidProviderConfigError(
+          id,
+          `unknown provider kind ${JSON.stringify((providerConfig as { kind: unknown }).kind)} ` +
+            `(expected "cli-bridge" or "direct-api")`,
+        );
     }
   }
 

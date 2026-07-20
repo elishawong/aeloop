@@ -80,11 +80,21 @@ function extractContent(parsed: unknown): string | undefined {
   return typeof content === "string" ? content : undefined;
 }
 
-/** Pulls the response's own `model` field, when present and a string. */
+/**
+ * Pulls the response's own `model` field, when present and a *non-blank*
+ * string. `""` (or a whitespace-only string) is treated the same as
+ * missing — never returned as-is — because the caller (`invoke()`) does
+ * `extractModel(parsed) ?? model`, and `??` only falls back on
+ * `null`/`undefined`, not `""`. Without this, a legal-but-degenerate
+ * `"model": ""` response body would make `InvokeResult.model === ""`,
+ * violating the non-empty invariant `types.ts:72` documents (PRD §5 /
+ * DESIGN §8.5#4).
+ */
 function extractModel(parsed: unknown): string | undefined {
   if (typeof parsed !== "object" || parsed === null) return undefined;
   const { model } = parsed as ChatCompletionsResponse;
-  return typeof model === "string" ? model : undefined;
+  if (typeof model !== "string") return undefined;
+  return model.trim().length > 0 ? model : undefined;
 }
 
 export class LiteLLMAdapter implements ModelAdapter {
@@ -101,6 +111,7 @@ export class LiteLLMAdapter implements ModelAdapter {
   async invoke(req: InvokeRequest): Promise<InvokeResult> {
     const baseUrl = this.requireBaseUrl();
     const model = this.requireModel();
+    const providerId = this.requireProviderId();
     const url = `${normalizeBaseUrl(baseUrl)}/chat/completions`;
 
     let response: Response;
@@ -126,7 +137,24 @@ export class LiteLLMAdapter implements ModelAdapter {
       );
     }
 
-    const rawBody = await response.text();
+    // `response.text()` is a network read, not just a data transform — a
+    // connection that dies mid-body (truncated chunked response, server
+    // process killed after headers) makes undici reject `.text()` with a
+    // bare `TypeError` ("terminated"/"aborted"), not a `SyntaxError`. That
+    // has to land inside this try/catch too (Zorro round-1 blocker 1),
+    // otherwise it would escape `invoke()` as an untyped error and break
+    // `errors.ts:22-27`'s "adapters only ever throw AdapterInvokeError"
+    // contract.
+    let rawBody: string;
+    try {
+      rawBody = await response.text();
+    } catch (cause) {
+      throw new AdapterInvokeError(
+        `LiteLLMAdapter "${this.id}" failed to read response body from ${url}`,
+        { cause },
+      );
+    }
+
     let parsed: unknown;
     try {
       parsed = JSON.parse(rawBody);
@@ -147,7 +175,7 @@ export class LiteLLMAdapter implements ModelAdapter {
 
     return {
       content,
-      provider: this.id,
+      provider: providerId,
       model: extractModel(parsed) ?? model,
     };
   }
@@ -216,5 +244,20 @@ export class LiteLLMAdapter implements ModelAdapter {
       throw new AdapterInvokeError(`LiteLLMAdapter "${this.id}" has no model configured`);
     }
     return model;
+  }
+
+  /**
+   * `id` is typed as a non-optional `string` in the constructor, so this is
+   * belt-and-suspenders rather than a case that should ever trip in
+   * practice (`config.ts` always passes the provider's own map key as
+   * `id`) — but `InvokeResult.provider` carries the same non-empty
+   * invariant as `.model` (`types.ts:72`), so it gets the same runtime
+   * guard rather than trusting the type alone (Zorro round-1 blocker 2).
+   */
+  private requireProviderId(): string {
+    if (typeof this.id !== "string" || this.id.trim().length === 0) {
+      throw new AdapterInvokeError("LiteLLMAdapter constructed with an empty/missing provider id");
+    }
+    return this.id;
   }
 }
