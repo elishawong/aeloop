@@ -69,7 +69,7 @@ function assertValidProviderConfig(
  *   increment neither errors nor fabricates a placeholder adapter for a
  *   cli-bridge provider id.
  *
- * Running this against the real `profiles/helix/config.yaml` (both of its
+ * Running this against the real `profiles/subscription/config.yaml` (both of its
  * providers are `cli-bridge`) is expected to return an **empty**
  * `AdapterRegistry` — that's the predicate `config.test.ts` pins down, not
  * a bug to "fix" by adding a placeholder branch later.

@@ -12,13 +12,13 @@ description: 启动 / 跑起 aeloop,用来看一个改动真的 work。当被要
 ## 前置
 - 包管理器:pnpm。没装依赖先 `pnpm install`。
 - 环境:复制 `.env.example` → 按 profile 填。
-  - **helix profile**:无需 apikey,走本机 `claude` / `codex` CLI 登录态。
-  - **verity profile**:填 `LITELLM_BASE_URL` / `LITELLM_TOKEN`。
+  - **subscription profile**:无需 apikey,走本机 `claude` / `codex` CLI 登录态。
+  - **apikey profile**:填 `LITELLM_BASE_URL` / `LITELLM_TOKEN`。
 
 ## 跑(默认)
 ```sh
 pnpm install
-AI_AGENT_PROFILE=helix pnpm dev        # 或 verity
+AI_AGENT_PROFILE=subscription pnpm dev # 或 apikey
 ```
 
 ## 验证清单(改了什么看什么)

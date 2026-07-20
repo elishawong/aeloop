@@ -15,7 +15,7 @@
  *      `StalenessEngine`/`SystemConfig`) — `inject()` reads back from
  *      SQLite and applies the real filtering/warning logic.
  *   3. A real `PromptComposer` (pointed at the real, committed
- *      `profiles/helix/personas/` directory) — `compose()` consumes the
+ *      `profiles/subscription/personas/` directory) — `compose()` consumes the
  *      injector's actual return value directly, no intermediate reshaping.
  *   4. Assertions against the final prompt *string* — the one artifact a
  *      Harness-layer caller (A2+) would actually send to a model.
@@ -36,7 +36,7 @@ import { ContextInjector } from "./context/injector.js";
 import { PromptComposer } from "./prompt/composer.js";
 
 const NOW = "2026-07-20T00:00:00.000Z";
-const HELIX_PERSONAS_DIR = path.join(resolveProfileDir("helix"), "personas");
+const SUBSCRIPTION_PERSONAS_DIR = path.join(resolveProfileDir("subscription"), "personas");
 
 const openStores: MemoryStore[] = [];
 afterEach(() => {
@@ -119,7 +119,7 @@ describe("Context -> Prompt vertical slice (real MemoryStore -> real ContextInje
     expect(injectedIds).not.toContain(rejected.id);
 
     // ---- 3. Real PromptComposer, consuming the injector's real output -
-    const composer = new PromptComposer(HELIX_PERSONAS_DIR);
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
     const prompt = composer.compose("coder", injected, task);
 
     // ---- 4. Assertions on the actual final prompt string ---------------
@@ -171,7 +171,7 @@ describe("Context -> Prompt vertical slice (real MemoryStore -> real ContextInje
     const injector = new ContextInjector(store, staleness);
     const injected = injector.inject(task, new Date(NOW));
 
-    const composer = new PromptComposer(HELIX_PERSONAS_DIR);
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
     const prompt = composer.compose("coder", injected, task);
 
     expect(prompt).not.toContain("this will be rejected via the service");

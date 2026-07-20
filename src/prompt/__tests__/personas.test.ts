@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { resolveProfileDir } from "../../profile/loader.js";
 import { InvalidRoleNameError, loadPersona, PersonaNotFoundError, resolvePersonaPath } from "../personas.js";
 
-const HELIX_PERSONAS_DIR = path.join(resolveProfileDir("helix"), "personas");
+const SUBSCRIPTION_PERSONAS_DIR = path.join(resolveProfileDir("subscription"), "personas");
 
 const tmpDirs: string[] = [];
 function makeTmpPersonasDir(): string {
@@ -21,15 +21,15 @@ afterEach(() => {
   }
 });
 
-describe("loadPersona — real committed helix personas", () => {
+describe("loadPersona — real committed subscription personas", () => {
   it("loads the coder persona by role name", () => {
-    const text = loadPersona("coder", HELIX_PERSONAS_DIR);
+    const text = loadPersona("coder", SUBSCRIPTION_PERSONAS_DIR);
     expect(text).toContain("Coder");
     expect(text).toContain("CoderOutput");
   });
 
   it("loads the tester persona by role name", () => {
-    const text = loadPersona("tester", HELIX_PERSONAS_DIR);
+    const text = loadPersona("tester", SUBSCRIPTION_PERSONAS_DIR);
     expect(text).toContain("Tester");
     expect(text).toContain("TesterOutput");
   });
@@ -83,7 +83,7 @@ describe("loadPersona — path traversal is blocked (Zorro review, feature/issue
     // containment check.
     let thrown: unknown;
     try {
-      loadPersona("../../../CLAUDE", HELIX_PERSONAS_DIR);
+      loadPersona("../../../CLAUDE", SUBSCRIPTION_PERSONAS_DIR);
     } catch (err) {
       thrown = err;
     }
@@ -92,25 +92,25 @@ describe("loadPersona — path traversal is blocked (Zorro review, feature/issue
   });
 
   it("rejects a role name with a deeper traversal chain reaching outside the repo", () => {
-    expect(() => loadPersona("../../../../../../etc/passwd", HELIX_PERSONAS_DIR)).toThrow(InvalidRoleNameError);
+    expect(() => loadPersona("../../../../../../etc/passwd", SUBSCRIPTION_PERSONAS_DIR)).toThrow(InvalidRoleNameError);
   });
 
   it("rejects an absolute path as a role name", () => {
-    expect(() => loadPersona("/etc/passwd", HELIX_PERSONAS_DIR)).toThrow(InvalidRoleNameError);
+    expect(() => loadPersona("/etc/passwd", SUBSCRIPTION_PERSONAS_DIR)).toThrow(InvalidRoleNameError);
   });
 
   it("rejects a role name containing a backslash traversal sequence", () => {
-    expect(() => loadPersona("..\\..\\secrets", HELIX_PERSONAS_DIR)).toThrow(InvalidRoleNameError);
+    expect(() => loadPersona("..\\..\\secrets", SUBSCRIPTION_PERSONAS_DIR)).toThrow(InvalidRoleNameError);
   });
 
   it("rejects a bare '..' role name", () => {
-    expect(() => loadPersona("..", HELIX_PERSONAS_DIR)).toThrow(InvalidRoleNameError);
+    expect(() => loadPersona("..", SUBSCRIPTION_PERSONAS_DIR)).toThrow(InvalidRoleNameError);
   });
 
   it("an inert '..%2F'-style string (no URL-decoding happens here) is not treated as traversal — just an ordinary missing-file lookup", () => {
     // Nothing in loadPersona decodes %2F, so this never becomes a real ".."
     // path component; it's simply a role name that has no matching file.
-    expect(() => loadPersona("..%2F..%2Fsecrets", HELIX_PERSONAS_DIR)).toThrow(PersonaNotFoundError);
+    expect(() => loadPersona("..%2F..%2Fsecrets", SUBSCRIPTION_PERSONAS_DIR)).toThrow(PersonaNotFoundError);
   });
 
   it("blocks a symlinked persona file that resolves outside personasDir (symlink escape)", () => {

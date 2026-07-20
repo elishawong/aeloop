@@ -26,14 +26,14 @@ afterEach(() => {
   delete process.env["AELOOP_TEST_ENV_VAR"];
 });
 
-describe("loadProfile — helix (real committed profile)", () => {
-  it("parses profiles/helix/config.yaml into a usable ProfileConfig", () => {
-    const result = loadProfile("helix");
+describe("loadProfile — subscription (real committed profile)", () => {
+  it("parses profiles/subscription/config.yaml into a usable ProfileConfig", () => {
+    const result = loadProfile("subscription");
 
     expect(result.ok).toBe(true);
     if (!result.ok) return; // narrow for TS
-    expect(result.profile).toBe("helix");
-    expect(result.config.profile).toBe("helix");
+    expect(result.profile).toBe("subscription");
+    expect(result.config.profile).toBe("subscription");
     expect(result.config.providers["claude-cli"]).toEqual({
       kind: "cli-bridge",
       cmd: "claude",
@@ -47,32 +47,32 @@ describe("loadProfile — helix (real committed profile)", () => {
     expect(result.config.workflow?.reject_threshold).toBe(2);
   });
 
-  it("defaults to the helix profile when AI_AGENT_PROFILE is unset", () => {
+  it("defaults to the subscription profile when AI_AGENT_PROFILE is unset", () => {
     const original = process.env["AI_AGENT_PROFILE"];
     delete process.env["AI_AGENT_PROFILE"];
     try {
       const result = loadProfile();
       expect(result.ok).toBe(true);
-      if (result.ok) expect(result.profile).toBe("helix");
+      if (result.ok) expect(result.profile).toBe("subscription");
     } finally {
       if (original !== undefined) process.env["AI_AGENT_PROFILE"] = original;
     }
   });
 });
 
-describe("loadProfile — verity (must not exist in this repo)", () => {
+describe("loadProfile — apikey (must not exist in this repo)", () => {
   it("returns a typed not-found result, does not throw, does not fake an empty config", () => {
-    const result = loadProfile("verity");
+    const result = loadProfile("apikey");
 
     expect(result.ok).toBe(false);
     if (result.ok) return; // narrow for TS
     expect(result.error).toBeInstanceOf(ProfileNotFoundError);
-    expect(result.error.profile).toBe("verity");
-    expect(result.error.profileDir).toBe(resolveProfileDir("verity"));
+    expect(result.error.profile).toBe("apikey");
+    expect(result.error.profileDir).toBe(resolveProfileDir("apikey"));
   });
 });
 
-describe("loadProfile — missing profile dir (generic, not just verity)", () => {
+describe("loadProfile — missing profile dir (generic, not just apikey)", () => {
   it("returns { ok: false } for any profile with no config.yaml on disk", () => {
     const profilesRoot = makeTmpProfilesRoot();
     // deliberately don't create anything under profilesRoot/ghost
@@ -92,7 +92,7 @@ describe("loadProfile — malformed config.yaml (must not throw a bare/raw error
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       path.join(dir, "config.yaml"),
-      "profile: helix\n  providers: [this is: not, valid: yaml\n",
+      "profile: subscription\n  providers: [this is: not, valid: yaml\n",
       "utf-8",
     );
 
@@ -218,8 +218,8 @@ describe("loadProfile — minimal required-field validation before returning ok:
     expect(() => loadProfile("providers-wrong-type", profilesRoot)).toThrow(ProfileConfigParseError);
   });
 
-  it("still accepts the real committed helix profile (sanity check the validation isn't overly strict)", () => {
-    const result = loadProfile("helix");
+  it("still accepts the real committed subscription profile (sanity check the validation isn't overly strict)", () => {
+    const result = loadProfile("subscription");
     expect(result.ok).toBe(true);
   });
 });

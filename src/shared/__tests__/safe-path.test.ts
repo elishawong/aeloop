@@ -21,7 +21,7 @@ afterEach(() => {
 describe("isSinglePathSegment", () => {
   it("accepts an ordinary name", () => {
     expect(isSinglePathSegment("coder")).toBe(true);
-    expect(isSinglePathSegment("helix")).toBe(true);
+    expect(isSinglePathSegment("subscription")).toBe(true);
   });
 
   it("rejects an empty string", () => {

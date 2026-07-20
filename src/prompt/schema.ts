@@ -34,7 +34,7 @@ export type VerifiedBy = z.infer<typeof VerifiedBy>;
 
 /**
  * One claim a Coder or Tester makes about behavior, per both personas'
- * house rules (profiles/helix/personas/{coder,tester}.md): "label every
+ * house rules (profiles/subscription/personas/{coder,tester}.md): "label every
  * claim about behavior with how you know it's true" / "a claim with no
  * verification method behind it is not confirmed, say so".
  */

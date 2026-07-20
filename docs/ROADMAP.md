@@ -46,7 +46,7 @@
 - [ ] 彩色 diff + y/n 批准 + 升级视觉区分
 
 ### A6. profile 双跑验收
-- [ ] helix(claude+codex)与 verity(litellm)各跑通一次真实任务
+- [ ] subscription(claude+codex)与 apikey(litellm)各跑通一次真实任务
 
 ### spike(实现前必跑)
 - [ ] codex exec 非交互模式验证

@@ -30,9 +30,9 @@
 
 ## 1. 问题 / 用户 / 方案
 
-- **要解决的问题**:A2 建好了 Harness 层,但 `harness/config.ts` 的 `buildAdapterRegistry()` 对 `kind === "cli-bridge"` 显式跳过(注释原话:「A3 补 ClaudeCliAdapter/CodexCliAdapter 的构造分支于此」)——这意味着 helix profile(订阅制、无 apikey,两个 provider `claude-cli`/`codex-cli` 都是 `cli-bridge`)目前跑 `buildAdapterRegistry(helixConfig)` 会拿到一个**空的** `AdapterRegistry`,完全没有能力真的调一个模型。同时 DESIGN §8 点名 `ToolExecVerifier` 是「唯一真防幻觉的那道闸」——`ClaimSchema.verifiedBy` 允许模型自称某条 claim 是靠 `"tool_execution"` 验证的,但目前没有任何机制核实这个自称是不是真的,模型完全可以在从未调用任何工具的情况下堂而皇之地写 `verifiedBy: "tool_execution"`。
-- **给谁用**:直接消费方是 A4(Loop/LangGraph 编排的 Coder/Tester 节点)—— A4 会对 helix profile 调 `ProviderRouter.route("coder")`/`route("tester")` 拿到真实的 `ClaudeCliAdapter`/`CodexCliAdapter` 实例并调用 `invoke()`。更下游是 Elisha 本人的实际 dogfood 循环(订阅制,不打公司 API 计费)。短期内直接使用者是 Cypher/Zorro 在本增量和 A4 里跑测试。
-- **一句话方案**:按 spike 验证过的真实 CLI 调用形态建 `ClaudeCliAdapter`/`CodexCliAdapter`(都 `implements ModelAdapter`,`kind: "cli-bridge"`,复用同一个新建的通用子进程执行原语 `cli-exec.ts` 处理 spawn/超时/stdin 关闭)+ 各自的 JSONL trace 解析器,产出统一形状的 `ToolCallRecord[]`;建 `ToolExecVerifier`(纯函数 `checkToolExecution`)按已拍板的「存在性匹配」规则核实「claim 声称 tool_execution」与「trace 里真的发生过工具调用」是否一致,产出 `InvokeResult.toolExecChecked`;把 `harness/config.ts` 的 cli-bridge 分支接上,让 `profiles/helix/config.yaml` 真的能构造出两个真实 adapter;最后用一条硬性垂直切片测试证明这条链路真的接通(`PromptComposer → ProviderRouter → AdapterRegistry(真实 cli-bridge adapter,子进程指向受控 fixture 脚本而非真实 claude/codex 二进制)→ SchemaValidator → ToolExecVerifier 的判定落进 InvokeResult`)。
+- **要解决的问题**:A2 建好了 Harness 层,但 `harness/config.ts` 的 `buildAdapterRegistry()` 对 `kind === "cli-bridge"` 显式跳过(注释原话:「A3 补 ClaudeCliAdapter/CodexCliAdapter 的构造分支于此」)——这意味着 subscription profile(订阅制、无 apikey,两个 provider `claude-cli`/`codex-cli` 都是 `cli-bridge`)目前跑 `buildAdapterRegistry(subscriptionConfig)` 会拿到一个**空的** `AdapterRegistry`,完全没有能力真的调一个模型。同时 DESIGN §8 点名 `ToolExecVerifier` 是「唯一真防幻觉的那道闸」——`ClaimSchema.verifiedBy` 允许模型自称某条 claim 是靠 `"tool_execution"` 验证的,但目前没有任何机制核实这个自称是不是真的,模型完全可以在从未调用任何工具的情况下堂而皇之地写 `verifiedBy: "tool_execution"`。
+- **给谁用**:直接消费方是 A4(Loop/LangGraph 编排的 Coder/Tester 节点)—— A4 会对 subscription profile 调 `ProviderRouter.route("coder")`/`route("tester")` 拿到真实的 `ClaudeCliAdapter`/`CodexCliAdapter` 实例并调用 `invoke()`。更下游是 Elisha 本人的实际 dogfood 循环(订阅制,不打公司 API 计费)。短期内直接使用者是 Cypher/Zorro 在本增量和 A4 里跑测试。
+- **一句话方案**:按 spike 验证过的真实 CLI 调用形态建 `ClaudeCliAdapter`/`CodexCliAdapter`(都 `implements ModelAdapter`,`kind: "cli-bridge"`,复用同一个新建的通用子进程执行原语 `cli-exec.ts` 处理 spawn/超时/stdin 关闭)+ 各自的 JSONL trace 解析器,产出统一形状的 `ToolCallRecord[]`;建 `ToolExecVerifier`(纯函数 `checkToolExecution`)按已拍板的「存在性匹配」规则核实「claim 声称 tool_execution」与「trace 里真的发生过工具调用」是否一致,产出 `InvokeResult.toolExecChecked`;把 `harness/config.ts` 的 cli-bridge 分支接上,让 `profiles/subscription/config.yaml` 真的能构造出两个真实 adapter;最后用一条硬性垂直切片测试证明这条链路真的接通(`PromptComposer → ProviderRouter → AdapterRegistry(真实 cli-bridge adapter,子进程指向受控 fixture 脚本而非真实 claude/codex 二进制)→ SchemaValidator → ToolExecVerifier 的判定落进 InvokeResult`)。
 
 ## 2. 目标 / 非目标
 
@@ -52,12 +52,12 @@
 - ❌ **通过 `config.yaml` 指定底层模型**(`-m`/`--model` 覆盖)——v1 用 CLI 自身已配置的默认模型(spike 实测出来的是 `gpt-5.6-sol`(codex)/`claude-sonnet-5`(claude),这是本机当前配置决定的,不是 adapter 写死的)。
 - ❌ **coder 角色让 CLI 真的落盘改文件**——`CoderOutput.diff` 是**字符串**产物(DESIGN §3 sequence:`Coder-->>Orc: {diff, claims[], confidence}`),不是"CLI 自己把改动写进工作区"。两个 adapter 默认都用只读姿态(codex `--sandbox read-only`;claude 限定 `--allowedTools` 到只读工具集,§5 有精确清单),coder 是否需要更高权限直接改文件是 A4 Loop 网关设计的事,不是 A3 adapter 默认值的事。
 - ❌ **Loop 层的 G1-G3 门 / `structured_claims`/`workflow_runs`/`approvals` 建表持久化**——A4;A3 只保证 `InvokeResult.toolExecChecked` 被正确计算出来,不碰数据库(和 A2 §4 的"无状态、不建表"边界一致)。
-- ❌ **`profiles/verity/`**——verity profile 的两个角色都走 `LiteLLMAdapter`(direct-api),A3 不涉及。
+- ❌ **`profiles/apikey/`**——apikey profile 的两个角色都走 `LiteLLMAdapter`(direct-api),A3 不涉及。
 - ❌ **真实 CLI 打进自动化测试套件**——`CLAUDE.md`「远控点火」原则(程序化/自动化不打按订阅计费的交互式 CLI)。测试全部走**受控 fixture 子进程脚本**(§5/§6 有完整设计),没有任何测试会真的 `spawn` 生产环境的 `claude`/`codex` 二进制。
 
 ## 3. 用户故事
 
-- 作为 **A4 的 Loop 开发者**,我想要对 helix profile 调 `ProviderRouter.route("coder")` 直接拿到一个能真的调用 `claude` CLI 的 `ModelAdapter`,不用关心 spawn/JSONL 解析这些细节。
+- 作为 **A4 的 Loop 开发者**,我想要对 subscription profile 调 `ProviderRouter.route("coder")` 直接拿到一个能真的调用 `claude` CLI 的 `ModelAdapter`,不用关心 spawn/JSONL 解析这些细节。
 - 作为 **A4 的 Loop 开发者**,我想要 `InvokeResult.toolExecChecked` 在模型谎报「我验证过了」但实际没调用任何工具时明确给我 `"fail"`,而不是沉默地信任模型的自我报告。
 - 作为 **指挥官**,我想要看到一条测试证明「模型自称 `verifiedBy: "tool_execution"` 但 trace 里空空如也」这种幻觉场景真的会被 `ToolExecVerifier` 抓出来标 `fail`——不是文档自称,是真跑测试证明。
 - 作为 **指挥官**,我想要确认这套 adapter 不会在自动化测试里偷偷打真实 `claude`/`codex` 消耗订阅额度——测试策略要显式交代清楚。
@@ -164,13 +164,13 @@
 - `src/harness/__tests__/tool-exec-verifier.test.ts`:见上方"ToolExecVerifier"小节,四种组合全覆盖。
 - `src/harness/adapters/__tests__/codex-cli-adapter.test.ts`(走 `fake-codex.fixture.mjs`):①含工具调用的场景(fixture 打印 spike §1.3 那份真实 JSONL)→ `toolTrace()` 返回一条 `toolName: "shell"` 的记录,`content` 抽取正确(最后一条 agent_message);②无工具调用的对照组(fixture 打印 spike §1.3 里"Just say hello"那份真实 JSONL)→ `toolTrace()` 返回 `[]`(这条本来就是 spike 已验证过的负控,这里是把它固化成自动化回归测试);③模型自称 tool_execution 但 fixture 只打印无工具调用的输出(構造一个"content 里塞了 verifiedBy: tool_execution 但 trace 为空"的场景,可以是单独一份 fixture 变体)→ `toolExecChecked === "fail"`,直接验证本 PRD 最核心的防幻觉路径在真实 adapter 层面也成立(不只是 `tool-exec-verifier.test.ts` 那层纯函数单测);④非零退出/进程找不到(fixture 换成一个总是 exit 1 或干脆指向不存在的路径)→ 抛 `AdapterInvokeError`;⑤ `checkAvailability()`:fixture 支持 `--version` 分支,exit 0 → `available: true`;⑥ `model` 字段固定为 `"unknown"`(对应上面新发现的 codex `--json` 无 model 字段这条)。
 - `src/harness/adapters/__tests__/claude-cli-adapter.test.ts`(走 `fake-claude.fixture.mjs`):①含工具调用场景(spike §2.2 真实 JSONL)→ `toolTrace()` 正确抽出 `Bash`/`Read` 两条记录,顺序正确;②**无工具调用负控**(§0-3 拍板决策要求的新测试,spike 没独立跑过)——fixture 打印一份"不需要工具、纯文字回答"的真实/等价 JSONL(可以复用 spike §2.2 里 claude 的 `system/init` + 一条纯 `text` assistant 消息 + `result` 三行,不含任何 `tool_use`)→ 断言 `toolTrace()` 返回 `[]`;③声称 tool_execution 但 trace 为空 → `toolExecChecked === "fail"`(同 codex 侧②的镜像测试);④缺 `--verbose` 报错场景**不需要专门测试**(这是 adapter 内部固定拼死的 flag,不是运行时可变路径,没有分支可测);⑤ `model` 从 `system/init` 事件正确抽取(断言等于 fixture 里预置的 `"claude-sonnet-5"` 或类似值);⑥ `checkAvailability()` 同 codex 侧。
-- `src/harness/__tests__/config.test.ts`(**扩展已有文件**,不是新文件):①传入 `cmd: "claude"` 的 cli-bridge provider → registry 里 `get(id)` 拿到 `ClaudeCliAdapter` 实例;②`cmd: "codex"` → `CodexCliAdapter` 实例;③`cmd` 是未识别值(如 `"gemini"`)→ 抛 `InvalidProviderConfigError`;④**A2 已有的那条"真实 `profiles/helix/config.yaml` → 空 registry"的固定测试现在要更新**——helix config 的两个 provider 现在应该真的能构造出 adapter 了,这条测试的断言从"空 registry"改成"两个 provider 都能拿到对应 adapter 实例"(这是 A3 故意打破 A2 那条断言的地方,PR 描述/commit message 要说清楚为什么这条测试的断言变了,不能让 Zorro 看 diff 时以为是意外改动)。
+- `src/harness/__tests__/config.test.ts`(**扩展已有文件**,不是新文件):①传入 `cmd: "claude"` 的 cli-bridge provider → registry 里 `get(id)` 拿到 `ClaudeCliAdapter` 实例;②`cmd: "codex"` → `CodexCliAdapter` 实例;③`cmd` 是未识别值(如 `"gemini"`)→ 抛 `InvalidProviderConfigError`;④**A2 已有的那条"真实 `profiles/subscription/config.yaml` → 空 registry"的固定测试现在要更新**——subscription config 的两个 provider 现在应该真的能构造出 adapter 了,这条测试的断言从"空 registry"改成"两个 provider 都能拿到对应 adapter 实例"(这是 A3 故意打破 A2 那条断言的地方,PR 描述/commit message 要说清楚为什么这条测试的断言变了,不能让 Zorro 看 diff 时以为是意外改动)。
 
 ### 垂直切片(A3 收尾,硬性交付)
 
 - `src/harness-cli.e2e.test.ts`(命名对齐 `src/harness.e2e.test.ts` 的顶层 e2e 文件放置惯例,新文件而非改已有的那份——A2 那条切片证明的是"direct-api 路径接通",这条证明的是"cli-bridge 路径接通",两条独立场景值得独立文件,互不干扰):
   1. 真实 `MemoryStore` + `ContextInjector` + `PromptComposer`(照抄 `harness.e2e.test.ts`/`context-prompt.e2e.test.ts` 已有的搭建方式,不重新发明)产出真实 prompt 字符串。
-  2. 一份**内存态 fixture** `ProfileConfig`(不是读真实 `profiles/helix/config.yaml`——那份指向真实 `claude`/`codex` 二进制,e2e 测试要指向 fixture 脚本):`providers: { "codex-cli": { kind: "cli-bridge", cmd: "<绝对路径指向 fake-codex.fixture.mjs>" } }`。
+  2. 一份**内存态 fixture** `ProfileConfig`(不是读真实 `profiles/subscription/config.yaml`——那份指向真实 `claude`/`codex` 二进制,e2e 测试要指向 fixture 脚本):`providers: { "codex-cli": { kind: "cli-bridge", cmd: "<绝对路径指向 fake-codex.fixture.mjs>" } }`。
   3. 真实 `buildAdapterRegistry(fixtureConfig)` → 真实构造出一个 `CodexCliAdapter` 实例(**这一步本身就是本条切片和 A2 版本最大的区别**——A2 的切片直接 `new FakeAdapter()` 手写一个假的 `ModelAdapter`,完全绕过了 `buildAdapterRegistry`;这条切片走真实的 `buildAdapterRegistry` 分派逻辑,唯一被替身替换的是"`claude`/`codex` 这个真实二进制",不是"adapter 这个类本身")。
   4. 真实 `ProviderRouter` 路由到这个真实 adapter。
   5. 真实 `SchemaValidator.validate({ schema: CoderOutput, ... })`,`invoke` 回调就是 `(req) => adapter.invoke(req)`(这一步会真的 `spawn` fixture 脚本子进程)。
@@ -211,7 +211,7 @@
 - [ ] **两个 adapter 都实现 `ModelAdapter` 全部方法**:`id`/`kind`(固定 `"cli-bridge"`)/`checkAvailability()`(真的 spawn `--version`,不是只读配置)/`invoke()`/`toolTrace()`。
 - [ ] **`InvokeResult.provider`/`.model` 非空字符串**(DESIGN §8.5#4 的既有硬约束,A3 继续遵守):`codex-cli-adapter.test.ts`/`claude-cli-adapter.test.ts` 的成功路径测试各自断言这两个字段非空(codex 侧固定断言 `model === "unknown"`,claude 侧断言从 `system/init` 事件正确抽取)。
 - [ ] **`config.ts` 接线**:`config.test.ts` 有测试证明真实 `cmd: "claude"`/`cmd: "codex"` 的 provider 条目能构造出对应的真实 adapter 类实例;未识别 `cmd` 抛 `InvalidProviderConfigError`。
-- [ ] **打破 A2 断言的地方被显式记录**:`config.test.ts` 里原来断言"真实 helix config → 空 registry"的那条测试,改动后的版本 + commit message/PR 描述里都清楚说明这是预期的、A3 范围内的行为变化,不是意外回归。
+- [ ] **打破 A2 断言的地方被显式记录**:`config.test.ts` 里原来断言"真实 subscription config → 空 registry"的那条测试,改动后的版本 + commit message/PR 描述里都清楚说明这是预期的、A3 范围内的行为变化,不是意外回归。
 - [ ] **垂直切片必接通**:`harness-cli.e2e.test.ts` 存在且通过——真实 `MemoryStore`+`ContextInjector`+`PromptComposer` 产出的真实 prompt,经真实 `buildAdapterRegistry`(fixture 脚本替身)+真实 `ProviderRouter`+真实 cli-bridge adapter(真的 spawn 子进程)+真实 `SchemaValidator`,拿到 typed `CoderOutput` 且 `toolExecChecked` 判定正确。
 - [ ] `cli-exec.ts` 的超时/SIGKILL/stdin 立刻关闭/stdout-stderr 分流 四条机制各有测试覆盖。
 - [ ] `docs/ROADMAP.md` A3 对应行打钩、`docs/PROGRESS.md` 清空或更新、`CHANGELOG.md` 加行、根 `CLAUDE.md` 目录结构行同步更新。
@@ -238,7 +238,7 @@
 
 - **模型无关?** 是——`ClaudeCliAdapter`/`CodexCliAdapter` 都是 `ModelAdapter` 的其中一种可插拔实现,`ProviderRouter`/`AdapterRegistry`/`SchemaValidator` 完全不感知它们的存在,和 A2 的 `LiteLLMAdapter` 处于同等地位。
 - **跨层无反向依赖?** 是——`src/harness/adapters/{codex,claude}-cli-adapter.ts` 只 import 同层的 `harness/types.ts`/`harness/errors.ts`/`harness/cli-exec.ts`/`harness/tool-exec-verifier.ts`,不 import `src/context/`/`src/loop/`(A4 尚不存在)。
-- **`profiles/verity/` 不入仓?** 是——本增量不创建/不修改 `profiles/verity/` 任何文件。
+- **`profiles/apikey/` 不入仓?** 是——本增量不创建/不修改 `profiles/apikey/` 任何文件。
 - **角色不硬编码?** 是——两个 adapter 都不区分调用方是 `coder` 还是 `tester`,`invoke(req: InvokeRequest)` 对角色一无所知(`req.role` 字段本增量的两个 adapter 甚至不读取它)。
 - **引擎代码不含 Helix 人格?** 是——`src/harness/` 下所有新代码零 Helix/companion/私人记忆内容。
 - **远控点火(`CLAUDE.md` 铁律)?** 是——见 §5 测试策略小节的专门说明,自动化测试套件不产生任何对真实 `claude`/`codex` 二进制的调用,全部走受控 fixture 脚本子进程。

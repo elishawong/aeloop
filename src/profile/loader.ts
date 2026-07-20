@@ -77,11 +77,11 @@ export function resolveProfileDir(profile: string, profilesRoot: string = PROFIL
 }
 
 /**
- * Reads `AI_AGENT_PROFILE` (`"helix"` | `"verity"`, defaulting to
- * `"helix"`), locates `profiles/<name>/config.yaml`, parses it, and
+ * Reads `AI_AGENT_PROFILE` (`"subscription"` | `"apikey"`, defaulting to
+ * `"subscription"`), locates `profiles/<name>/config.yaml`, parses it, and
  * substitutes `${ENV_VAR}` placeholders in its string values.
  *
- * - **Missing profile** (no `config.yaml` found — e.g. `profiles/verity/`
+ * - **Missing profile** (no `config.yaml` found — e.g. `profiles/apikey/`
  *   absent on this machine) is a normal, expected state: returned as a
  *   typed `{ ok: false, error: ProfileNotFoundError }` result, never
  *   thrown, never silently swapped for an empty config.
@@ -191,7 +191,7 @@ function assertProfileConfigShape(
 }
 
 function readProfileEnv(): string {
-  return process.env["AI_AGENT_PROFILE"] ?? "helix";
+  return process.env["AI_AGENT_PROFILE"] ?? "subscription";
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

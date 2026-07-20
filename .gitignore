@@ -13,7 +13,7 @@ memory.db
 .helix/
 
 # 公司 overlay 永不进本仓(只在公司内部 git)
-profiles/verity/
+profiles/apikey/
 
 # 环境
 .env

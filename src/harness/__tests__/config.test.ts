@@ -29,14 +29,14 @@ describe("buildAdapterRegistry — direct-api provider", () => {
   });
 });
 
-describe("buildAdapterRegistry — real helix profile (both providers cli-bridge)", () => {
+describe("buildAdapterRegistry — real subscription profile (both providers cli-bridge)", () => {
   it("returns an empty AdapterRegistry — this is expected behavior (PRD §5), not a bug to fix by adding a placeholder cli-bridge adapter", () => {
-    const result = loadProfile("helix");
+    const result = loadProfile("subscription");
     expect(result.ok).toBe(true);
     if (!result.ok) return; // narrow for TS
 
     // Sanity: confirm the fixture this test relies on is really what the
-    // PRD describes — both real helix providers are cli-bridge.
+    // PRD describes — both real subscription providers are cli-bridge.
     expect(result.config.providers["claude-cli"]?.kind).toBe("cli-bridge");
     expect(result.config.providers["codex-cli"]?.kind).toBe("cli-bridge");
 
