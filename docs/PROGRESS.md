@@ -8,5 +8,5 @@
 ---
 
 ## 当前批次
-- **批次名**: (无进行中 Cypher 批次 —— A0+A1 引擎脚手架 + Context/Prompt 层 B0-B10 全部完成,已 push `feature/issue-1-a0-a1-scaffold`;下一步是 `/verify` 独立审,不是新批次,详见该需求 `docs/feature/a0-a1-engine-scaffold-context-prompt/progress.md`)
+- **批次名**: (无进行中 Cypher 批次 —— A2 Harness 层 B0-B7 全部完成,分支 `feature/issue-6-a2-harness`;B0-B5 已 push(`2830f68`),B6(垂直切片 `src/harness.e2e.test.ts`)+ B7(本文档回写)待 commit/push;下一步是 `/verify` 独立审,不是新批次,详见该需求 `docs/feature/a2-harness-provider-router-litellm-adapter/PRD.md`)
 - 上一批成果见 CHANGELOG.md

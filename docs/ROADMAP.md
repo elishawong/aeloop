@@ -28,10 +28,12 @@
 - [x] ContextInjector(醒来注入 + 滤 rejected)—— Verity 未做,aeloop 补 —— B5(`06259c9`)
 - [x] persona loader(按角色名动态查 registry)+ PromptComposer —— B7(`88852a5`)+ B8(`64e8240`)
 - [x] 硬性垂直切片测试(Context→Prompt 真接通,含 rejected 过滤断言)—— B9(`4eb97e4`)
-- [x] 打包配置核实 + 文档回写(本文件/PROGRESS/CHANGELOG/根 CLAUDE.md)—— B10;96/96 测试绿,待 Zorro 独立审(`/verify`)
+- [x] 打包配置核实 + 文档回写(本文件/PROGRESS/CHANGELOG/根 CLAUDE.md)—— B10;返工后 139/139 测试绿,已 Zorro 审 + merge(PR #3,`018ab85`)
 
-### A2. Harness
-- [ ] ProviderRouter + LiteLLMAdapter + SchemaValidator 统一入口
+### A2. Harness —— B0-B7 全部完成,详见 `docs/feature/a2-harness-provider-router-litellm-adapter/`
+- [x] ProviderRouter(角色→provider→adapter 纯查找,零 I/O)+ AdapterRegistry + LiteLLMAdapter(direct-api,401/403/429/5xx/尾斜线/缺key/非法JSON/真探活全覆盖)+ SchemaValidator(重试喂回错误)+ config.ts(buildAdapterRegistry)—— B0-B5(`8080f8f`/`e085e04`/`2830f68`)
+- [x] 硬性垂直切片测试(Prompt→Harness 真接通:真实 MemoryStore/ContextInjector/PromptComposer/AdapterRegistry/ProviderRouter/SchemaValidator,唯一替身 FakeAdapter)—— B6
+- [x] 文档回写(本文件/PROGRESS/CHANGELOG/根 CLAUDE.md)—— B7;165/165 测试绿,待 Zorro 独立审(`/verify`)
 
 ### A3. CLI 桥接 + 真核实(aeloop 特有)
 - [ ] ClaudeCliAdapter + CodexCliAdapter(先跑 codex exec spike)
