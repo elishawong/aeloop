@@ -58,7 +58,7 @@ export class PromptComposer {
   compose(role: Role, context: ContextInjectionResult, task: string): string {
     const persona = loadPersona(role, this.personasDir).trim();
 
-    if (!(role in this.schemas)) {
+    if (!Object.hasOwn(this.schemas, role)) {
       throw new SchemaNotRegisteredError(role);
     }
 
