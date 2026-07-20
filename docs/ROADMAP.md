@@ -20,9 +20,9 @@
 
 ## ⬜ 待办(里程碑 A0-A6,详见 DESIGN §8)
 ### A0. 脚手架
-- [ ] 新仓 src/ 骨架 + package.json + tsconfig + vitest + profile loader 空壳
+- [x] 新仓 src/ 骨架 + package.json + tsconfig + vitest + profile loader 空壳 —— B0(`c19dff3`)+ B1(`948fd24`),分支 `feature/issue-1-a0-a1-scaffold`,详见 `docs/feature/a0-a1-engine-scaffold-context-prompt/progress.md`
 
-### A1. Context + Prompt(先立防幻觉钻石)
+### A1. Context + Prompt(先立防幻觉钻石)—— B2-B9 进行中,见上面 progress.md
 - [ ] ClaimSchema/CoderOutput/TesterOutput(zod)+ SchemaValidator
 - [ ] SQLite+FTS5 store(RecallError 不静默)+ StalenessEngine + ConfirmationService(三态,db.transaction 包裹)
 - [ ] ContextInjector(醒来注入 + 滤 rejected)—— Verity 未做,aeloop 补

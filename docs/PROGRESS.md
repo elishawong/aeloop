@@ -8,5 +8,7 @@
 ---
 
 ## 当前批次
-- **批次名**: (无进行中批次 —— 项目自带层刚接入,src/ 引擎待 /spec 起)
+- **批次名**:A0+A1 引擎脚手架 + Context/Prompt 层(`docs/feature/a0-a1-engine-scaffold-context-prompt/PRD.md`,分支 `feature/issue-1-a0-a1-scaffold`)
+- **进行中**:B0(scaffold,commit `c19dff3`)+ B1(profile loader,commit `948fd24`)已完成,已 push。**下一步:B2**(`src/context/types.ts` + `errors.ts` + `store.ts` 建表+FTS5+CRUD + `store.test.ts`),见该需求 `progress.md` 顶部 RESUME 指针。
+- 详细批次日志见 `docs/feature/a0-a1-engine-scaffold-context-prompt/progress.md`(逐批做了什么 + 自检结果 + 决策记录);本文件只留一句指针,不重复内容。
 - 上一批成果见 CHANGELOG.md
