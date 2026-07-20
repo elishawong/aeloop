@@ -154,45 +154,70 @@ describe("LiteLLMAdapter", () => {
     expect(recorded?.headers.authorization).toBeUndefined();
   });
 
-  it("invoke(): a response body that dies mid-read (connection reset *after* headers are received) is thrown as AdapterInvokeError from the body-read path specifically, not a raw TypeError (Zorro round-1 blocker 1 / round-2: the original version raced the socket destroy against the client's TCP read, so it could fall into the *request-level* catch (litellm-adapter.ts:117-131) instead of the body-read catch (:148-156) this test exists to guard — a mutation test proved that version stayed green even with the round-1 fix reverted)", async () => {
+  it("invoke(): a response body that dies mid-read (connection reset *after* headers are received) is thrown as AdapterInvokeError from the body-read path specifically, not a raw TypeError (Zorro round-1 blocker 1 / round-2: the original version raced the socket destroy against the client's TCP read, so it could fall into the *request-level* catch (litellm-adapter.ts:117-131) instead of the body-read catch (:148-156) this test exists to guard — a mutation test proved that version stayed green even with the round-1 fix reverted / round-3→round-4: replaced the `setTimeout(50)` time-based race — which could still fire before the client actually received headers under CI load, producing a flaky false-red — with a happens-before handshake: `globalThis.fetch` is wrapped so the server socket is destroyed only *after* the real `fetch()` call has resolved, i.e. only once the client has deterministically already received the response headers)", async () => {
+    // Deterministic happens-before handshake (no timers): wrap the global
+    // `fetch` that `LiteLLMAdapter.invoke()` calls so the server-side
+    // socket is destroyed *after* `originalFetch()` resolves. `fetch()`
+    // resolving means the client has received the status line + headers
+    // and `Response` already exists — exactly the point the old 50ms
+    // `setTimeout` was gambling it would reach in time. Destroying the
+    // socket only once that's actually true (not "probably true within
+    // 50ms") means the failure is mechanically guaranteed to land during
+    // `response.text()` (litellm-adapter.ts:148-156), never during the
+    // `fetch()` call itself (:117-131) — no race window either way.
+    let serverSocket: import("node:net").Socket | undefined;
+
     activeServer = await startFakeServer((_req, res) => {
-      // `res.flushHeaders()` pushes the status line + headers onto the
-      // wire immediately (not buffered behind more `write()` calls), and
-      // the `setTimeout` before `destroy()` gives the client a real
-      // chance to receive them and resolve `fetch()`'s `Response` before
-      // the connection dies — otherwise `destroy()` can race ahead of the
-      // client's read and the failure surfaces from `fetch()` itself,
-      // never touching `response.text()` at all. `Content-Length: 10000`
-      // vs. the much shorter chunk actually written means `response.text()`
-      // is still waiting on more bytes when the socket dies, so undici
-      // rejects the body read specifically (a bare `TypeError`,
-      // "terminated"/"aborted" — not a `SyntaxError`).
+      // `Content-Length: 10000` vs. the much shorter chunk actually
+      // written means `response.text()` is still waiting on more bytes
+      // when the socket dies later, so undici rejects the body read
+      // specifically (a bare `TypeError`, "terminated"/"aborted" — not a
+      // `SyntaxError`).
       res.writeHead(200, { "Content-Type": "application/json", "Content-Length": "10000" });
       res.flushHeaders();
       res.write('{"model":"gpt-4o-mini","choices":[{"message":{"content":"partial');
-      setTimeout(() => res.socket?.destroy(), 50);
+      serverSocket = res.socket ?? undefined;
+      // Deliberately no destroy() here — the wrapped `fetch` below
+      // destroys the socket once it has proof the client already has the
+      // `Response` (headers received), not on a timer.
     });
 
-    const adapter = new LiteLLMAdapter("litellm", {
-      base_url: activeServer.baseUrl,
-      api_key: "sk-test",
-      model: "gpt-4o-mini",
-    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+      const res = await originalFetch(...args);
+      // `originalFetch()` having resolved *is* "headers received
+      // client-side" — the same event the old 50ms timeout could only
+      // approximate. Destroying the socket now, instead of on a clock,
+      // makes the body-read failure below deterministic.
+      serverSocket?.destroy();
+      return res;
+    }) as typeof fetch;
 
-    const invokePromise = adapter.invoke(fakeRequest);
+    try {
+      const adapter = new LiteLLMAdapter("litellm", {
+        base_url: activeServer.baseUrl,
+        api_key: "sk-test",
+        model: "gpt-4o-mini",
+      });
 
-    await expect(invokePromise).rejects.toBeInstanceOf(AdapterInvokeError);
-    await expect(invokePromise).rejects.not.toBeInstanceOf(TypeError);
-    // Assertions tight enough to actually distinguish "failed reading the
-    // body" from "the request itself failed" — a generic
-    // `toBeInstanceOf(AdapterInvokeError)` is true for *both* catch blocks
-    // in litellm-adapter.ts, which is exactly how the previous version of
-    // this test stayed green under mutation.
-    await invokePromise.catch((err: unknown) => {
-      expect(err).toBeInstanceOf(AdapterInvokeError);
-      expect((err as AdapterInvokeError).message).toContain("failed to read response body");
-      expect((err as AdapterInvokeError).cause).toBeInstanceOf(TypeError);
-    });
+      const invokePromise = adapter.invoke(fakeRequest);
+
+      await expect(invokePromise).rejects.toBeInstanceOf(AdapterInvokeError);
+      await expect(invokePromise).rejects.not.toBeInstanceOf(TypeError);
+      // Assertions tight enough to actually distinguish "failed reading the
+      // body" from "the request itself failed" — a generic
+      // `toBeInstanceOf(AdapterInvokeError)` is true for *both* catch blocks
+      // in litellm-adapter.ts, which is exactly how a previous version of
+      // this test stayed green under mutation.
+      await invokePromise.catch((err: unknown) => {
+        expect(err).toBeInstanceOf(AdapterInvokeError);
+        expect((err as AdapterInvokeError).message).toContain("failed to read response body");
+        expect((err as AdapterInvokeError).cause).toBeInstanceOf(TypeError);
+      });
+    } finally {
+      // Never leak the wrapped `fetch` into other tests.
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("invoke(): a successful response with \"model\": \"\" falls back to the configured model — InvokeResult.model is never empty-string (Zorro round-1 blocker 2)", async () => {
