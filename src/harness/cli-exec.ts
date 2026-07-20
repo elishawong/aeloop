@@ -57,18 +57,21 @@ export const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
  * (however large) was appended unconditionally, so a stream could end up
  * well past 32MB in practice (e.g. 31MB collected + one 10MB chunk → 41MB
  * appended, cap never actually enforced past the first check). This
- * enforces the cap as a true ceiling: at most `MAX_OUTPUT_BYTES` bytes are
- * ever appended for a given stream, no matter how the data arrives
- * chunked.
+ * enforces the cap as a true ceiling on the accumulated byte budget: the
+ * collected byte total for a given stream never exceeds `MAX_OUTPUT_BYTES`,
+ * no matter how the data arrives chunked.
  *
  * Truncation happens on a byte boundary (via `Buffer`, not a raw string
  * slice, since JS string indices are UTF-16 code units, not bytes) — a
  * multi-byte UTF-8 character split mid-sequence at the truncation point
  * decodes lossy (Node's default replacement-character behavior for an
- * incomplete UTF-8 tail), not a crash. That's an acceptable, honestly-
- * documented simplification for a safety cap whose job is "never blow up
- * memory", not "byte-perfect preservation of the last few characters
- * before truncation".
+ * incomplete UTF-8 tail), not a crash. (Because the incomplete tail
+ * decodes to U+FFFD, the *decoded string* can re-encode to at most ~2
+ * bytes over the cap — negligible against a 32MB ceiling; the collected
+ * byte budget above is what stays strictly bounded.) That's an acceptable,
+ * honestly-documented simplification for a safety cap whose job is "never
+ * blow up memory", not "byte-perfect preservation of the last few
+ * characters before truncation".
  */
 function appendWithinBudget(chunk: string, append: (s: string) => void, bytesSoFar: number): number {
   if (bytesSoFar >= MAX_OUTPUT_BYTES) return bytesSoFar; // already at/over cap — drop entirely

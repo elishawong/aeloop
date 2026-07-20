@@ -40,7 +40,7 @@
 - [x] profile 改名 `helix`/`verity` → `subscription`/`apikey`(按凭证模型命名,给引擎解耦掉具体人格名;独立 commit,不算某个 B 批次)—— `c243f64`
 - [x] `config.ts` 接线(`buildAdapterRegistry` 真构造两个 cli-bridge adapter;`cmd` 严格相等分派 flavor + 可选 `bin` 覆盖 spawn 目标,供测试指向受控 fixture)—— B5(`2b472bc`)
 - [x] 硬性垂直切片测试(cli-bridge 真接通:真实 MemoryStore/ContextInjector/PromptComposer/`buildAdapterRegistry`/ProviderRouter/真实 CodexCliAdapter 真 spawn/SchemaValidator/ToolExecVerifier,唯一替身是受控 fixture 子进程)—— B6(`12cba2d`)
-- [x] 文档回写(本文件/PROGRESS/CHANGELOG/根 CLAUDE.md)—— B7(本批);**217/217 测试绿,已建完,待 Zorro 独立审(`/verify`)—— 尚未 merge**
+- [x] 文档回写(本文件/PROGRESS/CHANGELOG/根 CLAUDE.md)—— B7;**228/228 测试绿,Zorro 两轮对抗审 PASS(R1 FAIL→返工→R2 PASS)+ Codex 跨模型二签,待指挥官终批 merge**
 
 ### A4. Loop
 - [ ] LangGraph 编排 + G1/G2/G3 + 阈值强制升级 + 审计表
