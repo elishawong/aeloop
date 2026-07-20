@@ -130,6 +130,16 @@ export function buildAdapterRegistry(config: ProfileConfig): AdapterRegistry {
   const registry = new AdapterRegistry();
 
   for (const [id, providerConfig] of Object.entries(config.providers)) {
+    // Zorro round-1 blocker B2: reject an empty provider-map key before it
+    // ever reaches an adapter constructor. `LiteLLMAdapter`/`ClaudeCliAdapter`/
+    // `CodexCliAdapter` each also guard against an empty `id` at invoke()
+    // time (`requireProviderId()`) as a last line of defense, but a bad
+    // `config.yaml` (`providers: { "": {...} }`) should fail loudly here,
+    // at construction time, not silently produce an adapter that would
+    // only reveal the problem the first time something calls invoke().
+    if (id.trim().length === 0) {
+      throw new InvalidProviderConfigError(id, `provider map key must be a non-empty string, got ${JSON.stringify(id)}`);
+    }
     assertValidProviderConfig(id, providerConfig);
 
     switch (providerConfig.kind) {

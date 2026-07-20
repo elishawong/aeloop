@@ -145,4 +145,40 @@ describe("ClaudeCliAdapter", () => {
       withScenario("no-result-event", () => adapter.invoke({ role: "coder", prompt: "x" })),
     ).rejects.toBeInstanceOf(AdapterInvokeError);
   });
+
+  // Zorro A3 round-1 regression tests (blocker B2, minor Y1, minor Y2).
+
+  it('B2 regression: an adapter constructed with an empty provider id throws AdapterInvokeError on invoke(), never returns provider:""', async () => {
+    const adapter = new ClaudeCliAdapter("", { cmd: FIXTURE });
+
+    await expect(
+      withScenario("with-tools", () => adapter.invoke({ role: "coder", prompt: "x" })),
+    ).rejects.toBeInstanceOf(AdapterInvokeError);
+  });
+
+  it("B2 regression: an adapter constructed with a whitespace-only provider id is treated the same as empty", async () => {
+    const adapter = new ClaudeCliAdapter("   ", { cmd: FIXTURE });
+
+    await expect(
+      withScenario("with-tools", () => adapter.invoke({ role: "coder", prompt: "x" })),
+    ).rejects.toBeInstanceOf(AdapterInvokeError);
+  });
+
+  it('Y1 regression: a "result" event with subtype:"success" but a missing (not false) is_error field is treated as failure, not success by omission', async () => {
+    const adapter = new ClaudeCliAdapter("claude-cli", { cmd: FIXTURE });
+
+    await expect(
+      withScenario("result-is-error-missing", () => adapter.invoke({ role: "coder", prompt: "x" })),
+    ).rejects.toBeInstanceOf(AdapterInvokeError);
+  });
+
+  it("Y2 regression: a raw non-object JSONL line (e.g. a bare `null`) mixed into otherwise-valid output is skipped, not a crash escaping the AdapterInvokeError contract", async () => {
+    const adapter = new ClaudeCliAdapter("claude-cli", { cmd: FIXTURE });
+
+    const result = await withScenario("null-line-then-hello", () =>
+      adapter.invoke({ role: "coder", prompt: "x" }),
+    );
+
+    expect(result.content).toBe("Hello despite the null line!");
+  });
 });

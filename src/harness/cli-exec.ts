@@ -36,8 +36,52 @@
 
 import { spawn } from "node:child_process";
 
-/** 32MB per stream — mirrors `codex-client.mjs`'s `MAX_OUTPUT_BYTES`, guards against an unbounded memory blow-up on a runaway child. */
-const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
+/**
+ * 32MB cap, applied **independently per stream** (stdout gets its own
+ * 32MB budget, stderr gets its own separate 32MB budget — not a combined
+ * 32MB across both) — mirrors `codex-client.mjs`'s `MAX_OUTPUT_BYTES`,
+ * guards against an unbounded memory blow-up on a runaway child. Exported
+ * so `cli-exec.test.ts` can assert against the real cap value directly
+ * (Zorro round-1 minor Y3's regression test) instead of duplicating the
+ * magic number and risking drift.
+ */
+export const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Appends `chunk` via `append`, but truncates it to whatever budget
+ * remains under `MAX_OUTPUT_BYTES` rather than ever letting the running
+ * total cross the cap — returns the new running byte total. **Zorro
+ * round-1 minor Y3**: the previous logic only checked "is the running
+ * total already under the cap?" *before* deciding whether to append a
+ * chunk whole; once under the cap by even one byte, an entire chunk
+ * (however large) was appended unconditionally, so a stream could end up
+ * well past 32MB in practice (e.g. 31MB collected + one 10MB chunk → 41MB
+ * appended, cap never actually enforced past the first check). This
+ * enforces the cap as a true ceiling: at most `MAX_OUTPUT_BYTES` bytes are
+ * ever appended for a given stream, no matter how the data arrives
+ * chunked.
+ *
+ * Truncation happens on a byte boundary (via `Buffer`, not a raw string
+ * slice, since JS string indices are UTF-16 code units, not bytes) — a
+ * multi-byte UTF-8 character split mid-sequence at the truncation point
+ * decodes lossy (Node's default replacement-character behavior for an
+ * incomplete UTF-8 tail), not a crash. That's an acceptable, honestly-
+ * documented simplification for a safety cap whose job is "never blow up
+ * memory", not "byte-perfect preservation of the last few characters
+ * before truncation".
+ */
+function appendWithinBudget(chunk: string, append: (s: string) => void, bytesSoFar: number): number {
+  if (bytesSoFar >= MAX_OUTPUT_BYTES) return bytesSoFar; // already at/over cap — drop entirely
+  const chunkBytes = Buffer.byteLength(chunk);
+  const remaining = MAX_OUTPUT_BYTES - bytesSoFar;
+  if (chunkBytes <= remaining) {
+    append(chunk);
+    return bytesSoFar + chunkBytes;
+  }
+  const truncated = Buffer.from(chunk, "utf8").subarray(0, remaining).toString("utf8");
+  append(truncated);
+  return MAX_OUTPUT_BYTES; // budget now fully consumed — every later chunk is dropped entirely
+}
 
 /**
  * The minimal shape `spawnWithTimeout` needs from a spawned child process —
@@ -155,18 +199,12 @@ export function spawnWithTimeout(
 
     if (child.stdout) {
       collectStream(child.stdout, (s) => {
-        if (stdoutBytes < MAX_OUTPUT_BYTES) {
-          stdout += s;
-          stdoutBytes += Buffer.byteLength(s);
-        }
+        stdoutBytes = appendWithinBudget(s, (piece) => (stdout += piece), stdoutBytes);
       });
     }
     if (child.stderr) {
       collectStream(child.stderr, (s) => {
-        if (stderrBytes < MAX_OUTPUT_BYTES) {
-          stderr += s;
-          stderrBytes += Buffer.byteLength(s);
-        }
+        stderrBytes = appendWithinBudget(s, (piece) => (stderr += piece), stderrBytes);
       });
     }
 

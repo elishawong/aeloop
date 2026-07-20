@@ -11,7 +11,7 @@
  */
 import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
-import { spawnWithTimeout, type MinimalSpawnedProcess, type SpawnImpl } from "../cli-exec.js";
+import { MAX_OUTPUT_BYTES, spawnWithTimeout, type MinimalSpawnedProcess, type SpawnImpl } from "../cli-exec.js";
 
 interface FakeChild {
   emitter: EventEmitter;
@@ -189,5 +189,48 @@ describe("spawnWithTimeout", () => {
 
     expect(result.spawnError).toContain("boom");
     expect(result.exitCode).toBeNull();
+  });
+
+  it("Y3 regression: a chunk arriving when the stream is already near the cap is truncated to the remaining budget — the total never crosses MAX_OUTPUT_BYTES", async () => {
+    // 5 bytes of budget left when the second chunk arrives.
+    const nearCapSize = MAX_OUTPUT_BYTES - 5;
+    const firstChunk = "a".repeat(nearCapSize);
+    // 20 bytes — whole, this would push the total 15 bytes over the cap
+    // (the exact bug: the old check only compared "bytes so far < cap"
+    // *before* deciding to append a chunk in full).
+    const secondChunk = "b".repeat(20);
+
+    const { spawnImpl } = mockSpawn(({ fake }) => {
+      fake.stdout.emit("data", firstChunk);
+      fake.stdout.emit("data", secondChunk);
+      fake.emitter.emit("close", 0, null);
+    });
+
+    const result = await spawnWithTimeout("fake-cmd", [], { timeoutMs: 5000, spawnImpl });
+
+    // The total must land exactly at the cap, never past it.
+    expect(Buffer.byteLength(result.stdout)).toBe(MAX_OUTPUT_BYTES);
+    // Only the first 5 bytes of the second chunk ("bbbbb") should have been
+    // appended — confirms it's a real truncation of THIS chunk, not e.g.
+    // silently dropping the whole second chunk instead (a different, also
+    // wrong, way to "not exceed the cap").
+    expect(result.stdout.endsWith("bbbbb")).toBe(true);
+    expect(result.stdout.endsWith("bbbbbb")).toBe(false);
+  });
+
+  it("stdout and stderr each get their own independent 32MB budget, not a combined one", async () => {
+    const stdoutChunk = "x".repeat(MAX_OUTPUT_BYTES);
+    const stderrChunk = "y".repeat(MAX_OUTPUT_BYTES);
+
+    const { spawnImpl } = mockSpawn(({ fake }) => {
+      fake.stdout.emit("data", stdoutChunk);
+      fake.stderr.emit("data", stderrChunk);
+      fake.emitter.emit("close", 0, null);
+    });
+
+    const result = await spawnWithTimeout("fake-cmd", [], { timeoutMs: 5000, spawnImpl });
+
+    expect(Buffer.byteLength(result.stdout)).toBe(MAX_OUTPUT_BYTES);
+    expect(Buffer.byteLength(result.stderr)).toBe(MAX_OUTPUT_BYTES);
   });
 });

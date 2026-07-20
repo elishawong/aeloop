@@ -80,6 +80,7 @@ export class ClaudeCliAdapter implements ModelAdapter {
 
   async invoke(req: InvokeRequest): Promise<InvokeResult> {
     this.lastTrace = [];
+    const providerId = this.requireProviderId();
 
     const result = await spawnWithTimeout(
       this.cmd,
@@ -120,7 +121,13 @@ export class ClaudeCliAdapter implements ModelAdapter {
     if (resultEvent === undefined) {
       throw new AdapterInvokeError(`ClaudeCliAdapter "${this.id}" produced no "result" event in its stream-json output`);
     }
-    if (resultEvent.subtype !== "success" || resultEvent.is_error === true) {
+    // Zorro round-1 minor Y1: require is_error === false explicitly, not
+    // merely "!== true" — the previous check let a missing/null/non-boolean
+    // is_error field sail through as "success" (only a literal `true`
+    // tripped it), which is the wrong default for a field whose entire
+    // purpose is signaling failure. A response that never says is_error at
+    // all should not be trusted as success by omission.
+    if (resultEvent.subtype !== "success" || resultEvent.is_error !== false) {
       throw new AdapterInvokeError(
         `ClaudeCliAdapter "${this.id}" reported failure (subtype=${String(resultEvent.subtype)}, is_error=${String(resultEvent.is_error)})`,
       );
@@ -132,7 +139,7 @@ export class ClaudeCliAdapter implements ModelAdapter {
 
     return {
       content,
-      provider: this.id,
+      provider: providerId,
       // From the stream's `system`/`subtype:"init"` event, present at the
       // very start of every stream (even tool-free ones) — spike-verified
       // more reliable than digging through individual assistant messages.
@@ -171,19 +178,50 @@ export class ClaudeCliAdapter implements ModelAdapter {
   toolTrace(): ToolCallRecord[] {
     return this.lastTrace;
   }
+
+  /**
+   * `id` is typed as a non-optional `string` in the constructor, so this is
+   * belt-and-suspenders rather than a case that should ever trip in
+   * practice (`config.ts` always passes the provider's own map key as
+   * `id`) — but `InvokeResult.provider` carries the same non-empty
+   * invariant as `.model` (`types.ts:72`), so it gets the same runtime
+   * guard rather than trusting the type alone (mirrors
+   * `LiteLLMAdapter.requireProviderId()`, A2's Zorro round-1 blocker 2 —
+   * this adapter didn't inherit that fix, Zorro A3 round-1 blocker B2).
+   */
+  private requireProviderId(): string {
+    if (typeof this.id !== "string" || this.id.trim().length === 0) {
+      throw new AdapterInvokeError("ClaudeCliAdapter constructed with an empty/missing provider id");
+    }
+    return this.id;
+  }
 }
 
-/** Tolerant line-by-line JSONL parse — a line that doesn't parse is skipped, not fatal. */
+/**
+ * Tolerant line-by-line JSONL parse — a line that doesn't parse, or that
+ * parses to something other than a plain object (e.g. `"null"`, a bare
+ * number/string, or an array), is skipped, not fatal. **Zorro round-1
+ * minor Y2**: `JSON.parse` alone accepts any valid JSON value, not just
+ * objects — a stray `null`/scalar/array line used to sail through as a
+ * "ClaudeJsonlEvent" with no `.type` property, and every downstream read
+ * of `event.type`/`event.message` would throw a raw `TypeError` on it
+ * (e.g. `null.type`), escaping the `AdapterInvokeError`-only contract this
+ * file otherwise holds. Filtering to plain objects here means every event
+ * this function returns is at least safe to read `.type` off of.
+ */
 function parseJsonlEvents(stdout: string): ClaudeJsonlEvent[] {
   const events: ClaudeJsonlEvent[] = [];
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
+    let parsed: unknown;
     try {
-      events.push(JSON.parse(trimmed) as ClaudeJsonlEvent);
+      parsed = JSON.parse(trimmed);
     } catch {
       continue;
     }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) continue;
+    events.push(parsed as ClaudeJsonlEvent);
   }
   return events;
 }

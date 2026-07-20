@@ -85,6 +85,7 @@ export class CodexCliAdapter implements ModelAdapter {
 
   async invoke(req: InvokeRequest): Promise<InvokeResult> {
     this.lastTrace = [];
+    const providerId = this.requireProviderId();
 
     const result = await spawnWithTimeout(this.cmd, ["exec", "--json", "--sandbox", "read-only", req.prompt], {
       timeoutMs: DEFAULT_TIMEOUT_MS,
@@ -109,14 +110,30 @@ export class CodexCliAdapter implements ModelAdapter {
     const trace = extractTrace(events);
     this.lastTrace = trace;
 
-    const content = extractLastAgentMessageText(events);
-    if (content === undefined) {
+    // Zorro round-1 blocker B1: unconditionally find the LAST agent_message
+    // item first, THEN require its `.text` to be a string — never silently
+    // fall back to an earlier agent_message just because the true last
+    // one's `.text` is malformed. Falling back would reintroduce exactly
+    // the "mid-turn self-correction" hallucination spike-findings.md §1.4
+    // documents (an early agent_message can claim something false, e.g.
+    // `tools_used:[]`, before the tool actually runs; only the LAST one is
+    // authoritative) — this whole "always take the last one" design exists
+    // specifically to not regress into taking an earlier, wrong answer.
+    const lastAgentMessage = findLastAgentMessageItem(events);
+    if (lastAgentMessage === undefined) {
       throw new AdapterInvokeError(`CodexCliAdapter "${this.id}" produced no agent_message in its --json output`);
     }
+    if (typeof lastAgentMessage.text !== "string") {
+      throw new AdapterInvokeError(
+        `CodexCliAdapter "${this.id}"'s final agent_message had a non-string "text" field ` +
+          `(got ${describeType(lastAgentMessage.text)}) — refusing to fall back to an earlier agent_message`,
+      );
+    }
+    const content = lastAgentMessage.text;
 
     return {
       content,
-      provider: this.id,
+      provider: providerId,
       // `codex exec --json`'s JSONL stream never carries a `model` field —
       // verified by re-grepping every `--json` sample the spike captured,
       // zero hits (`model: ...` only appears in the plain-text banner,
@@ -125,6 +142,23 @@ export class CodexCliAdapter implements ModelAdapter {
       model: "unknown",
       toolExecChecked: checkToolExecution(content, trace),
     };
+  }
+
+  /**
+   * `id` is typed as a non-optional `string` in the constructor, so this is
+   * belt-and-suspenders rather than a case that should ever trip in
+   * practice (`config.ts` always passes the provider's own map key as
+   * `id`) — but `InvokeResult.provider` carries the same non-empty
+   * invariant as `.model` (`types.ts:72`), so it gets the same runtime
+   * guard rather than trusting the type alone (mirrors
+   * `LiteLLMAdapter.requireProviderId()`, A2's Zorro round-1 blocker 2 —
+   * this adapter didn't inherit that fix, Zorro A3 round-1 blocker B2).
+   */
+  private requireProviderId(): string {
+    if (typeof this.id !== "string" || this.id.trim().length === 0) {
+      throw new AdapterInvokeError("CodexCliAdapter constructed with an empty/missing provider id");
+    }
+    return this.id;
   }
 
   /**
@@ -158,17 +192,34 @@ export class CodexCliAdapter implements ModelAdapter {
   }
 }
 
-/** Tolerant line-by-line JSONL parse — a line that doesn't parse is skipped, not fatal (mirrors `ToolExecVerifier`'s own "don't throw on malformed input" posture; codex's own banner/warnings have a small chance of leaking a non-JSON line into stdout). */
+/**
+ * Tolerant line-by-line JSONL parse — a line that doesn't parse, or that
+ * parses to something other than a plain object (e.g. `"null"`, a bare
+ * number/string, or an array), is skipped, not fatal (mirrors
+ * `ToolExecVerifier`'s own "don't throw on malformed input" posture;
+ * codex's own banner/warnings have a small chance of leaking a non-JSON
+ * line into stdout). **Zorro round-1 minor Y2**: `JSON.parse` alone
+ * accepts any valid JSON value, not just objects — a stray `null`/scalar/
+ * array line used to sail through as a "CodexJsonlEvent" with no `.type`
+ * property, and every downstream read of `event.type`/`event.item` would
+ * throw a raw `TypeError` on it (e.g. `null.type`), escaping the
+ * `AdapterInvokeError`-only contract this file otherwise holds. Filtering
+ * to plain objects here means every event this function returns is at
+ * least safe to read `.type` off of.
+ */
 function parseJsonlEvents(stdout: string): CodexJsonlEvent[] {
   const events: CodexJsonlEvent[] = [];
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
+    let parsed: unknown;
     try {
-      events.push(JSON.parse(trimmed) as CodexJsonlEvent);
+      parsed = JSON.parse(trimmed);
     } catch {
       continue;
     }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) continue;
+    events.push(parsed as CodexJsonlEvent);
   }
   return events;
 }
@@ -190,14 +241,34 @@ function extractTrace(events: CodexJsonlEvent[]): ToolCallRecord[] {
   return trace;
 }
 
-/** The **last** `item.completed`/`agent_message` event's `text` — not the first, per spike-findings.md §1.4's mid-turn self-correction finding. `undefined` when the stream never had one (an anomalous/empty response). */
-function extractLastAgentMessageText(events: CodexJsonlEvent[]): string | undefined {
-  let last: string | undefined;
+/**
+ * The **last** `item.completed`/`agent_message` item — not the first, per
+ * spike-findings.md §1.4's mid-turn self-correction finding. Returns the
+ * raw item (not just its `.text`) so the caller decides how to handle a
+ * malformed `.text` — critically, **unconditionally** tracks whichever
+ * agent_message item was seen last, regardless of whether its `.text` is a
+ * valid string (Zorro round-1 blocker B1): the previous version only
+ * updated `last` when `.text` was already a string, so a true-last
+ * agent_message with a malformed `.text` silently fell back to returning
+ * an *earlier*, valid-looking one — exactly the "declared something false
+ * mid-turn, corrected it in the final answer" hallucination this whole
+ * "always take the last one" design exists to catch, reintroduced as a
+ * fallback path. `undefined` only when the stream had no agent_message
+ * item at all.
+ */
+function findLastAgentMessageItem(events: CodexJsonlEvent[]): CodexJsonlItem | undefined {
+  let last: CodexJsonlItem | undefined;
   for (const event of events) {
     if (event.type !== "item.completed") continue;
     const item = event.item;
     if (!item || item.type !== "agent_message") continue;
-    if (typeof item.text === "string") last = item.text;
+    last = item; // unconditional — this IS the latest one seen, valid .text or not
   }
   return last;
+}
+
+function describeType(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "an array";
+  return typeof value;
 }

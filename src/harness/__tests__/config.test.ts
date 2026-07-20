@@ -240,4 +240,16 @@ describe("buildAdapterRegistry â€” malformed provider entries (Zorro round-1 ðŸŸ
       expect((err as Error).message).toContain("direct-apu");
     }
   });
+
+  it("Zorro A3 round-1 blocker B2 regression: an empty provider-map key throws InvalidProviderConfigError instead of reaching an adapter constructor", () => {
+    const config: ProfileConfig = {
+      profile: "fixture",
+      providers: {
+        "": { kind: "direct-api", base_url: "http://127.0.0.1:9999", model: "gpt-4o-mini" },
+      },
+      roles: { coder: { provider: "" } },
+    };
+
+    expect(() => buildAdapterRegistry(config)).toThrow(InvalidProviderConfigError);
+  });
 });

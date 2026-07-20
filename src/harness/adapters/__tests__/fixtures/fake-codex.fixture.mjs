@@ -20,34 +20,47 @@
 // types/fields/values, reconstructed as JS objects rather than hand-escaped
 // strings to avoid transcription bugs) from spike-findings.md §1.3's real
 // `codex exec --json` captures (issue #10's spike) — not invented. The rest
-// (`claims-no-trace`, `claims-with-trace`, `error`, `no-agent-message`) are
-// constructed: the spike never ran a schema-shaped prompt (with or without
-// tool use), or captured a non-zero exit, so there is no verbatim sample for
-// those — needed to exercise ToolExecVerifier's "fail"/"pass" paths and
-// AdapterInvokeError's non-zero-exit path at the adapter (and, for
-// `claims-with-trace`, the full harness-cli.e2e.test.ts B6 slice) level,
-// built with the same real event *shape* as the verbatim samples —
-// `claims-with-trace` specifically combines `with-tools`' real
-// command_execution pair with `claims-no-trace`'s CoderOutput-shaped final
-// text, so it's the one scenario that's simultaneously "schema-valid" and
-// "trace non-empty" (needed for B6's "pass" assertion; A3 PRD §5/§6's B6
-// task description).
+// (`claims-no-trace`, `claims-with-trace`, `error`, `no-agent-message`,
+// `final-text-non-string`, `null-line-then-hello`) are constructed: the
+// spike never ran a schema-shaped prompt (with or without tool use),
+// captured a non-zero exit, or produced a malformed agent_message/JSONL
+// line, so there is no verbatim sample for those — needed to exercise
+// ToolExecVerifier's "fail"/"pass" paths, AdapterInvokeError's non-zero-exit
+// path, and (Zorro A3 round-1 B1/Y2) the "don't silently fall back to an
+// earlier answer" and "don't crash on a non-object JSONL line" regressions,
+// at the adapter (and, for `claims-with-trace`, the full
+// harness-cli.e2e.test.ts B6 slice) level, built with the same real event
+// *shape* as the verbatim samples — `claims-with-trace` specifically
+// combines `with-tools`' real command_execution pair with
+// `claims-no-trace`'s CoderOutput-shaped final text, so it's the one
+// scenario that's simultaneously "schema-valid" and "trace non-empty"
+// (needed for B6's "pass" assertion; A3 PRD §5/§6's B6 task description).
+//
+// **Zorro A3 round-1 minor Y4**: every branch sets `process.exitCode`
+// instead of calling `process.exit()` — `process.exit()` called
+// immediately after an async `stdout.write()` can truncate output that
+// hasn't finished flushing through the pipe yet (Node's docs explicitly
+// warn about this); `process.exitCode` lets the script finish normally and
+// Node drains stdio before actually exiting. No branch in this file calls
+// `process.exit()` anymore, including `--version`/`error`/`default` — the
+// whole script is now one `if/else` + `switch` with no early-exit calls,
+// so setting `exitCode` and falling through to the end of the script is
+// always safe.
 
 const args = process.argv.slice(2);
-
-if (args[0] === "--version") {
-  // Real version string from the spike's environment (spike-findings.md §1).
-  process.stdout.write("codex-cli 0.144.1\n");
-  process.exit(0);
-}
 
 function emit(event) {
   process.stdout.write(JSON.stringify(event) + "\n");
 }
 
-const scenario = process.env.FAKE_CODEX_SCENARIO ?? "with-tools";
+if (args[0] === "--version") {
+  // Real version string from the spike's environment (spike-findings.md §1).
+  process.stdout.write("codex-cli 0.144.1\n");
+  process.exitCode = 0;
+} else {
+  const scenario = process.env.FAKE_CODEX_SCENARIO ?? "with-tools";
 
-switch (scenario) {
+  switch (scenario) {
   case "with-tools": {
     // Verbatim (as data) from spike-findings.md §1.3 — the `fileB.txt`
     // capture, prompt: "List the files in the current directory, then read
@@ -88,7 +101,7 @@ switch (scenario) {
       type: "turn.completed",
       usage: { input_tokens: 34509, cached_input_tokens: 26112, output_tokens: 189, reasoning_output_tokens: 0 },
     });
-    process.exit(0);
+    process.exitCode = 0;
     break;
   }
 
@@ -102,7 +115,7 @@ switch (scenario) {
       type: "turn.completed",
       usage: { input_tokens: 17125, cached_input_tokens: 9984, output_tokens: 6, reasoning_output_tokens: 0 },
     });
-    process.exit(0);
+    process.exitCode = 0;
     break;
   }
 
@@ -132,7 +145,7 @@ switch (scenario) {
       type: "turn.completed",
       usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 },
     });
-    process.exit(0);
+    process.exitCode = 0;
     break;
   }
 
@@ -176,7 +189,7 @@ switch (scenario) {
       type: "turn.completed",
       usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 },
     });
-    process.exit(0);
+    process.exitCode = 0;
     break;
   }
 
@@ -184,7 +197,7 @@ switch (scenario) {
     // Constructed non-zero-exit scenario (spike never captured a real
     // codex failure) — exercises AdapterInvokeError's non-zero-exit path.
     process.stderr.write("codex: fatal: something broke\n");
-    process.exit(1);
+    process.exitCode = 1;
     break;
   }
 
@@ -198,12 +211,67 @@ switch (scenario) {
       type: "turn.completed",
       usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0 },
     });
-    process.exit(0);
+    process.exitCode = 0;
+    break;
+  }
+
+  case "final-text-non-string": {
+    // Constructed (Zorro A3 round-1 blocker B1's regression fixture): an
+    // early, valid-looking agent_message, followed by the TRUE final
+    // agent_message whose `.text` is an object, not a string. Before the
+    // B1 fix, `extractLastAgentMessageText` only updated its "last seen"
+    // tracker when `.text` was already a string, so this exact shape made
+    // the adapter silently return the EARLY message's text instead of
+    // throwing — reintroducing the "trust a mid-turn answer that got
+    // corrected later" hallucination spike-findings.md §1.4 exists to
+    // prevent. Correct behavior: throw AdapterInvokeError, never fall back.
+    emit({ type: "thread.started", thread_id: "fixture-final-text-non-string" });
+    emit({ type: "turn.started" });
+    emit({
+      type: "item.completed",
+      item: {
+        id: "item_0",
+        type: "agent_message",
+        text: "This is an early, valid-looking answer that must NOT be returned.",
+      },
+    });
+    emit({
+      type: "item.completed",
+      item: { id: "item_1", type: "agent_message", text: { unexpected: "an object, not a string" } },
+    });
+    emit({
+      type: "turn.completed",
+      usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 },
+    });
+    process.exitCode = 0;
+    break;
+  }
+
+  case "null-line-then-hello": {
+    // Constructed (Zorro A3 round-1 minor Y2's regression fixture): a raw
+    // `null` JSONL line (valid JSON, not an object) mixed in among
+    // otherwise-valid lines. Before the Y2 fix, `parseJsonlEvents` accepted
+    // any value `JSON.parse` could produce, so this `null` line became an
+    // "event" with no `.type` property — every downstream `event.type`
+    // read (`null.type`) threw a raw, uncaught `TypeError`, escaping the
+    // "adapters only ever throw AdapterInvokeError" contract. Correct
+    // behavior: the null line is silently skipped, the rest of the stream
+    // parses normally, content is the real final answer.
+    process.stdout.write("null\n");
+    emit({ type: "thread.started", thread_id: "fixture-null-line" });
+    emit({ type: "turn.started" });
+    emit({ type: "item.completed", item: { id: "item_0", type: "agent_message", text: "Hello despite the null line!" } });
+    emit({
+      type: "turn.completed",
+      usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 },
+    });
+    process.exitCode = 0;
     break;
   }
 
   default: {
     process.stderr.write(`fake-codex.fixture.mjs: unknown FAKE_CODEX_SCENARIO "${scenario}"\n`);
-    process.exit(1);
+    process.exitCode = 1;
+  }
   }
 }

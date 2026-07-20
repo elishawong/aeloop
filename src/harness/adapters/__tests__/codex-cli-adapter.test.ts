@@ -126,4 +126,49 @@ describe("CodexCliAdapter", () => {
     expect(result.available).toBe(false);
     expect(result.reason).toBeTruthy();
   });
+
+  // Zorro A3 round-1 regression tests (blocker B1, blocker B2, minor Y2).
+
+  it('B1 regression: when the TRUE last agent_message has a non-string "text", the adapter throws instead of silently falling back to an earlier, valid-looking agent_message', async () => {
+    const adapter = new CodexCliAdapter("codex-cli", { cmd: FIXTURE });
+
+    let thrown: unknown;
+    try {
+      await withScenario("final-text-non-string", () => adapter.invoke({ role: "coder", prompt: "x" }));
+    } catch (err) {
+      thrown = err;
+    }
+
+    // Must throw — must NOT resolve with the early message's text (that
+    // would be the exact regression Zorro's real spawn caught: returning
+    // "This is an early, valid-looking answer that must NOT be returned.").
+    expect(thrown).toBeInstanceOf(AdapterInvokeError);
+    expect((thrown as Error).message).not.toContain("This is an early");
+  });
+
+  it("B2 regression: an adapter constructed with an empty provider id throws AdapterInvokeError on invoke(), never returns provider:\"\"", async () => {
+    const adapter = new CodexCliAdapter("", { cmd: FIXTURE });
+
+    await expect(
+      withScenario("with-tools", () => adapter.invoke({ role: "coder", prompt: "x" })),
+    ).rejects.toBeInstanceOf(AdapterInvokeError);
+  });
+
+  it("B2 regression: an adapter constructed with a whitespace-only provider id is treated the same as empty", async () => {
+    const adapter = new CodexCliAdapter("   ", { cmd: FIXTURE });
+
+    await expect(
+      withScenario("with-tools", () => adapter.invoke({ role: "coder", prompt: "x" })),
+    ).rejects.toBeInstanceOf(AdapterInvokeError);
+  });
+
+  it("Y2 regression: a raw non-object JSONL line (e.g. a bare `null`) mixed into otherwise-valid output is skipped, not a crash escaping the AdapterInvokeError contract", async () => {
+    const adapter = new CodexCliAdapter("codex-cli", { cmd: FIXTURE });
+
+    const result = await withScenario("null-line-then-hello", () =>
+      adapter.invoke({ role: "coder", prompt: "x" }),
+    );
+
+    expect(result.content).toBe("Hello despite the null line!");
+  });
 });
