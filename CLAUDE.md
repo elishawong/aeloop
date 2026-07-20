@@ -13,14 +13,14 @@ aeloop = **模型无关、治理优先的 coder/tester 引擎**(四层嵌套 Pro
 |---|---|
 | 语言 / 运行时 | TypeScript + Node.js v24 |
 | 数据层 | SQLite(better-sqlite3;评估 `node:sqlite` 减依赖)+ FTS5 |
-| 校验 | zod(输出 schema)+ ajv(`Ajv2020`,JSON Schema 校验) |
+| 校验 | zod(输出 schema + 直接 `safeParse` 校验模型输出;ajv 原列此处,#6 定 A2 跳过 → 用 zod 直校避免双真源,留 A4 真需 JSON-Schema 原生校验时再评估) |
 | 编排 | `@langchain/langgraph` + `checkpoint-sqlite`(官方 SqliteSaver) |
 | 配置 | js-yaml(config.yaml)+ `${ENV}` 占位替换 |
 | 测试 | vitest |
 | 包管理 | pnpm |
 | 部署 | CLI 工具(`pnpm add -g`),**非 server** |
 | env | `LITELLM_BASE_URL` / `LITELLM_TOKEN`(仅 verity profile);无统一前缀 |
-> A0+A1(`src/prompt/` `src/context/` `src/profile/` `src/shared/`)已建并 96/96 测试绿,分支 `feature/issue-1-a0-a1-scaffold`,详见 `docs/feature/a0-a1-engine-scaffold-context-prompt/`;待 Zorro 审(`/verify`)。`better-sqlite3` 已装并实测(含 FTS5)。`langgraph`/`checkpoint-sqlite`/`ajv` 是 A2(Harness)/A4(Loop)才需要的依赖,`package.json` 尚未引入,不代表已验证可装 —— 见 DESIGN §8 里程碑 A0-A6。
+> A0+A1(`src/prompt/` `src/context/` `src/profile/` `src/shared/`)已 merge 到 main(PR #3,139/139 测试绿),详见 `docs/feature/a0-a1-engine-scaffold-context-prompt/`。`better-sqlite3` 已装并实测(含 FTS5)。`langgraph`/`checkpoint-sqlite` 是 A4(Loop)才需要的依赖,`package.json` 尚未引入,不代表已验证可装。`ajv` 经 A2(#6)评估**不用**(SchemaValidator 直接对 schema-registry 的 zod 对象 `safeParse`,避免双真源),是否 A4 需要待定 —— 见 DESIGN §8 里程碑 A0-A6。
 
 ## 3. 目录结构(现状 · A0+A1 已建 prompt/context/profile/shared,harness/loop/cli 待 A2+)
 ```
