@@ -158,17 +158,17 @@
 
 ## 8. 可测验收标准(可勾选)
 
-- [ ] `pnpm build` 成功(tsc strict + noUncheckedIndexedAccess 无报错)。
-- [ ] `pnpm test` 全绿(vitest run)。
-- [ ] `AI_AGENT_PROFILE=helix` 时 `profile/loader.ts` 正确解析 `profiles/helix/config.yaml`;`AI_AGENT_PROFILE=verity` 且 `profiles/verity/` 不存在时返回类型化"未找到"结果而非抛裸异常或静默返回空对象。
-- [ ] `memories`/`memory_confirmations`/`system_config` 三张表按 §4.1 列齐全建出(含新补 `confirmed_at`/`confirmed_by`/`actor`/`updated_at` 四列)。
-- [ ] `ConfirmationService` 的 `confirm`/`correct`/`reject` 三方法均用 `db.transaction` 包裹;有一条测试证明"事务中途失败则整体回滚,不留半写状态"。
-- [ ] `ContextInjector` 有一条**针对性测试**证明 `confidence_state === 'rejected'` 的记忆不会出现在注入结果里。
-- [ ] persona loader 按角色名字符串动态解析(非硬编码 `{coder,tester}`),有测试覆盖"角色 persona 文件缺失"路径。
-- [ ] 所有 `JSON.parse` 调用点(本增量涉及的:`tags` 反序列化 / config.yaml 相关如适用)都包在 try-catch 里,失败进类型化 error,不裸抛 `SyntaxError`。
-- [ ] **硬性垂直切片测试存在且通过**:一条端到端测试证明 Context(`ContextInjector`)→ Prompt(`PromptComposer`)真的接通(种子数据 → 注入 → 组装 → 断言最终 prompt 内容),不是分层孤立测试拼出来的假象。
-- [ ] `package.json` `files`/`.npmignore` 确认 `profiles/*/personas/**/*.md` 会随包分发。
-- [ ] `docs/ROADMAP.md` 对应 A0/A1 勾选项更新、`docs/PROGRESS.md` 清空或更新、`CHANGELOG.md` 加行、`profiles/verity/` 未被误提交(`git status` 确认 `.gitignore` 生效)。
+- [x] `pnpm build` 成功(tsc strict + noUncheckedIndexedAccess 无报错)。—— B10 复核实测通过。
+- [x] `pnpm test` 全绿(vitest run)。—— B10 复核实测 **96/96**。
+- [x] `AI_AGENT_PROFILE=helix` 时 `profile/loader.ts` 正确解析 `profiles/helix/config.yaml`;`AI_AGENT_PROFILE=verity` 且 `profiles/verity/` 不存在时返回类型化"未找到"结果而非抛裸异常或静默返回空对象。—— B1(`948fd24`)。
+- [x] `memories`/`memory_confirmations`/`system_config` 三张表按 §4.1 列齐全建出(含新补 `confirmed_at`/`confirmed_by`/`actor`/`updated_at` 四列)。—— B2(`0eea001`)。
+- [x] `ConfirmationService` 的 `confirm`/`correct`/`reject` 三方法均用 `db.transaction` 包裹;有一条测试证明"事务中途失败则整体回滚,不留半写状态"。—— B4(`b24fa3f`)。
+- [x] `ContextInjector` 有一条**针对性测试**证明 `confidence_state === 'rejected'` 的记忆不会出现在注入结果里。—— B5(`06259c9`)。
+- [x] persona loader 按角色名字符串动态解析(非硬编码 `{coder,tester}`),有测试覆盖"角色 persona 文件缺失"路径。—— B7(`88852a5`)。
+- [x] 所有 `JSON.parse` 调用点(本增量涉及的:`tags` 反序列化 / config.yaml 相关如适用)都包在 try-catch 里,失败进类型化 error,不裸抛 `SyntaxError`。—— B10 复核 `grep -rn "JSON.parse" src` 唯一命中点(`store.ts:209` tags 反序列化)包在 try-catch → `MemoryTagsParseError`;`profile/loader.ts` 的 `loadYaml(...)` 同样包在 try-catch → `ProfileConfigParseError`。
+- [x] **硬性垂直切片测试存在且通过**:一条端到端测试证明 Context(`ContextInjector`)→ Prompt(`PromptComposer`)真的接通(种子数据 → 注入 → 组装 → 断言最终 prompt 内容),不是分层孤立测试拼出来的假象。—— B9(`4eb97e4`)。
+- [x] `package.json` `files`/`.npmignore` 确认 `profiles/*/personas/**/*.md` 会随包分发。—— B10 用 `pnpm pack` 实打包核实:`files` 字段(无 `.npmignore`,`files` 单独生效)已含 `profiles/*/personas/**/*.md` + `profiles/*/config.yaml`(B0 已落好,B10 只复核);`tar -tzf` 确认 tarball 内 `dist/` 无任何 `*.test.*` 泄漏。
+- [x] `docs/ROADMAP.md` 对应 A0/A1 勾选项更新、`docs/PROGRESS.md` 清空或更新、`CHANGELOG.md` 加行、`profiles/verity/` 未被误提交(`git status` 确认 `.gitignore` 生效)。—— B10 本批完成。
 
 ## 9. 依赖 / 风险
 

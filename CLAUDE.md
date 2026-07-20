@@ -20,16 +20,16 @@ aeloop = **模型无关、治理优先的 coder/tester 引擎**(四层嵌套 Pro
 | 包管理 | pnpm |
 | 部署 | CLI 工具(`pnpm add -g`),**非 server** |
 | env | `LITELLM_BASE_URL` / `LITELLM_TOKEN`(仅 verity profile);无统一前缀 |
-> M0-M3 相关依赖(langgraph/checkpoint-sqlite/better-sqlite3)已在开发机验证可装。src/ 代码尚未建(由 `/spec`→build 起,见 DESIGN §8 里程碑 A0-A6)。
+> A0+A1(`src/prompt/` `src/context/` `src/profile/` `src/shared/`)已建并 96/96 测试绿,分支 `feature/issue-1-a0-a1-scaffold`,详见 `docs/feature/a0-a1-engine-scaffold-context-prompt/`;待 Zorro 审(`/verify`)。`better-sqlite3` 已装并实测(含 FTS5)。`langgraph`/`checkpoint-sqlite`/`ajv` 是 A2(Harness)/A4(Loop)才需要的依赖,`package.json` 尚未引入,不代表已验证可装 —— 见 DESIGN §8 里程碑 A0-A6。
 
-## 3. 目录结构(目标 · src/ 由 /spec 建,当前仅项目自带层)
+## 3. 目录结构(现状 · A0+A1 已建 prompt/context/profile/shared,harness/loop/cli 待 A2+)
 ```
 aeloop/
 ├── CLAUDE.md / README.md / CHANGELOG.md / .gitignore
 ├── docs/  (README 索引 / DESIGN 权威 / BACKLOG / PROGRESS / ROADMAP)
 ├── .claude/skills/  (aigit / run)
-├── src/  (prompt / context / harness / loop / cli / profile / shared) ← 待建
-├── workflows/  (coder-tester-loop.json) ← 待建
+├── src/  (prompt / context / profile / shared 已建 —— A0+A1;harness / loop / cli 待建 —— A2+)
+├── workflows/  (coder-tester-loop.json) ← 待建(A4 才有消费方)
 └── profiles/  (helix/ 私人 overlay;verity/ 只在公司内部 git,.gitignore 屏蔽)
 ```
 

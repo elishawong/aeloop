@@ -1,6 +1,6 @@
 ---
 feature: a0-a1-engine-scaffold-context-prompt
-status: in_progress
+status: done
 last_updated: 2026-07-20
 ---
 
@@ -8,7 +8,7 @@ last_updated: 2026-07-20
 
 > 边写边更。每批做完追加一条:做了什么 + 本地自检结果 + 可追源的证据。
 
-> **▶ 下一步(RESUME 指针)**:B10 —— 打包配置核实(`package.json` `files`/`.npmignore` 含 `profiles/*/personas/**/*.md`,已在 B0 落好,B10 只需复核)+ README/CLAUDE.md 打钩更新 + `docs/ROADMAP.md`/`docs/PROGRESS.md`/`CHANGELOG.md` 回写。B0-B9 全部完成,A0+A1 只剩 B10 这一个收尾批次。见 PRD §5 构建/分发相关 / §6 批次拆解。
+> **▶ 下一步(RESUME 指针)**:**B0-B10 全部完成。** A0+A1 增量 build 收官,下一步是 `/verify`(Zorro 独立审),不是新的 Cypher 批次。
 
 ## B6-B9(Prompt 层 + 垂直切片)收尾摘要
 
@@ -148,6 +148,21 @@ last_updated: 2026-07-20
   - **顺手补齐**:`src/index.ts` 追加 `export * from "./prompt/{schema,personas,composer}.js"`(此前 B6-B8 各批次都专注单文件未回头补 barrel,B9 作为"全部接通"的收尾点一并补上,和 profile/context 层已有模式一致)。
 - 本地自检:`pnpm build`/`pnpm lint` 无报错(含新增 barrel export 无命名冲突,已验证 `CoderOutput` 类型+常量同名的 TS 声明合并不冲突);`pnpm test`:**全绿 96/96**(B6-B9 净增 35 条:18(B6)+6(B7)+9(B8)+2(B9)=35,61+35=96,与 vitest 实测总数一致)。
 - `git status`/`find dist -name "*.test.*"` 确认:测试文件未泄进 `dist/`,`profiles/verity/` 未被误建。
+
+### B10 — 打包配置核实 + 文档回写(A0+A1 收官)
+- 状态:完成
+- commit:待本批 commit(文档回写 + PRD §8 打钩,无 `src/` 代码改动)
+- 做了什么:
+  - **第 0 步(先做)**:`git merge origin/main`(把 main 上 `a6b8efe` 文档修复——CLAUDE.md §2 技术栈表 + `.claude/skills/run/SKILL.md` 的 npm→pnpm——并进 feature 分支)。**零冲突**(feature 分支未碰过这两个文件),`git log origin/main --oneline feature/issue-1-a0-a1-scaffold..origin/main` 核实合并前只落后这一个 commit。merge 后 `grep -n -i "npm\|pnpm" CLAUDE.md .claude/skills/run/SKILL.md` 确认继承的 pnpm 措辞已在 feature 分支生效。
+  - **打包配置核实(PRD §8 倒数第二条)**:`package.json` 无 `.npmignore`(`files` 字段单独生效,B0 已落好 `profiles/*/personas/**/*.md` + `profiles/*/config.yaml`)。用 `pnpm pack` 实打一个 tarball,`tar -tzf aeloop-0.0.1.tgz | sort` 核实:① `package/profiles/helix/personas/{coder,tester}.md` + `package/profiles/helix/config.yaml` 确实在包内,`pnpm add -g` 会分发到位;② `package/dist/**` 只有 `.js`/`.d.ts`/`.js.map`,**零** `*.test.*` 文件泄漏。验证完 `rm -f aeloop-0.0.1.tgz`,`git status --short` 确认无残留。**结论:无需改动,B0 的打包配置已经是对的。**
+  - **JSON.parse / YAML.load 复核**(PRD §8 倒数第 4 条):`grep -rn "JSON.parse" src --include="*.ts"` 排除测试文件后唯一命中 `store.ts:209`(tags 反序列化,包在 try-catch → `MemoryTagsParseError`);`profile/loader.ts` 的 `loadYaml(...)` 同样包在 try-catch → `ProfileConfigParseError`。均已在各自批次(B1/B2)落地,B10 只是复核确认没有遗漏点。
+  - **文档回写**:`docs/ROADMAP.md` A1 四条 `[ ]` 全部改 `[x]` 并补 commit 引用 + 新增"打包配置核实+文档回写"一条(对应本批);`docs/PROGRESS.md` 清空回「无进行中批次」空模板(A0+A1 已完,下一步是 `/verify` 不是新批次);`CHANGELOG.md` 顶部加一行 A0+A1 build 完成摘要;根 `CLAUDE.md` §2 技术栈表脚注 + §3 目录结构图更新"src/ 尚未建"这类过期状态描述为真实现状(A0+A1 已建 prompt/context/profile/shared,harness/loop/cli 待 A2+;langgraph/checkpoint-sqlite/ajv 尚未装,不再混称"已验证可装"),**未删任何规则/红线,只改状态描述**;PRD §8 十一条验收标准逐条核实并打钩(见上方 §8,每条附commit/验证方式引用)。
+- 本地自检(最终全量质量门,真机跑):
+  - `pnpm build`(`tsc -p tsconfig.build.json`)—— 无报错。
+  - `pnpm lint`(`tsc --noEmit`)—— 无报错。
+  - `pnpm test`(`vitest run`)—— **10 test files / 96 tests 全部 passed**,与 B9 收尾时的 96/96 一致(B10 未新增/删除任何 `src/` 测试)。
+  - `git status --short` 确认工作区干净;`find dist -name "*.test.*"` 空;`profiles/verity/` 未被误建(`ls profiles/` 只有 `helix/`);`git check-ignore -v profiles/verity/anything` 命中 `.gitignore:16`,规则生效。
+- **A0+A1 增量 build 收官**:B0-B10 全部完成,分支 `feature/issue-1-a0-a1-scaffold` 已推送到 `origin`,下一步交 Zorro `/verify` 独立审。
 
 ## 决策记录(可追源)
 - 2026-07-20:包管理器从 npm 切到 **pnpm**(军师本轮口径更正,mid-task 消息)。B0 起未产生任何 npm 遗留物(`package-lock.json`/扁平 `node_modules`)——package.json 写好后先切到 pnpm 才跑的第一次 `install`,无需清理。lockfile = `pnpm-lock.yaml`。
