@@ -94,7 +94,7 @@
 ## 5. 逐文件任务清单
 
 ### A0 脚手架
-- `package.json` — deps:`zod`、`js-yaml`、SQLite 驱动(见 §9 `[?]` DB 驱动选型);devDeps:`typescript`、`vitest`、`@types/node`、`@types/js-yaml`(+ DB 驱动对应 `@types/*` 如需要)。scripts:`build`(`tsc`)、`test`(`vitest run`)、`test:watch`、`lint`(见 §9 `[?]`)。
+- `package.json` — deps:`zod`、`js-yaml`、SQLite 驱动(见 §9 `[?]` DB 驱动选型);devDeps:`typescript`、`vitest`、`@types/node`、`@types/js-yaml`(+ DB 驱动对应 `@types/*` 如需要)。scripts:`build`(`tsc -p tsconfig.build.json` —— B0 已落 `tsconfig.build.json`,排除 `*.test.ts` 使测试产物不进 `dist/` 污染分发,对齐 §8.5#8)、`test`(`vitest run`)、`test:watch`、`lint`(`tsc --noEmit`,含测试文件类型检查)。包管理器 pnpm。
 - `tsconfig.json` — `strict: true`、`noUncheckedIndexedAccess: true`、`target`/`module` 对齐 Node v24(ESM 优先,`[?]` 需确认 CommonJS vs ESM,见 §9)、`outDir: dist`、`rootDir: src`。
 - `vitest.config.ts` — 基本配置,`include: ['src/**/*.test.ts']`。
 - `.env.example` — `LITELLM_BASE_URL=` / `LITELLM_TOKEN=`(仅 verity profile 用到,helix 本增量不需要真实值)、`AI_AGENT_PROFILE=helix`。
@@ -127,7 +127,7 @@
 - `src/context-prompt.e2e.test.ts`(或等价位置,命名 `[?]` 待定)—— 端到端测试:①用 `store.ts` 写入 3 条记忆(confirmed/unconfirmed/rejected 各一条)→ ②`ContextInjector.inject(...)` → ③喂给 `PromptComposer.compose('coder', ...)` → ④断言最终 prompt 字符串包含 confirmed 内容、**不包含** rejected 内容、unconfirmed 内容存在但带警告标记。这条测试就是 DESIGN §8.5 "aeloop 每个里程碑收尾必须有一条薄垂直切片真正接通" 的硬证据。
 
 ### 构建/分发相关(DESIGN §8.5 #8)
-- 确认 `package.json` 的 `files` 字段(或 `.npmignore`)包含 `profiles/*/personas/**/*.md`,使 `npm i -g` 安装时 persona 文本随包分发。**结构性说明**:aeloop 目标文件结构里 personas 位于顶层 `profiles/`、不在 `src/` 下,tsc 编译不会处理它们,所以 Verity 那种"dist 不拷 .md"问题在 aeloop 目录结构下**不会以相同形式重现**;本增量只需确认打包配置正确即可,不需要额外的构建期拷贝脚本。若 §9 `[?]`(ESM/CJS、driver 选型)决定引入构建工具链变化,届时重新核实此结论。
+- 确认 `package.json` 的 `files` 字段(或 `.npmignore`)包含 `profiles/*/personas/**/*.md`,使 `pnpm add -g` 安装时 persona 文本随包分发。**结构性说明**:aeloop 目标文件结构里 personas 位于顶层 `profiles/`、不在 `src/` 下,tsc 编译不会处理它们,所以 Verity 那种"dist 不拷 .md"问题在 aeloop 目录结构下**不会以相同形式重现**;本增量只需确认打包配置正确即可,不需要额外的构建期拷贝脚本。若 §9 `[?]`(ESM/CJS、driver 选型)决定引入构建工具链变化,届时重新核实此结论。
 
 ## 6. 批次拆解
 
@@ -135,7 +135,7 @@
 
 | 批次 | 内容 | 依赖 | 规模 |
 |---|---|---|---|
-| **B0** | package.json / tsconfig / vitest.config / .env.example / npm scripts | 无(起点) | [S] |
+| **B0** | package.json / tsconfig / vitest.config / .env.example / pnpm scripts | 无(起点) | [S] |
 | **B1** | src 骨架目录 + shared/types.ts + profile/loader.ts + profile/errors.ts + profiles/helix/config.yaml + personas 示例 + 对应测试 | B0 | [M] |
 | **B2** | context/types.ts + errors.ts + store.ts(建表 + FTS5 + CRUD + RecallError)+ store.test.ts | B1(需要 profile 决定 db 路径约定,但 store 本身可先用显式路径参数实现,不强耦合 profile) | [M] |
 | **B3** | context/config.ts(SystemConfig)+ staleness.ts(StalenessEngine)+ 对应测试 | B2 | [S] |
@@ -158,8 +158,8 @@
 
 ## 8. 可测验收标准(可勾选)
 
-- [ ] `npm run build` 成功(tsc strict + noUncheckedIndexedAccess 无报错)。
-- [ ] `npm test` 全绿(vitest run)。
+- [ ] `pnpm build` 成功(tsc strict + noUncheckedIndexedAccess 无报错)。
+- [ ] `pnpm test` 全绿(vitest run)。
 - [ ] `AI_AGENT_PROFILE=helix` 时 `profile/loader.ts` 正确解析 `profiles/helix/config.yaml`;`AI_AGENT_PROFILE=verity` 且 `profiles/verity/` 不存在时返回类型化"未找到"结果而非抛裸异常或静默返回空对象。
 - [ ] `memories`/`memory_confirmations`/`system_config` 三张表按 §4.1 列齐全建出(含新补 `confirmed_at`/`confirmed_by`/`actor`/`updated_at` 四列)。
 - [ ] `ConfirmationService` 的 `confirm`/`correct`/`reject` 三方法均用 `db.transaction` 包裹;有一条测试证明"事务中途失败则整体回滚,不留半写状态"。
