@@ -2,7 +2,7 @@
 
 > 📌 **aeloop 的单一进度真相** —— 回答「现在到哪了 / 接下来做什么」。细节见各批实现文档。
 > 🔗 设计权威:[docs/DESIGN.md](./DESIGN.md)(§8 里程碑 A0-A6)
-> 最后更新:2026-07-20
+> 最后更新:2026-07-20(A3 build 收官,待 Zorro `/verify`)
 
 ---
 
@@ -16,7 +16,7 @@
 
 ## ✅ 已完成
 > `[x]` 已 push · `[~]` 完成待 commit/push
-- [~] **项目接入 Helix** — 铺项目自带层(CLAUDE/docs 体系/skills/.gitignore)+ 设计权威 docs/DESIGN.md(本批,待 commit/push)
+- [x] **项目接入 Helix** — 铺项目自带层(CLAUDE/docs 体系/skills/.gitignore)+ 设计权威 docs/DESIGN.md(`2cc30d5`;本行 B7 前一直误留 `[~]`「待 commit/push」,发现是遗留未清的标记 —— 早已 push,这里顺手订正)
 
 ## ⬜ 待办(里程碑 A0-A6,详见 DESIGN §8)
 ### A0. 脚手架
@@ -35,9 +35,12 @@
 - [x] 硬性垂直切片测试(Prompt→Harness 真接通:真实 MemoryStore/ContextInjector/PromptComposer/AdapterRegistry/ProviderRouter/SchemaValidator,唯一替身 FakeAdapter)—— B6
 - [x] 文档回写(本文件/PROGRESS/CHANGELOG/根 CLAUDE.md)—— B7;171/171 测试绿,已 Zorro 四轮对抗审 + Codex `gpt-5.6-sol` 跨模型二签 PASS(R1-R3 FAIL 返工,R4 PASS,双模型同判,详见 `docs/feature/a2-harness-provider-router-litellm-adapter/test-report.md`),merge→main PR#7(`c9c22aa`)
 
-### A3. CLI 桥接 + 真核实(aeloop 特有)
-- [ ] ClaudeCliAdapter + CodexCliAdapter(先跑 codex exec spike)
-- [ ] ToolExecVerifier(声称 tool_execution 就必须有真实工具调用)
+### A3. CLI 桥接 + 真核实(aeloop 特有)—— B0-B7 全部完成,详见 `docs/feature/a3-cli-bridge/`
+- [x] ClaudeCliAdapter + CodexCliAdapter(cli-bridge,真 spawn 真解析:codex `exec --json`/claude `-p --output-format stream-json --verbose`)+ `cli-exec.ts`(通用 spawn/超时/stdin 立即关闭原语)+ `ToolExecVerifier`(`checkToolExecution`——声称 `tool_execution` 但 trace 为空 → `fail`)—— B0-B2(`d08f59d`)+ B3(`9abd1d7`)+ B4(`25ab7bc`)
+- [x] profile 改名 `helix`/`verity` → `subscription`/`apikey`(按凭证模型命名,给引擎解耦掉具体人格名;独立 commit,不算某个 B 批次)—— `c243f64`
+- [x] `config.ts` 接线(`buildAdapterRegistry` 真构造两个 cli-bridge adapter;`cmd` 严格相等分派 flavor + 可选 `bin` 覆盖 spawn 目标,供测试指向受控 fixture)—— B5(`2b472bc`)
+- [x] 硬性垂直切片测试(cli-bridge 真接通:真实 MemoryStore/ContextInjector/PromptComposer/`buildAdapterRegistry`/ProviderRouter/真实 CodexCliAdapter 真 spawn/SchemaValidator/ToolExecVerifier,唯一替身是受控 fixture 子进程)—— B6(`12cba2d`)
+- [x] 文档回写(本文件/PROGRESS/CHANGELOG/根 CLAUDE.md)—— B7(本批);**217/217 测试绿,已建完,待 Zorro 独立审(`/verify`)—— 尚未 merge**
 
 ### A4. Loop
 - [ ] LangGraph 编排 + G1/G2/G3 + 阈值强制升级 + 审计表
@@ -49,8 +52,8 @@
 - [ ] subscription(claude+codex)与 apikey(litellm)各跑通一次真实任务
 
 ### spike(实现前必跑)
-- [ ] codex exec 非交互模式验证
-- [ ] deepseek 探活 + 结构化输出验证
+- [x] codex exec 非交互模式验证 —— issue #10 前置 spike(claude 侧 `-p --output-format stream-json --verbose` 一并验过),详见 `docs/feature/a3-cli-bridge/spike-findings.md`(`2017280`)
+- [ ] deepseek 探活 + 结构化输出验证(verity/apikey profile tester 半边,A3 不涉及,留 A6/A2 尾账)
 
 ---
 

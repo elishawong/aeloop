@@ -20,15 +20,17 @@ aeloop = **模型无关、治理优先的 coder/tester 引擎**(四层嵌套 Pro
 | 包管理 | pnpm |
 | 部署 | CLI 工具(`pnpm add -g`),**非 server** |
 | env | `LITELLM_BASE_URL` / `LITELLM_TOKEN`(仅 apikey profile);无统一前缀 |
-> A0+A1(`src/prompt/` `src/context/` `src/profile/` `src/shared/`)已 merge 到 main(PR #3,139/139 测试绿),详见 `docs/feature/a0-a1-engine-scaffold-context-prompt/`。`better-sqlite3` 已装并实测(含 FTS5)。`langgraph`/`checkpoint-sqlite` 是 A4(Loop)才需要的依赖,`package.json` 尚未引入,不代表已验证可装。`ajv` 经 A2(#6)评估**不用**(SchemaValidator 直接对 schema-registry 的 zod 对象 `safeParse`,避免双真源),是否 A4 需要待定 —— 见 DESIGN §8 里程碑 A0-A6。
+> A0+A1(`src/prompt/` `src/context/` `src/profile/` `src/shared/`)已 merge 到 main(PR #3,139/139 测试绿),详见 `docs/feature/a0-a1-engine-scaffold-context-prompt/`。A2(`src/harness/` 的 ProviderRouter/AdapterRegistry/LiteLLMAdapter/SchemaValidator)已 merge 到 main(PR #7,171/171 测试绿,四轮 Zorro 对抗审 + Codex 跨模型二签 PASS),详见 `docs/feature/a2-harness-provider-router-litellm-adapter/`。A3(`src/harness/adapters/` 的 ClaudeCliAdapter/CodexCliAdapter + `tool-exec-verifier.ts` + `cli-exec.ts`)build 已完成、217/217 测试绿,**待 Zorro 独立审(`/verify`),尚未 merge**,详见 `docs/feature/a3-cli-bridge/`。`better-sqlite3` 已装并实测(含 FTS5)。`langgraph`/`checkpoint-sqlite` 是 A4(Loop)才需要的依赖,`package.json` 尚未引入,不代表已验证可装。`ajv` 经 A2(#6)评估**不用**(SchemaValidator 直接对 schema-registry 的 zod 对象 `safeParse`,避免双真源),是否 A4 需要待定 —— 见 DESIGN §8 里程碑 A0-A6。
 
-## 3. 目录结构(现状 · A0-A2 已建 prompt/context/profile/shared/harness,loop/cli 待 A3+)
+## 3. 目录结构(现状 · A0-A3 已建 prompt/context/profile/shared/harness(含 cli-bridge),loop/cli 待 A4+)
 ```
 aeloop/
 ├── CLAUDE.md / README.md / CHANGELOG.md / .gitignore
 ├── docs/  (README 索引 / DESIGN 权威 / BACKLOG / PROGRESS / ROADMAP)
 ├── .claude/skills/  (aigit / run)
-├── src/  (prompt / context / profile / shared / harness 已建 —— A0-A2;loop / cli 待建 —— A3+)
+├── src/  (prompt / context / profile / shared / harness 已建 —— A0-A3;harness 含 cli-bridge:
+│         adapters/{claude-cli,codex-cli}-adapter.ts + tool-exec-verifier.ts + cli-exec.ts,
+│         A3 build 完成待 Zorro 审;loop / cli 待建 —— A4+)
 ├── workflows/  (coder-tester-loop.json) ← 待建(A4 才有消费方)
 └── profiles/  (subscription/ 私人 overlay;apikey/ 只在公司内部 git,.gitignore 屏蔽)
 ```
