@@ -1,11 +1,13 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { z } from "zod";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveProfileDir } from "../profile/loader.js";
 import type { ContextInjectionResult } from "../context/injector.js";
 import { PromptComposer } from "./composer.js";
 import { PersonaNotFoundError } from "./personas.js";
+import { DEFAULT_OUTPUT_SCHEMAS, SchemaNotRegisteredError } from "./schema-registry.js";
 
 const HELIX_PERSONAS_DIR = path.join(resolveProfileDir("helix"), "personas");
 
@@ -112,16 +114,47 @@ describe("PromptComposer — tester role (real committed helix persona + real Te
   });
 });
 
-describe("PromptComposer — role with a persona but no entry in the output-schema registry", () => {
-  it("omits the Output Schema section instead of throwing", () => {
+describe("PromptComposer — role registered with an explicit `null` schema (opt-out, not omission-by-accident)", () => {
+  it("omits the Output Schema section instead of throwing, when the registry explicitly says null", () => {
     const dir = makeTmpPersonasDir();
     writeFileSync(path.join(dir, "reviewer.md"), "# Reviewer\n\nBe thorough.\n", "utf-8");
-    const composer = new PromptComposer(dir);
+    const composer = new PromptComposer(dir, { ...DEFAULT_OUTPUT_SCHEMAS, reviewer: null });
 
     const prompt = composer.compose("reviewer", makeContext([]), "task");
 
     expect(prompt).toContain("Be thorough.");
     expect(prompt).not.toContain("# Output Schema");
+  });
+});
+
+describe("PromptComposer — schema registry is external, not hardcoded in composer.ts (Zorro review, feature/issue-1-a0-a1-scaffold)", () => {
+  it("a role with a persona but NO registry entry at all throws SchemaNotRegisteredError, not a silent omission", () => {
+    const dir = makeTmpPersonasDir();
+    writeFileSync(path.join(dir, "reviewer.md"), "# Reviewer\n\nBe thorough.\n", "utf-8");
+    const composer = new PromptComposer(dir); // default registry: only coder/tester
+
+    let thrown: unknown;
+    try {
+      composer.compose("reviewer", makeContext([]), "task");
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(SchemaNotRegisteredError);
+    expect((thrown as SchemaNotRegisteredError).role).toBe("reviewer");
+  });
+
+  it("registering a brand-new role's schema works purely by passing a custom registry — zero edits to composer.ts", () => {
+    const dir = makeTmpPersonasDir();
+    writeFileSync(path.join(dir, "reviewer.md"), "# Reviewer\n\nBe thorough.\n", "utf-8");
+    const ReviewerOutput = z.object({ verdict: z.enum(["approve", "changes-requested"]) });
+    const composer = new PromptComposer(dir, { ...DEFAULT_OUTPUT_SCHEMAS, reviewer: ReviewerOutput });
+
+    const prompt = composer.compose("reviewer", makeContext([]), "task");
+
+    expect(prompt).toContain("Be thorough.");
+    expect(prompt).toContain("# Output Schema");
+    expect(prompt).toContain("approve");
+    expect(prompt).toContain("changes-requested");
   });
 });
 

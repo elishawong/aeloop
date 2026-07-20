@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,7 +7,7 @@ import {
   resolveProfileDir,
   substituteEnvPlaceholders,
 } from "./loader.js";
-import { ProfileConfigParseError, ProfileNotFoundError } from "./errors.js";
+import { InvalidProfileNameError, ProfileConfigParseError, ProfileNotFoundError } from "./errors.js";
 
 /** Directories created per-test under the OS tmp dir, cleaned up after each. */
 const tmpDirs: string[] = [];
@@ -174,6 +174,107 @@ describe("loadProfile — ${ENV} placeholder substitution", () => {
     expect(result.config.providers["litellm"]?.["base_url"]).toBe(
       "${AELOOP_TEST_ENV_VAR}",
     );
+  });
+});
+
+describe("loadProfile — minimal required-field validation before returning ok:true (Zorro review suggestion)", () => {
+  it("throws ProfileConfigParseError when 'profile' is missing", () => {
+    const profilesRoot = makeTmpProfilesRoot();
+    const dir = path.join(profilesRoot, "no-profile-field");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "config.yaml"), "providers: {}\nroles: {}\n", "utf-8");
+
+    expect(() => loadProfile("no-profile-field", profilesRoot)).toThrow(ProfileConfigParseError);
+  });
+
+  it("throws ProfileConfigParseError when 'providers' is missing", () => {
+    const profilesRoot = makeTmpProfilesRoot();
+    const dir = path.join(profilesRoot, "no-providers");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "config.yaml"), "profile: no-providers\nroles: {}\n", "utf-8");
+
+    expect(() => loadProfile("no-providers", profilesRoot)).toThrow(ProfileConfigParseError);
+  });
+
+  it("throws ProfileConfigParseError when 'roles' is missing", () => {
+    const profilesRoot = makeTmpProfilesRoot();
+    const dir = path.join(profilesRoot, "no-roles");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "config.yaml"), "profile: no-roles\nproviders: {}\n", "utf-8");
+
+    expect(() => loadProfile("no-roles", profilesRoot)).toThrow(ProfileConfigParseError);
+  });
+
+  it("throws ProfileConfigParseError when 'providers' is present but not a mapping", () => {
+    const profilesRoot = makeTmpProfilesRoot();
+    const dir = path.join(profilesRoot, "providers-wrong-type");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, "config.yaml"),
+      "profile: providers-wrong-type\nproviders: not-a-mapping\nroles: {}\n",
+      "utf-8",
+    );
+
+    expect(() => loadProfile("providers-wrong-type", profilesRoot)).toThrow(ProfileConfigParseError);
+  });
+
+  it("still accepts the real committed helix profile (sanity check the validation isn't overly strict)", () => {
+    const result = loadProfile("helix");
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe("loadProfile — path traversal is blocked (Zorro review, feature/issue-1-a0-a1-scaffold)", () => {
+  it("real repro: a '../../../CLAUDE'-style profile name no longer leaks the repo's own CLAUDE.md directory", () => {
+    // Before the fix, `path.join(profilesRoot, profile)` collapsed the ".."
+    // segments with no containment check, so a traversal profile name
+    // resolved to a directory (and file) outside `profiles/`.
+    let thrown: unknown;
+    try {
+      loadProfile("../../../CLAUDE");
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(InvalidProfileNameError);
+    expect((thrown as InvalidProfileNameError).profile).toBe("../../../CLAUDE");
+  });
+
+  it("rejects a profile name with a deeper traversal chain reaching outside the repo", () => {
+    expect(() => loadProfile("../../../../../../etc")).toThrow(InvalidProfileNameError);
+  });
+
+  it("rejects an absolute path as a profile name", () => {
+    expect(() => loadProfile("/etc")).toThrow(InvalidProfileNameError);
+  });
+
+  it("rejects a profile name containing a backslash traversal sequence", () => {
+    expect(() => loadProfile("..\\..\\secrets")).toThrow(InvalidProfileNameError);
+  });
+
+  it("rejects a bare '..' profile name", () => {
+    expect(() => loadProfile("..")).toThrow(InvalidProfileNameError);
+  });
+
+  it("an inert '..%2F'-style string (no URL-decoding happens here) is not treated as traversal — just an ordinary missing-profile lookup", () => {
+    const profilesRoot = makeTmpProfilesRoot();
+    const result = loadProfile("..%2F..%2Fsecrets", profilesRoot);
+    expect(result.ok).toBe(false);
+  });
+
+  it("blocks a symlinked profile directory that resolves outside profilesRoot (symlink escape)", () => {
+    const profilesRoot = makeTmpProfilesRoot();
+    const secretRoot = mkdtempSync(path.join(os.tmpdir(), "aeloop-profile-secret-"));
+    tmpDirs.push(secretRoot);
+    writeFileSync(path.join(secretRoot, "config.yaml"), "profile: leaked\nproviders: {}\nroles: {}\n", "utf-8");
+    symlinkSync(secretRoot, path.join(profilesRoot, "leaked"));
+
+    let thrown: unknown;
+    try {
+      loadProfile("leaked", profilesRoot);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(InvalidProfileNameError);
   });
 });
 

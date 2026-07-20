@@ -51,3 +51,27 @@ export class ProfileConfigParseError extends Error {
 function describeCause(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
+
+/**
+ * `profile` failed one of the two path-safety checks in
+ * `../shared/safe-path.js` (Zorro review, feature/issue-1-a0-a1-scaffold:
+ * the same path-traversal hole found in `prompt/personas.ts`'s role
+ * lookup — `profile` was `path.join`-ed straight into
+ * `profilesRoot/<profile>/config.yaml` with no containment check). Distinct
+ * from `ProfileNotFoundError` — this is not "a legitimate profile name
+ * with no config.yaml on disk (yet)", it's "this string can never be a
+ * valid profile name", whether because it isn't a single path segment
+ * (contains `/`, `\`, `..`, or is already absolute) or because it resolves
+ * outside `profilesRoot` through a symlink. Thrown, not returned as
+ * `{ ok: false }` — unlike a missing profile, an unsafe name is not an
+ * expected/normal state.
+ */
+export class InvalidProfileNameError extends Error {
+  readonly profile: string;
+
+  constructor(profile: string, reason: string) {
+    super(`Invalid profile name "${profile}": ${reason}`);
+    this.name = "InvalidProfileNameError";
+    this.profile = profile;
+  }
+}

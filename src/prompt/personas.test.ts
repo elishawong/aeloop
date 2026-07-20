@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveProfileDir } from "../profile/loader.js";
-import { loadPersona, PersonaNotFoundError, resolvePersonaPath } from "./personas.js";
+import { InvalidRoleNameError, loadPersona, PersonaNotFoundError, resolvePersonaPath } from "./personas.js";
 
 const HELIX_PERSONAS_DIR = path.join(resolveProfileDir("helix"), "personas");
 
@@ -72,5 +72,61 @@ describe("loadPersona — missing persona file (required path per PRD §8)", () 
 describe("resolvePersonaPath", () => {
   it("joins personasDir and '<role>.md'", () => {
     expect(resolvePersonaPath("coder", "/x/personas")).toBe(path.join("/x/personas", "coder.md"));
+  });
+});
+
+describe("loadPersona — path traversal is blocked (Zorro review, feature/issue-1-a0-a1-scaffold)", () => {
+  it("real repro: a '../../../CLAUDE'-style role no longer leaks the repo's own CLAUDE.md", () => {
+    // Before the fix, this exact call returned the repo root CLAUDE.md's
+    // content — `path.join` happily collapsed the ".." segments and
+    // `existsSync`/`readFileSync` followed the resulting path with no
+    // containment check.
+    let thrown: unknown;
+    try {
+      loadPersona("../../../CLAUDE", HELIX_PERSONAS_DIR);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(InvalidRoleNameError);
+    expect((thrown as InvalidRoleNameError).role).toBe("../../../CLAUDE");
+  });
+
+  it("rejects a role name with a deeper traversal chain reaching outside the repo", () => {
+    expect(() => loadPersona("../../../../../../etc/passwd", HELIX_PERSONAS_DIR)).toThrow(InvalidRoleNameError);
+  });
+
+  it("rejects an absolute path as a role name", () => {
+    expect(() => loadPersona("/etc/passwd", HELIX_PERSONAS_DIR)).toThrow(InvalidRoleNameError);
+  });
+
+  it("rejects a role name containing a backslash traversal sequence", () => {
+    expect(() => loadPersona("..\\..\\secrets", HELIX_PERSONAS_DIR)).toThrow(InvalidRoleNameError);
+  });
+
+  it("rejects a bare '..' role name", () => {
+    expect(() => loadPersona("..", HELIX_PERSONAS_DIR)).toThrow(InvalidRoleNameError);
+  });
+
+  it("an inert '..%2F'-style string (no URL-decoding happens here) is not treated as traversal — just an ordinary missing-file lookup", () => {
+    // Nothing in loadPersona decodes %2F, so this never becomes a real ".."
+    // path component; it's simply a role name that has no matching file.
+    expect(() => loadPersona("..%2F..%2Fsecrets", HELIX_PERSONAS_DIR)).toThrow(PersonaNotFoundError);
+  });
+
+  it("blocks a symlinked persona file that resolves outside personasDir (symlink escape)", () => {
+    const dir = makeTmpPersonasDir();
+    const secretDir = mkdtempSync(path.join(os.tmpdir(), "aeloop-personas-secret-"));
+    tmpDirs.push(secretDir);
+    const secretFile = path.join(secretDir, "secret.md");
+    writeFileSync(secretFile, "TOP SECRET", "utf-8");
+    symlinkSync(secretFile, path.join(dir, "leaked.md"));
+
+    let thrown: unknown;
+    try {
+      loadPersona("leaked", dir);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(InvalidRoleNameError);
   });
 });

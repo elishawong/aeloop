@@ -233,19 +233,90 @@ describe("MemoryStore — FTS5 recall", () => {
     expect(store.searchMemories("giraffe").map((r) => r.id)).not.toContain(m.id);
   });
 
-  it("RecallError trigger path: a malformed FTS5 query string throws RecallError, not a raw SqliteError, and never silently returns []", () => {
+  it("RecallError trigger path: a real SQLite-level failure (dropped FTS5 index) throws RecallError, not a raw SqliteError, and never silently returns []", () => {
     const store = openStore();
     store.insertMemory({ type: "idea", title: "A", content: "a" }, NOW);
+    // Simulate a genuine DB-level failure — the fix that makes ordinary
+    // punctuated text safe (toSafeFtsQuery, see below) means a plain
+    // caller-supplied string can no longer trigger a MATCH syntax error, so
+    // this test now forces a real SQLite error instead (a dropped index),
+    // proving RecallError still wraps-and-throws for actual DB failures
+    // rather than the safety net silently becoming "swallow every error".
+    (store as unknown as { db: import("better-sqlite3").Database }).db.exec("DROP TABLE memories_fts");
 
-    // An unterminated quoted phrase is invalid FTS5 MATCH syntax.
     let thrown: unknown;
     try {
-      store.searchMemories('"unterminated phrase');
+      store.searchMemories("anything");
     } catch (err) {
       thrown = err;
     }
     expect(thrown).toBeInstanceOf(RecallError);
     expect((thrown as Error).name).toBe("RecallError");
+  });
+});
+
+describe("MemoryStore — FTS5 recall: natural-language query safety (Zorro review, feature/issue-1-a0-a1-scaffold)", () => {
+  it("searches text containing a hyphenated compound word without throwing a syntax error", () => {
+    const store = openStore();
+    const m = store.insertMemory(
+      { type: "decision", title: "Retry policy", content: "use retry-backoff before giving up" },
+      NOW,
+    );
+    store.insertMemory({ type: "idea", title: "Unrelated", content: "something about bananas" }, NOW);
+
+    expect(() => store.searchMemories("retry-backoff")).not.toThrow();
+    expect(store.searchMemories("retry-backoff").map((r) => r.id)).toContain(m.id);
+  });
+
+  it('searches text containing "C++" without throwing a syntax error', () => {
+    const store = openStore();
+    const m = store.insertMemory({ type: "decision", title: "Language choice", content: "written in C++ for speed" }, NOW);
+
+    expect(() => store.searchMemories("C++")).not.toThrow();
+    expect(store.searchMemories("C++").map((r) => r.id)).toContain(m.id);
+  });
+
+  it("a full natural-language sentence with punctuation and hyphens matches a memory covering the same ground", () => {
+    // Multiple whitespace-separated quoted phrases are joined with FTS5's
+    // implicit AND (`toSafeFtsQuery` in store.ts), so this asserts what the
+    // safe-query fix actually promises — "does not throw a syntax error on
+    // real task text, and recall still works when the target memory's
+    // content shares the query's tokens" — not full-text relevance ranking
+    // across unrelated wording (out of scope for this fix).
+    const store = openStore();
+    const m = store.insertMemory(
+      {
+        type: "decision",
+        title: "Backoff investigation",
+        content: "Investigate the retry-backoff loop before shipping the API changes.",
+      },
+      NOW,
+    );
+
+    const results = store.searchMemories("Investigate the retry-backoff loop before shipping.");
+    expect(results.map((r) => r.id)).toContain(m.id);
+  });
+
+  it("an unterminated quoted phrase (raw FTS5 syntax that used to throw) is now just inert query text", () => {
+    const store = openStore();
+    store.insertMemory({ type: "idea", title: "A", content: "a" }, NOW);
+
+    expect(() => store.searchMemories('"unterminated phrase')).not.toThrow();
+  });
+
+  it("returns [] without touching the database for an empty or whitespace-only query", () => {
+    const store = openStore();
+    store.insertMemory({ type: "idea", title: "A", content: "a" }, NOW);
+
+    expect(store.searchMemories("")).toEqual([]);
+    expect(store.searchMemories("   ")).toEqual([]);
+  });
+
+  it("returns [] for a query that is only punctuation (no matchable word tokens)", () => {
+    const store = openStore();
+    store.insertMemory({ type: "idea", title: "A", content: "a" }, NOW);
+
+    expect(store.searchMemories("--- !!! ???")).toEqual([]);
   });
 });
 

@@ -372,18 +372,67 @@ export class MemoryStore {
   // ---- FTS5 recall -------------------------------------------------------
 
   /**
-   * FTS5 keyword recall over `title`/`content`/`tags`. A malformed FTS5
-   * query string (e.g. an unterminated quoted phrase) makes SQLite raise a
-   * syntax error at query time — that failure is wrapped into `RecallError`
-   * and thrown, never swallowed into an empty array (PRD §8).
+   * FTS5 keyword recall over `title`/`content`/`tags`.
+   *
+   * `query` is treated as **plain natural-language text**, not raw FTS5
+   * query syntax — this is the caller-facing contract (`ContextInjector`
+   * feeds this arbitrary task descriptions, DESIGN §3). It is tokenized on
+   * whitespace and every token is wrapped as an FTS5 quoted phrase before
+   * being sent to `MATCH` (`toSafeFtsQuery` below). This matters because
+   * FTS5's query syntax gives special meaning to characters that show up
+   * constantly in ordinary text — a bare hyphen is a column-exclusion/NOT
+   * operator, so `"retry-backoff"` unquoted is a syntax error, and so is
+   * `"C++"` (`+` inside an unquoted term). Quoting each token sidesteps the
+   * operator grammar entirely while leaving FTS5's tokenizer (which runs
+   * the same way inside a quoted phrase as outside one) to still match
+   * multi-word phrases correctly, because insert-time content and
+   * query-time phrases are tokenized by the same rules (see
+   * `store.test.ts`'s "FTS5 recall — natural-language query safety" cases
+   * for concrete hyphenated/punctuated examples).
+   *
+   * A real SQLite-level failure (e.g. the `memories_fts` index itself
+   * missing/corrupted) still throws `RecallError` wrapping the cause —
+   * this fix only changes what reaches `MATCH`, it does not swallow a
+   * genuine DB error into an empty result (PRD §8).
    */
   searchMemories(query: string): Memory[] {
+    const ftsQuery = toSafeFtsQuery(query);
+    if (ftsQuery === null) return [];
+
     let rows: MemoryRow[];
     try {
-      rows = this.searchMemoriesStmt.all(query);
+      rows = this.searchMemoriesStmt.all(ftsQuery);
     } catch (cause) {
       throw new RecallError(`FTS5 recall query failed for "${query}"`, cause);
     }
     return rows.map((row) => this.mapRow(row));
   }
+}
+
+/**
+ * `\p{L}`/`\p{N}` = Unicode letter/number — used to drop tokens that carry
+ * no actual word content after quoting (e.g. a stray `"--"` word in the
+ * input), which would otherwise become an empty/degenerate FTS5 phrase.
+ */
+const HAS_WORD_CHAR = /[\p{L}\p{N}]/u;
+
+/**
+ * Turns free-form text into a safe FTS5 `MATCH` argument: split on
+ * whitespace, drop tokens with no letters/digits, wrap each surviving
+ * token as a quoted phrase (doubling any embedded `"` per FTS5's string
+ * literal escaping), and join with spaces (FTS5's implicit `AND` between
+ * adjacent phrases/terms). Returns `null` for input with no matchable
+ * tokens at all, so the caller can short-circuit to `[]` without ever
+ * touching the database — an empty/whitespace-only search is a legitimate
+ * "nothing to search for", not a query failure.
+ */
+function toSafeFtsQuery(raw: string): string | null {
+  const tokens = raw
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0 && HAS_WORD_CHAR.test(token));
+
+  if (tokens.length === 0) return null;
+
+  return tokens.map((token) => `"${token.replace(/"/g, '""')}"`).join(" ");
 }

@@ -45,10 +45,23 @@ afterEach(() => {
 
 describe("Context -> Prompt vertical slice (real MemoryStore -> real ContextInjector -> real PromptComposer)", () => {
   it("confirmed content reaches the final prompt, rejected content never does, unconfirmed content reaches it with a visible warning", () => {
+    // The task text below is real natural-language text containing a
+    // hyphenated compound word ("retry-backoff") — deliberately the exact
+    // shape that used to make raw FTS5 MATCH throw a syntax error (Zorro
+    // review, feature/issue-1-a0-a1-scaffold, blocker #2). It's fed into
+    // `injector.inject()` as the real recall query below, not skipped via
+    // `inject(undefined)` — this slice exercises the safe-FTS-query fix
+    // (`MemoryStore.searchMemories` / `toSafeFtsQuery`) end to end, not
+    // just the core-memory-type path.
+    const task = "Explain the retry-backoff strategy.";
+
     // ---- 1. Real store, real SQLite, real writes ----------------------
     const store = new MemoryStore(":memory:");
     openStores.push(store);
 
+    // `type: "decision"` is a CORE_MEMORY_TYPES member (src/context/
+    // injector.ts) — always injected regardless of query, proving the
+    // core-recall path.
     const confirmed = store.insertMemory(
       {
         type: "decision",
@@ -58,15 +71,23 @@ describe("Context -> Prompt vertical slice (real MemoryStore -> real ContextInje
       },
       NOW,
     );
+    // `type: "idea"` is deliberately NOT a core type — this memory only
+    // reaches the injection result because its content is actually
+    // recalled by `task`'s FTS5 keywords (every word in `task` appears in
+    // this content, in order, so the AND-of-quoted-phrases query matches).
+    // Proves the FTS5 recall branch is live, not dead code (blocker #3).
     const unconfirmed = store.insertMemory(
       {
         type: "idea",
-        title: "Rate limit guess",
-        content: "The API rate limit is believed to be 100 requests/min.",
+        title: "Retry-backoff notes",
+        content: "Explain the retry-backoff strategy used by the client.",
         confidenceState: "unconfirmed",
       },
       NOW,
     );
+    // `type: "decision"` — a core type, so it would be included by the
+    // core-recall pass on type alone; the rejected-filter must still drop
+    // it regardless of that.
     const rejected = store.insertMemory(
       {
         type: "decision",
@@ -88,7 +109,7 @@ describe("Context -> Prompt vertical slice (real MemoryStore -> real ContextInje
     const staleness = new StalenessEngine(config);
     const injector = new ContextInjector(store, staleness);
 
-    const injected = injector.inject(undefined, new Date(NOW));
+    const injected = injector.inject(task, new Date(NOW));
 
     // Prove the injector really did its job before handing its actual
     // return value (not a reshaped copy) into the composer below.
@@ -99,7 +120,7 @@ describe("Context -> Prompt vertical slice (real MemoryStore -> real ContextInje
 
     // ---- 3. Real PromptComposer, consuming the injector's real output -
     const composer = new PromptComposer(HELIX_PERSONAS_DIR);
-    const prompt = composer.compose("coder", injected, "Implement the retry-backoff helper.");
+    const prompt = composer.compose("coder", injected, task);
 
     // ---- 4. Assertions on the actual final prompt string ---------------
     // Confirmed content: present, no warning tag attached to it.
@@ -111,14 +132,15 @@ describe("Context -> Prompt vertical slice (real MemoryStore -> real ContextInje
     expect(prompt).not.toContain("The context store uses MySQL for persistence.");
     expect(prompt).not.toContain("Wrong database claim");
 
-    // Unconfirmed content: present, but with a visible warning marker.
-    expect(prompt).toContain("The API rate limit is believed to be 100 requests/min.");
-    expect(prompt).toContain("[warning: unconfirmed] Rate limit guess");
+    // Unconfirmed content: present (via real FTS5 keyword recall of the
+    // hyphenated task text), but with a visible warning marker.
+    expect(prompt).toContain("Explain the retry-backoff strategy used by the client.");
+    expect(prompt).toContain("[warning: unconfirmed] Retry-backoff notes");
 
     // The rest of the composed prompt is real too, not just the memory section.
     expect(prompt).toContain("You are the Coder in a two-model coder/tester loop.");
     expect(prompt).toContain('"diff"'); // CoderOutput schema section
-    expect(prompt).toContain("Implement the retry-backoff helper.");
+    expect(prompt).toContain(task);
   });
 
   it("a memory rejected via ConfirmationService.reject() (not just inserted pre-rejected) is also filtered out end to end", async () => {
@@ -126,13 +148,17 @@ describe("Context -> Prompt vertical slice (real MemoryStore -> real ContextInje
     // than inserting a pre-rejected row directly — proves the filtering
     // holds for the realistic path (a memory starts unconfirmed, then
     // gets rejected through the service) too, not only the insert-time
-    // shortcut used in the first test.
+    // shortcut used in the first test. Also runs `inject()` against a real
+    // hyphenated task string rather than `inject(undefined)`.
     const { ConfirmationService } = await import("./context/confirmation.js");
 
+    const task = "Review the retry-backoff change before merging.";
     const store = new MemoryStore(":memory:");
     openStores.push(store);
     const confirmation = new ConfirmationService(store);
 
+    // Core type (`decision`) so it would be included by the core-recall
+    // pass on type alone — the reject-via-service path must still drop it.
     const memory = store.insertMemory(
       { type: "decision", title: "Later rejected", content: "this will be rejected via the service", confidenceState: "unconfirmed" },
       NOW,
@@ -143,10 +169,10 @@ describe("Context -> Prompt vertical slice (real MemoryStore -> real ContextInje
     config.set("default_stale_days", "30", NOW);
     const staleness = new StalenessEngine(config);
     const injector = new ContextInjector(store, staleness);
-    const injected = injector.inject(undefined, new Date(NOW));
+    const injected = injector.inject(task, new Date(NOW));
 
     const composer = new PromptComposer(HELIX_PERSONAS_DIR);
-    const prompt = composer.compose("coder", injected, "task");
+    const prompt = composer.compose("coder", injected, task);
 
     expect(prompt).not.toContain("this will be rejected via the service");
     expect(injected.memories.map((m) => m.memory.id)).not.toContain(memory.id);

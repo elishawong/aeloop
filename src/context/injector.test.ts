@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { MemoryStore } from "./store.js";
 import { SystemConfig } from "./config.js";
 import { StalenessEngine } from "./staleness.js";
-import { ContextInjector } from "./injector.js";
+import { ContextInjector, CORE_MEMORY_TYPES } from "./injector.js";
 import { RecallError } from "./errors.js";
 
 const NOW = "2026-07-20T00:00:00.000Z";
@@ -57,7 +57,7 @@ describe("ContextInjector — stale/unconfirmed are kept, not filtered, and carr
   it("an unconfirmed memory stays in the result with warning='unconfirmed'", () => {
     const { store, injector } = setup();
     const memory = store.insertMemory(
-      { type: "idea", title: "New idea", content: "not yet reviewed", confidenceState: "unconfirmed" },
+      { type: "decision", title: "New idea", content: "not yet reviewed", confidenceState: "unconfirmed" },
       NOW,
     );
 
@@ -71,7 +71,7 @@ describe("ContextInjector — stale/unconfirmed are kept, not filtered, and carr
   it("a stale confirmed memory stays in the result with warning='stale'", () => {
     const { store, injector } = setup();
     const memory = store.insertMemory(
-      { type: "snapshot", title: "Old snapshot", content: "aging", confidenceState: "confirmed" },
+      { type: "constraint", title: "Old constraint", content: "aging", confidenceState: "confirmed" },
       NOW,
     );
     const asOf = new Date("2026-09-01T00:00:00.000Z"); // well past 30-day default threshold
@@ -86,7 +86,7 @@ describe("ContextInjector — stale/unconfirmed are kept, not filtered, and carr
   it("a fresh confirmed memory carries no warning", () => {
     const { store, injector } = setup();
     const memory = store.insertMemory(
-      { type: "snapshot", title: "Fresh", content: "just written", confidenceState: "confirmed" },
+      { type: "constraint", title: "Fresh", content: "just written", confidenceState: "confirmed" },
       NOW,
     );
 
@@ -99,7 +99,7 @@ describe("ContextInjector — stale/unconfirmed are kept, not filtered, and carr
   it("a memory that is both stale and unconfirmed reports 'stale' (documented priority)", () => {
     const { store, injector } = setup();
     const memory = store.insertMemory(
-      { type: "idea", title: "Old + unreviewed", content: "x", confidenceState: "unconfirmed" },
+      { type: "decision", title: "Old + unreviewed", content: "x", confidenceState: "unconfirmed" },
       NOW,
     );
     const asOf = new Date("2026-09-01T00:00:00.000Z");
@@ -110,13 +110,49 @@ describe("ContextInjector — stale/unconfirmed are kept, not filtered, and carr
   });
 });
 
-describe("ContextInjector — core + FTS5 recall merge", () => {
-  it("merges FTS keyword hits into the core full-recall set, deduped by id", () => {
+describe("ContextInjector — core vs. recalled (Zorro review: the old implementation made FTS5 recall dead code)", () => {
+  it("CORE_MEMORY_TYPES is the documented always-want set: identity/constraint/decision", () => {
+    expect([...CORE_MEMORY_TYPES].sort()).toEqual(["constraint", "decision", "identity"]);
+  });
+
+  it("a non-core, non-matching memory is absent from the result with no query", () => {
     const { store, injector } = setup();
-    const core = store.insertMemory(
-      { type: "constraint", title: "Always in core", content: "core content" },
+    const nonCore = store.insertMemory(
+      { type: "active_task", title: "Session-scoped task", content: "not core, not queried" },
       NOW,
     );
+
+    const result = injector.inject(undefined, new Date(NOW));
+
+    expect(result.memories.map((m) => m.memory.id)).not.toContain(nonCore.id);
+  });
+
+  it("that same non-core memory appears only once its keywords are actually queried", () => {
+    const { store, injector } = setup();
+    const nonCore = store.insertMemory(
+      { type: "active_task", title: "Giraffe task", content: "mentions a giraffe explicitly" },
+      NOW,
+    );
+
+    const withoutQuery = injector.inject(undefined, new Date(NOW));
+    expect(withoutQuery.memories.map((m) => m.memory.id)).not.toContain(nonCore.id);
+
+    const withQuery = injector.inject("giraffe", new Date(NOW));
+    expect(withQuery.memories.map((m) => m.memory.id)).toContain(nonCore.id);
+  });
+
+  it("a core-type memory is present even with no query and no keyword match", () => {
+    const { store, injector } = setup();
+    const core = store.insertMemory({ type: "identity", title: "Always in core", content: "core content" }, NOW);
+
+    const result = injector.inject(undefined, new Date(NOW));
+
+    expect(result.memories.map((m) => m.memory.id)).toContain(core.id);
+  });
+
+  it("merges FTS keyword hits into the core full-recall set, deduped by id", () => {
+    const { store, injector } = setup();
+    const core = store.insertMemory({ type: "constraint", title: "Always in core", content: "core content" }, NOW);
     const recalled = store.insertMemory(
       { type: "decision", title: "Giraffe decision", content: "mentions a giraffe explicitly" },
       NOW,
@@ -131,21 +167,23 @@ describe("ContextInjector — core + FTS5 recall merge", () => {
     expect(ids.filter((id) => id === core.id)).toHaveLength(1);
   });
 
-  it("with no query, only the core full-recall set is returned", () => {
+  it("with no query, only the core set is returned — a non-core memory with no query is excluded", () => {
     const { store, injector } = setup();
-    const memory = store.insertMemory({ type: "idea", title: "A", content: "a" }, NOW);
+    const core = store.insertMemory({ type: "identity", title: "Core", content: "always here" }, NOW);
+    store.insertMemory({ type: "idea", title: "Non-core", content: "session-scoped, no query given" }, NOW);
 
     const result = injector.inject(undefined, new Date(NOW));
 
-    expect(result.memories.map((m) => m.memory.id)).toEqual([memory.id]);
+    expect(result.memories.map((m) => m.memory.id)).toEqual([core.id]);
   });
 });
 
 describe("ContextInjector — RecallError propagates, is never swallowed into an empty result", () => {
-  it("a malformed FTS5 query string thrown by the store propagates out of inject()", () => {
+  it("a real SQLite-level recall failure propagates out of inject()", () => {
     const { store, injector } = setup();
-    store.insertMemory({ type: "idea", title: "A", content: "a" }, NOW);
+    store.insertMemory({ type: "identity", title: "A", content: "a" }, NOW);
+    (store as unknown as { db: import("better-sqlite3").Database }).db.exec("DROP TABLE memories_fts");
 
-    expect(() => injector.inject('"unterminated', new Date(NOW))).toThrow(RecallError);
+    expect(() => injector.inject("anything", new Date(NOW))).toThrow(RecallError);
   });
 });

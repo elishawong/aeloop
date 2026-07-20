@@ -8,12 +8,12 @@ last_updated: 2026-07-20
 
 > 边写边更。每批做完追加一条:做了什么 + 本地自检结果 + 可追源的证据。
 
-> **▶ 下一步(RESUME 指针)**:**B0-B10 全部完成。** A0+A1 增量 build 收官,下一步是 `/verify`(Zorro 独立审),不是新的 Cypher 批次。
+> **▶ 下一步(RESUME 指针)**:**B0-B11 全部完成。** B0-B10 是初次 build;首轮 Zorro 独立审判 **FAIL**(路径穿越安全洞 + FTS5 召回崩溃 + ContextInjector 死代码 + composer schema 硬编码 + 文档幻觉根因),B11 是修复批次,同分支 `feature/issue-1-a0-a1-scaffold` 提交。下一步是把 B11 交回 Zorro 复审,不是新的 Cypher 功能批次。
 
 ## B6-B9(Prompt 层 + 垂直切片)收尾摘要
 
 - 状态:**全部完成**,四批依序提交 + push 到 `feature/issue-1-a0-a1-scaffold`(commit `4e6ff3a`/`88852a5`/`64e8240`/`4eb97e4`)。
-- 质量门:`pnpm build`(tsc strict + noUncheckedIndexedAccess)/`pnpm lint`(tsc --noEmit)/`pnpm test`(vitest run)全绿,**96/96** 测试通过(61 既有 + 8 B6 + 6 B7... 精确分布见下方各批次条目;总计较上一段 61 条净增 35 条)。
+- 质量门:`pnpm build`(tsc strict + noUncheckedIndexedAccess)/`pnpm lint`(tsc --noEmit)/`pnpm test`(vitest run)全绿,**96/96** 测试通过(61 既有 + 18 B6 + 6 B7 + 9 B8 + 2 B9 = 96,净增 35 条;**此行数字已订正**,原文写"8 B6 + 6 B7"与下方 B6/B7 各批次条目实际数字不符,B7 的"+8"更正见该批次条目)。
 - 跨层依赖检查:`grep -n "^import" src/prompt/*.ts`(不含测试文件)确认 `composer.ts` 仅 `import type { ContextInjectionResult, InjectedMemory, InjectionWarning } from "../context/injector.js"`(输出类型)+ `Role` from `../shared/types.js`——零 import `MemoryStore`/`StalenessEngine`/`ContextInjector` 类本身,零 import harness/loop(不存在)。
 - 详情见下方 `### B6`-`### B9` 各批次条目。
 
@@ -59,7 +59,9 @@ last_updated: 2026-07-20
   - `src/index.ts` 追加 re-export `profile/loader.js` + `profile/errors.js`。
 - **⚠️ 二个坑,已现场修复,如实记录**(均记进 B1 commit message):
   1. **`@types/node` 在 pnpm 下需要显式 `"types": ["node"]`**——见 B0 记录,B1 写代码时才实际触发报错(`node:fs`/`node:path`/`node:url`/`process` 全报 `TS2591`),已在 B0 的 tsconfig 里修好,B1 直接受益。
-  2. **`js-yaml@5.x` 的 ESM 构建(`dist/js-yaml.mjs`)没有 default export,只有具名导出**(`load`/`dump`/…)。最初写成 `import yaml from "js-yaml"; yaml.load(...)`,`tsc` 类型检查竟然通过(因为 `@types/js-yaml@4.0.9` 是给 js-yaml 4.x 老 API 写的类型,还带着 default export 的类型声明,和 js-yaml 5.x 实际的 ESM 产物对不上),但**运行时** `yaml.load` 是 `undefined`(`TypeError: Cannot read properties of undefined (reading 'load')`),被 vitest 抓到——这正是"lint 过不代表真的跑得通"的活教材。**修复**:改成具名导入 `import { load as loadYaml } from "js-yaml"`。**遗留观察(标 `[?]`,未处理,不影响本段验收)**:`@types/js-yaml@4.0.9` 相对 js-yaml 5.x 可能已经过期/形状不完全匹配(js-yaml 5.x 自己在 `exports.types` 里也带了 `dist/js-yaml.d.ts`),这次只是恰好没在类型层面报错、被运行时测试兜住;要不要把 `@types/js-yaml` 从 devDependencies 里去掉、改吃 js-yaml 自带类型,留给后续增量评估,本段不动(PRD 明确要求 devDeps 含 `@types/js-yaml`,未经指挥官确认不擅自去掉)。
+  2. **`js-yaml@5.x` 的 ESM 构建(`dist/js-yaml.mjs`)没有 default export,只有具名导出**(`load`/`dump`/…)。最初写成 `import yaml from "js-yaml"; yaml.load(...)`,`tsc` 类型检查竟然通过,但**运行时** `yaml.load` 是 `undefined`(`TypeError: Cannot read properties of undefined (reading 'load')`),被 vitest 抓到——这正是"lint 过不代表真的跑得通"的活教材。**修复**:改成具名导入 `import { load as loadYaml } from "js-yaml"`。
+     **⚠️ 根因更正(Zorro 复审 `feature/issue-1-a0-a1-scaffold` 指出,`tsc --traceResolution` 实测证伪原记录,2026-07-20 补记)**:本条最初记录"`tsc` 类型检查通过是因为 `@types/js-yaml@4.0.9` 是给 js-yaml 4.x 老 API 写的类型,和 5.x 实际产物对不上"——这个归因是**错的**,未经验证就写下的猜测。真机核实(`npx tsc --noEmit --traceResolution 2>&1 | grep js-yaml`)显示:TypeScript 解析 `js-yaml` 时走的是它自己 `package.json` 的 `exports`/`types` 字段(`"types": "./dist/js-yaml.d.ts"`),**直接解析到 js-yaml 5.x 包自带的 `dist/js-yaml.d.ts`,`@types/js-yaml@4.0.9` 从头到尾没被 `tsc` 碰过一次**——`@types/js-yaml` 是彻底的死依赖,不是"旧但被用到、只是形状对不上"。`import yaml from "js-yaml"; yaml.load(...)` 之所以类型检查能通过,真正原因是 `tsconfig.json:11` 的 `"esModuleInterop": true`——这个选项允许对一个只有具名导出、没有 default export 的模块写 `import x from "..."` 语法并在类型层面合成一个默认导出,和 `@types/js-yaml` 版本新旧完全无关,js-yaml 5.x 自带的 `dist/js-yaml.d.ts`(真正被 `tsc` 使用的那份类型)同样只有具名导出(`export { ... }`),`esModuleInterop` 才是让这行代码"类型检查过但运行时崩"的唯一原因。
+     **处理(本条 B1 遗留 `[?]` 已收敛,不再是遗留项)**:`@types/js-yaml` 是从未被使用的死依赖,已 `pnpm remove @types/js-yaml`(devDependencies 去掉这一项);`pnpm build`/`pnpm lint`/`pnpm test` 去掉后仍全绿(js-yaml 5.x 自带类型顶上,无需它)。PRD §5 devDeps 清单同步去掉 `@types/js-yaml` 这一条(见 PRD.md 改动)。
 - 本地自检:`pnpm run build`(`tsc -p tsconfig.build.json`,`dist/` 只有 `index`/`shared/types`/`profile/{errors,loader}` 六组文件,无测试文件泄进去)→ `pnpm run lint`(`tsc --noEmit`,含测试文件类型检查,无报错)→ `pnpm run test`(`vitest run`,**9/9 通过**:helix 正常加载、`AI_AGENT_PROFILE` 未设默认 helix、verity 缺席返回类型化结果、通用缺失 profile 目录场景、YAML 语法错误抛类型化错误、非 mapping 根抛类型化错误、`${ENV}` 已设值替换、`${ENV}` 未设值保留占位符、`substituteEnvPlaceholders` 递归单测)。
 - `git status` 确认:`profiles/verity/` 未被误建(本增量完全没创建它),`.gitignore` 对 `dist/`/`node_modules/` 生效(`git status --ignored` 确认)。
 
@@ -123,7 +125,7 @@ last_updated: 2026-07-20
   - `resolvePersonaPath(role, personasDir)` + `loadPersona(role, personasDir)`:纯字符串键查找 `<personasDir>/<role>.md`,**零 `if role === ...` 分支**(DESIGN §1.7)——`personas/` 目录本身就是角色 registry,加角色只需落一个新 `.md` 文件,不改这个 loader 的代码。`personasDir` 是显式参数(不隐式耦合 profile),延续 `store.ts`(显式 `dbPath`)/`profile/loader.ts`(显式 `profilesRoot`)已有的模式。
   - `PersonaNotFoundError`(role + personaPath):文件缺失时的类型化错误,不裸抛 `ENOENT`。
 - **必修项断言点**(角色 persona 文件缺失路径,PRD §8):`describe("loadPersona — missing persona file...")` 两条 `it`——① 目录存在但目标角色 `.md` 缺失;② 整个 `personasDir` 目录都不存在。均断言 `instanceof PersonaNotFoundError` + `.role`/`.personaPath` 字段正确。另有一条"动态加载任意新角色,只需落文件不改代码"的针对性测试(临时目录写一个 `reviewer.md`,验证零代码改动即可加载)。
-- 本地自检:`pnpm build`/`pnpm lint` 无报错;`pnpm test`:**+8 条新增**(真实 helix coder/tester persona 加载 2 条 + 动态新角色 1 条 + 缺失路径 2 条 + `resolvePersonaPath` 单测 1 条,共细分见测试文件)。
+- 本地自检:`pnpm build`/`pnpm lint` 无报错;`pnpm test`:**+6 条新增**(真实 helix coder/tester persona 加载 2 条 + 动态新角色 1 条 + 缺失路径 2 条 + `resolvePersonaPath` 单测 1 条 = 6,共细分见测试文件)。**订正(Zorro 复审指出)**:本条原写"+8 条新增",与自己枚举的 2+1+2+1=6 及 `personas.test.ts` 实际 `it()` 数不符,已改正为 6(B10/顶部摘要处同步订正)。
 
 ### B8 — prompt/composer.ts(PromptComposer)+ composer.test.ts
 - 状态:完成
@@ -151,7 +153,7 @@ last_updated: 2026-07-20
 
 ### B10 — 打包配置核实 + 文档回写(A0+A1 收官)
 - 状态:完成
-- commit:待本批 commit(文档回写 + PRD §8 打钩,无 `src/` 代码改动)
+- commit:`b6a6cd1` — `docs(a0-a1): B10 — verify packaging config, wrap up A0+A1 build docs`(**订正**:本行原写"待本批 commit",该状态在这条已经落盘提交之后未回写,已改为真实 commit hash)
 - 做了什么:
   - **第 0 步(先做)**:`git merge origin/main`(把 main 上 `a6b8efe` 文档修复——CLAUDE.md §2 技术栈表 + `.claude/skills/run/SKILL.md` 的 npm→pnpm——并进 feature 分支)。**零冲突**(feature 分支未碰过这两个文件),`git log origin/main --oneline feature/issue-1-a0-a1-scaffold..origin/main` 核实合并前只落后这一个 commit。merge 后 `grep -n -i "npm\|pnpm" CLAUDE.md .claude/skills/run/SKILL.md` 确认继承的 pnpm 措辞已在 feature 分支生效。
   - **打包配置核实(PRD §8 倒数第二条)**:`package.json` 无 `.npmignore`(`files` 字段单独生效,B0 已落好 `profiles/*/personas/**/*.md` + `profiles/*/config.yaml`)。用 `pnpm pack` 实打一个 tarball,`tar -tzf aeloop-0.0.1.tgz | sort` 核实:① `package/profiles/helix/personas/{coder,tester}.md` + `package/profiles/helix/config.yaml` 确实在包内,`pnpm add -g` 会分发到位;② `package/dist/**` 只有 `.js`/`.d.ts`/`.js.map`,**零** `*.test.*` 文件泄漏。验证完 `rm -f aeloop-0.0.1.tgz`,`git status --short` 确认无残留。**结论:无需改动,B0 的打包配置已经是对的。**
@@ -163,6 +165,42 @@ last_updated: 2026-07-20
   - `pnpm test`(`vitest run`)—— **10 test files / 96 tests 全部 passed**,与 B9 收尾时的 96/96 一致(B10 未新增/删除任何 `src/` 测试)。
   - `git status --short` 确认工作区干净;`find dist -name "*.test.*"` 空;`profiles/verity/` 未被误建(`ls profiles/` 只有 `helix/`);`git check-ignore -v profiles/verity/anything` 命中 `.gitignore:16`,规则生效。
 - **A0+A1 增量 build 收官**:B0-B10 全部完成,分支 `feature/issue-1-a0-a1-scaffold` 已推送到 `origin`,下一步交 Zorro `/verify` 独立审。
+
+### B11 — Zorro 首轮复审 FAIL 返工(安全洞 + FTS5 崩溃 + 死代码 + composer 硬编码 + 文档幻觉)
+- 状态:完成,同分支 `feature/issue-1-a0-a1-scaffold` 顺序提交(每条阻塞项独立 commit,见下方逐条)。
+- **背景**:Zorro(Codex 独立引擎)对 B0-B10 判 **FAIL**,五条阻塞项(路径穿越、FTS5 召回崩溃、ContextInjector 死代码、composer schema 硬编码、progress.md 根因幻觉)+ 两条建议改。本批逐条修复,交回 Zorro 复审。
+- **① 路径穿越 → 本地文件外泄(安全,最高优先)**:
+  - 根因:`src/prompt/personas.ts`(`loadPersona`)和 `src/profile/loader.ts`(`loadProfile`)把外部传入的 `role`/`profile` 字符串直接 `path.join` 进文件路径再读取,无 containment 检查。**真机复现**(修复前):`loadPersona("../../../CLAUDE", "./profiles/helix/personas")` 返回仓库根 `CLAUDE.md` 的完整内容(`node --experimental-strip-types` 实测,见本轮修复过程记录)。
+  - 修法:新增 `src/shared/safe-path.ts`(两层防御,`personas.ts`/`loader.ts` 共用):① `isSinglePathSegment`——拒绝含 `/`、`\`、`..`、绝对路径的输入;② `isContainedRealpath`——`fs.realpathSync` 解析后二次核验最终路径仍在 `personasDir`/`profilesRoot` 内(防符号链接逃逸)。`personas.ts` 新增 `InvalidRoleNameError`,`profile/errors.ts` 新增 `InvalidProfileNameError`,均在触碰文件系统前抛出。
+  - 断言点:`personas.test.ts`/`loader.test.ts` 各新增一组"path traversal is blocked"测试——① 真实复现原 exploit 字符串(`"../../../CLAUDE"`)现在抛 `InvalidRoleNameError`/`InvalidProfileNameError`;② 更深层遍历、绝对路径、反斜杠、裸 `..`;③ `"..%2F..%2Fsecrets"` 这类 URL 编码字符串证明是惰性的(没有解码逻辑,不构成穿越,落到正常的"未找到"路径);④ 符号链接逃逸(`symlinkSync` 真实建软链指向临时目录外的秘密文件,验证被挡)。`src/shared/safe-path.test.ts`(新增)对两个底层函数本身也做了直接单测。
+- **② 正常任务文本让 FTS 召回崩**:
+  - 根因:`MemoryStore.searchMemories(query)` 把调用方文本原样传给 FTS5 `MATCH`,连字符(`retry-backoff`)、`C++` 等常见文本触发 FTS5 语法错误。
+  - 修法:`store.ts` 新增 `toSafeFtsQuery`——按空白分词、丢弃无字母数字的词、每词转成 quoted phrase(内部 `"` 双写转义)、空格连接(FTS5 隐式 AND)。空/纯标点输入直接短路返回 `[]`,不打 DB。真正的 DB 级错误(如 `memories_fts` 表被删)仍包成 `RecallError` 抛出,不吞。
+  - 断言点:`store.test.ts` 新增一组"natural-language query safety"测试——连字符词、`C++`、含标点的完整自然语句(与目标记忆内容共享全部 token,验证 AND 语义下召回仍生效)、原本会报错的 `'"unterminated phrase'` 现在惰性通过、空/纯标点查询返回 `[]`。原来的"RecallError trigger path"测试改为真实 DB 错误路径(`DROP TABLE memories_fts`)触发,不再依赖已被修复的语法错误。
+- **③ ContextInjector 的 FTS 召回是死代码 + 测试摆样子**:
+  - 根因:`inject()` 的"核心记忆"曾是 `store.listMemories()`(全表),FTS5 召回结果永远是其子集,merge 分支零贡献;`injector.test.ts` 的 merge 断言恒真。
+  - 修法:`injector.ts` 新增 `CORE_MEMORY_TYPES`(`identity`/`constraint`/`decision`——Zorro 复审原文举例的"永远要"类型,已在代码注释标注为实现层选择、非规格事实),`inject()` 的核心集合改为按类型过滤,非核心类型只在被 `query` 实际召回时才出现。
+  - 断言点:`injector.test.ts` 重写"core vs. recalled"一组测试——① 非核心、未被 query 命中的记忆在无 query 时**缺席**;② 同一条记忆在 query 命中后才出现;③ 核心类型记忆无 query 也存在;④ merge 去重测试改用真核心类型。`context-prompt.e2e.test.ts` 两条测试都改用真实含连字符任务文本(`"Explain the retry-backoff strategy."` / `"Review the retry-backoff change before merging."`)过 `inject()`,不再用 `inject(undefined)` 绕开。
+- **④ PromptComposer 硬编码 `{coder,tester}` schema 映射**:
+  - 根因:`OUTPUT_SCHEMAS` 是 `composer.ts` 内部私有常量,未知角色静默省略 Output Schema 小节,违反 DESIGN §1.7 的"按角色名动态查 registry"精神(和 persona loader 的动态查找不对称)。
+  - 修法:新增 `src/prompt/schema-registry.ts`(`SchemaRegistry` 类型 = `Record<string, z.ZodType | null>`、`DEFAULT_OUTPUT_SCHEMAS`、`SchemaNotRegisteredError`)。`PromptComposer` 构造函数新增可选 `schemas` 参数(默认 `DEFAULT_OUTPUT_SCHEMAS`,不破坏既有调用方)。角色完全不在 registry 里 → 抛 `SchemaNotRegisteredError`(不静默);角色显式注册为 `null` → 视为"故意不要结构化输出",省略小节但不报错(区分"没接线"和"故意不要")。
+  - 断言点:`composer.test.ts` 新增/改写——① 显式 `null` 注册仍省略小节;② 完全未注册的角色抛 `SchemaNotRegisteredError`;③ 通过自定义 registry(`{...DEFAULT_OUTPUT_SCHEMAS, reviewer: ReviewerOutput}`)注册新角色 schema,零改 `composer.ts` 即生效。
+- **⑤ progress.md 错误根因(幻觉门)+ 删死依赖**:
+  - 根因:B1 条目原写"`tsc` 类型检查通过是因为 `@types/js-yaml@4.0.9` 是给 js-yaml 4.x 老 API 写的类型,和 5.x 实际产物对不上"——这是**未经验证的猜测**。真机核实(`npx tsc --noEmit --traceResolution 2>&1 | grep js-yaml`)证明 `tsc` 解析 `js-yaml` 走的是包自身 `package.json` 的 `"types": "./dist/js-yaml.d.ts"`,`@types/js-yaml@4.0.9` 从未被 `tsc` 碰过——是彻底的死依赖。`import yaml from "js-yaml"; yaml.load(...)` 类型检查能过的真正原因是 `tsconfig.json:11` 的 `"esModuleInterop": true`(允许对纯具名导出模块合成默认导入),和 `@types/js-yaml` 新旧无关。
+  - 修法:`pnpm remove @types/js-yaml`;`pnpm build`/`pnpm lint`/`pnpm test` 复跑确认去掉后仍全绿(js-yaml 5.x 自带类型顶上)。progress.md B1 条目 + PRD §5 devDeps 清单同步订正(去掉 `@types/js-yaml` 的要求 + 补记根因订正)。
+  - 顺手订正的其他文档幻觉/残留(同属本条"文档对账"范畴):B7 测试计数(顶部摘要 + B7 条目原写"+8",实为 6,与自己枚举的 2+1+2+1 求和矛盾,已订正为 6);B10 commit 状态(原写"待本批 commit",该文档在提交之后未回写,已补真实 hash `b6a6cd1`);PRD §9 的 `[?]` 1-5 项(已由 §9.0 指挥官批复收敛为定案,原 `[?]` 标记是文档未回写的残留,已改标"[已定案]"并注明出处)。
+- **🟡 建议改(本轮一并修)**:
+  - `profile/loader.ts`:新增 `assertProfileConfigShape`——`ProfileConfig` 返回 `ok:true` 前校验 `profile`(字符串)/`providers`(mapping)/`roles`(mapping)三个必需顶层字段存在且类型正确,缺失/类型错 → `ProfileConfigParseError`;替换了原来直接 `as ProfileConfig` 裸类型断言。`loader.test.ts` 新增 5 条测试(缺 `profile`/`providers`/`roles` 各一条 + `providers` 类型错一条 + 真实 helix profile 仍能过的 sanity check)。
+  - `confirmation.test.ts` 新增 `correct() -> reject()` 边界测试:锁定"reject 保留最后一次 correct() 写入的 confirmedAt/confirmedBy"这个此前只被"confirm→reject"路径覆盖过的行为,现在补上"correct→reject"路径,防止未来重构悄悄改掉这个有争议的元数据设计决策。
+- **本地自检(最终全量质量门,真机跑)**:
+  - `pnpm build`(`tsc -p tsconfig.build.json`)—— 无报错。
+  - `pnpm lint`(`tsc --noEmit`)—— 无报错。
+  - `pnpm test`(`vitest run`)—— **11 test files / 139 tests 全部 passed**(较 B10 收尾 96/96 净增 43 条,逐文件 `it()` 数量核对——`safe-path.test.ts`:新文件 +11;`personas.test.ts`:6→13(+7);`loader.test.ts`:9→21(+12);`store.test.ts`:19→25(+6);`injector.test.ts`:9→13(+4,重写而非纯新增);`composer.test.ts`:9→11(+2);`confirmation.test.ts`:11→12(+1);合计 11+7+12+6+4+2+1=43。`pnpm exec vitest run --reporter=json` 实测总数核对一致)。
+  - `pnpm pack` + `tar -tzf aeloop-0.0.1.tgz`:`profiles/helix/{config.yaml,personas/*.md}` 在包内,`dist/` 新增的 `shared/safe-path.*`/`prompt/schema-registry.*` 编译产物齐全,零 `*.test.*` 泄漏;验证完 `rm -f aeloop-0.0.1.tgz`。
+  - 跨层反向依赖复核:`grep -n "^import" src/context/*.ts src/prompt/*.ts src/profile/*.ts` 排除测试文件后,新增的 `../shared/safe-path.js` 引用属层内共享工具(不算反向依赖),零命中 `harness`/`loop`;`composer.ts` 对 `../context/injector.js` 仍是纯 type-only import。
+  - `src/index.ts` barrel 补齐 `shared/safe-path.js` + `prompt/schema-registry.js` 两个新模块的 re-export,`pnpm build` 确认无命名冲突。
+  - `git status --short` / `find dist -name "*.test.*"` / `profiles/verity/` 未被误建,均复核通过。
+- **交回**:本批修复已 push 到 `feature/issue-1-a0-a1-scaffold`,交回 Zorro 复审(非新的 Cypher 功能批次)。
 
 ## 决策记录(可追源)
 - 2026-07-20:包管理器从 npm 切到 **pnpm**(军师本轮口径更正,mid-task 消息)。B0 起未产生任何 npm 遗留物(`package-lock.json`/扁平 `node_modules`)——package.json 写好后先切到 pnpm 才跑的第一次 `install`,无需清理。lockfile = `pnpm-lock.yaml`。

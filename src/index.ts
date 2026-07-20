@@ -6,6 +6,7 @@
  * (see docs/DESIGN.md §8 milestones A2-A5).
  */
 export * from "./shared/types.js";
+export * from "./shared/safe-path.js";
 export * from "./profile/loader.js";
 export * from "./profile/errors.js";
 export * from "./context/types.js";
@@ -16,5 +17,6 @@ export * from "./context/staleness.js";
 export * from "./context/confirmation.js";
 export * from "./context/injector.js";
 export * from "./prompt/schema.js";
+export * from "./prompt/schema-registry.js";
 export * from "./prompt/personas.js";
 export * from "./prompt/composer.js";

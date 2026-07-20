@@ -126,6 +126,34 @@ describe("ConfirmationService.reject()", () => {
     expect(() => service.reject(999, "elisha", NOW)).toThrow(MemoryNotFoundError);
     expect(store.getConfirmationsForMemory(999)).toEqual([]);
   });
+
+  it("correct() -> reject(): preserves the confirmed_at/confirmed_by set by the prior correct(), not wiped by reject() (locks the documented, disputable behavior — Zorro review suggestion, protects against silent drift)", () => {
+    const { store, service } = setup();
+    const memory = store.insertMemory({ type: "idea", title: "T", content: "original" }, NOW);
+
+    const corrected = service.correct(memory.id, "corrected content", "elisha", NOW);
+    expect(corrected.confidenceState).toBe("confirmed"); // correct() also confirms, per class doc
+    expect(corrected.confirmedAt).toBe(NOW);
+    expect(corrected.confirmedBy).toBe("elisha");
+
+    const rejected = service.reject(memory.id, "zorro", LATER);
+
+    expect(rejected.confidenceState).toBe("rejected");
+    expect(rejected.content).toBe("corrected content"); // reject() never touches content
+    // The disputed behavior this test locks down: reject() preserves the
+    // confirmed_at/confirmed_by written by the *preceding correct() call*
+    // — not just a preceding confirm() (already covered above) — because
+    // correct() itself sets those same two columns as part of "a
+    // correction is itself an act of confirming the corrected text"
+    // (confirmation.ts class doc).
+    expect(rejected.confirmedAt).toBe(NOW);
+    expect(rejected.confirmedBy).toBe("elisha");
+
+    const history = store.getConfirmationsForMemory(memory.id);
+    expect(history).toHaveLength(2);
+    expect(history[0]).toMatchObject({ action: "correct", actor: "elisha" });
+    expect(history[1]).toMatchObject({ action: "reject", actor: "zorro", oldContent: "corrected content" });
+  });
 });
 
 describe("ConfirmationService — transaction atomicity (PRD §8 acceptance criterion)", () => {

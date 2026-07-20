@@ -94,7 +94,7 @@
 ## 5. 逐文件任务清单
 
 ### A0 脚手架
-- `package.json` — deps:`zod`、`js-yaml`、SQLite 驱动(见 §9 `[?]` DB 驱动选型);devDeps:`typescript`、`vitest`、`@types/node`、`@types/js-yaml`(+ DB 驱动对应 `@types/*` 如需要)。scripts:`build`(`tsc -p tsconfig.build.json` —— B0 已落 `tsconfig.build.json`,排除 `*.test.ts` 使测试产物不进 `dist/` 污染分发,对齐 §8.5#8)、`test`(`vitest run`)、`test:watch`、`lint`(`tsc --noEmit`,含测试文件类型检查)。包管理器 pnpm。
+- `package.json` — deps:`zod`、`js-yaml`、SQLite 驱动(§9.0#1 已定案:`better-sqlite3`);devDeps:`typescript`、`vitest`、`@types/node`(+ DB 驱动对应 `@types/*` 如需要)。**不含 `@types/js-yaml`**(Zorro 复审 `feature/issue-1-a0-a1-scaffold` 发现:`tsc --traceResolution` 实测证明 TypeScript 从未解析这个包——js-yaml 5.x 自带 `dist/js-yaml.d.ts` 并通过自身 `package.json` 的 `exports`/`types` 字段被直接使用,`@types/js-yaml` 是彻底的死依赖;已 `pnpm remove @types/js-yaml`,`pnpm build`/`pnpm lint`/`pnpm test` 去掉后仍全绿,详见 progress.md B1 条目的根因订正)。scripts:`build`(`tsc -p tsconfig.build.json` —— B0 已落 `tsconfig.build.json`,排除 `*.test.ts` 使测试产物不进 `dist/` 污染分发,对齐 §8.5#8)、`test`(`vitest run`)、`test:watch`、`lint`(`tsc --noEmit`,含测试文件类型检查)。包管理器 pnpm。
 - `tsconfig.json` — `strict: true`、`noUncheckedIndexedAccess: true`、`target`/`module` 对齐 Node v24(ESM 优先,`[?]` 需确认 CommonJS vs ESM,见 §9)、`outDir: dist`、`rootDir: src`。
 - `vitest.config.ts` — 基本配置,`include: ['src/**/*.test.ts']`。
 - `.env.example` — `LITELLM_BASE_URL=` / `LITELLM_TOKEN=`(仅 verity profile 用到,helix 本增量不需要真实值)、`AI_AGENT_PROFILE=helix`。
@@ -128,6 +128,20 @@
 
 ### 构建/分发相关(DESIGN §8.5 #8)
 - 确认 `package.json` 的 `files` 字段(或 `.npmignore`)包含 `profiles/*/personas/**/*.md`,使 `pnpm add -g` 安装时 persona 文本随包分发。**结构性说明**:aeloop 目标文件结构里 personas 位于顶层 `profiles/`、不在 `src/` 下,tsc 编译不会处理它们,所以 Verity 那种"dist 不拷 .md"问题在 aeloop 目录结构下**不会以相同形式重现**;本增量只需确认打包配置正确即可,不需要额外的构建期拷贝脚本。若 §9 `[?]`(ESM/CJS、driver 选型)决定引入构建工具链变化,届时重新核实此结论。
+
+### Zorro 复审修复(2026-07-20,同分支 `feature/issue-1-a0-a1-scaffold` 第二轮,B0-B10 之后)
+> 首轮 Zorro 独立审判 FAIL,以下是修复本身新增/改动的文件清单,补记进 §5 供后续读者追溯(原 B0-B10 逐文件清单已完成,不回改,这里只加增量)。
+- `src/shared/safe-path.ts`(新增)+ `src/shared/safe-path.test.ts`(新增)—— `isSinglePathSegment`/`isContainedRealpath` 两层路径穿越防御,`src/prompt/personas.ts`(`loadPersona`)与 `src/profile/loader.ts`(`loadProfile`)共用。
+- `src/prompt/personas.ts` —— 新增 `InvalidRoleNameError`,`loadPersona` 在触碰文件系统前先做路径安全校验。
+- `src/profile/errors.ts` —— 新增 `InvalidProfileNameError`。
+- `src/profile/loader.ts` —— `loadProfile` 同样接入路径安全校验;新增 `assertProfileConfigShape`(必需顶层字段 `profile`/`providers`/`roles` 最小校验,替换裸 `as ProfileConfig`)。
+- `src/context/store.ts` —— 新增 `toSafeFtsQuery`(FTS5 关键词安全转义:按空白分词 + 逐词转 quoted phrase),`searchMemories` 改吃安全转义后的查询串。
+- `src/context/injector.ts` —— 新增 `CORE_MEMORY_TYPES`(`identity`/`constraint`/`decision`),`inject()` 的"核心全量"改为按类型过滤而非全表扫描,让 FTS5 召回分支真正生效。
+- `src/prompt/schema-registry.ts`(新增)—— `SchemaRegistry`/`DEFAULT_OUTPUT_SCHEMAS`/`SchemaNotRegisteredError`,把角色→schema 映射从 `composer.ts` 内部硬编码搬出为外部可注入 registry。
+- `src/prompt/composer.ts` —— `PromptComposer` 构造函数新增可选 `schemas: SchemaRegistry` 参数;角色不在 registry 里 → 抛 `SchemaNotRegisteredError`(替代原来的静默省略)。
+- `src/context-prompt.e2e.test.ts` —— 两条测试都改用真实含连字符的任务文本(`"Explain the retry-backoff strategy."` 等)喂给 `inject()`,不再用 `inject(undefined)` 绕开 FTS5 召回路径。
+- `package.json` —— `pnpm remove @types/js-yaml`(死依赖,详见本文件"依赖"小节 + progress.md B1 条目根因订正)。
+- 对应测试文件(`personas.test.ts`/`loader.test.ts`/`store.test.ts`/`injector.test.ts`/`composer.test.ts`/`confirmation.test.ts`)均补充/重写了对抗性断言,详见 progress.md 新增的 B11 条目。
 
 ## 6. 批次拆解
 
@@ -183,15 +197,15 @@
 - Node v24(已确认本机 `v24.1.0`,与 `CLAUDE.md` §2 一致)。
 - npm registry 可达(本次核实以下包当前可解析版本,供 `package.json` 版本区间参考,非锁定具体版本):`zod@4.4.3`、`js-yaml@5.2.1`、`vitest@4.1.10`、`typescript@7.0.2`、`better-sqlite3@12.11.1`。以上为 2026-07-20 当天 `npm view` 实测结果,写入 `package.json` 时用 `^` 区间而非锁死这些精确值。
 
-**风险 / `[?]` 待 spike 或指挥官确认**(逐条明确,不编造结论):
+**风险 / 历史 `[?]`(1-5 已由 §9.0 指挥官批复收敛为定案,不再是未决项 —— 保留原文字作可追源记录,标注改为「已定案」而非 `[?]`;Zorro 复审 `feature/issue-1-a0-a1-scaffold` 指出这五条早该在 §9.0 落定后同步改标,原 `[?]` 是文档未回写的残留)**:
 
-1. `[?]` **SQLite 驱动:better-sqlite3 vs node:sqlite**。已本机验证 `node:sqlite`(Node v24.1.0 内置)的 `DatabaseSync` 支持 `CREATE VIRTUAL TABLE ... USING fts5(...)` 且可正常建表(实测通过,见本次 PRD 撰写过程中的 spike:`node -e "require('node:sqlite')..."` 建 FTS5 表成功)。但 `node:sqlite` 目前仍带 `ExperimentalWarning`(实验性 API,可能变动),而 `better-sqlite3@12.11.1` 是成熟稳定的第三方原生模块。**建议**:A0/A1 用 `better-sqlite3` 作为主选(稳定、CLAUDE.md 已列为技术栈首选、"已在开发机验证可装"),`node:sqlite` 的验证结果记录在案作为未来减依赖的备选,不在本增量切换。此建议未经指挥官拍板,标 `[?]`。
-2. `[?]` **ESM vs CommonJS**。`package.json`/`tsconfig.json` 的 module 系统本次未与指挥官核实,CLAUDE.md 技术栈表未写明。建议默认 ESM(`"type": "module"` + `NodeNext` module 解析,Node v24 对 ESM 支持成熟),但需指挥官确认或在 B0 批次开工前用一次小 spike(建最小 vitest+TS ESM 项目跑通)验证 vitest/better-sqlite3 在 ESM 下无坑再定案。
-3. `[?]` **lint 工具选型**。CLAUDE.md 技术栈表未列 eslint 或其他 lint 工具;DESIGN §8.5 #8 只写"配 lint 脚本"未指定用什么。本增量默认先用 `tsc --noEmit` 作为最小静态检查(已有依赖,零新增),不引入 eslint 等未在技术栈表出现的新依赖,除非指挥官确认要加。
-4. `[?]` **`tags` 列序列化格式**。DESIGN §5 ER 图只标 `tags TEXT`,未定是 JSON 数组字符串还是逗号分隔。本增量默认 JSON 数组字符串(`JSON.stringify`/`JSON.parse`,配 try-catch),因为要支持 FTS5 关键词召回时可能需要结构化处理;此选择未经指挥官确认。
-5. `[?]` **`replaceLatest` / persona 缺失路径测试的确切语义**。军师给的必修项原文提到"加一个 replaceLatest / persona 解析测试",但 aeloop 是全新著作(Verity 源码属公司内部仓,不在本项目可见性边界内,未读取),我无法核实 Verity 侧 `replaceLatest` 的确切方法名/签名。**本增量按语义实现**:`ConfirmationService.correct()` 处理"修正一条记忆的最新内容"这个动作,并补两条测试(有既有 `memory_confirmations` 记录时 / 该记忆是首次被确认、无既有记录时);persona loader 补"角色文件缺失"路径测试。具体方法命名以本仓 A1 实现为准,不强行照抄一个我没验证过的外部命名。
+1. **[已定案,见 §9.0#1]** SQLite 驱动:better-sqlite3 vs node:sqlite。已本机验证 `node:sqlite`(Node v24.1.0 内置)的 `DatabaseSync` 支持 `CREATE VIRTUAL TABLE ... USING fts5(...)` 且可正常建表(实测通过,见本次 PRD 撰写过程中的 spike:`node -e "require('node:sqlite')..."` 建 FTS5 表成功)。但 `node:sqlite` 目前仍带 `ExperimentalWarning`(实验性 API,可能变动),而 `better-sqlite3@12.11.1` 是成熟稳定的第三方原生模块。指挥官已批:A0/A1 用 `better-sqlite3`,`node:sqlite` 的验证结果记录在案作为未来减依赖的备选。
+2. **[已定案,见 §9.0#2]** ESM vs CommonJS。指挥官已批:ESM(`"type": "module"` + `NodeNext` module 解析)。B0 spike 实测无阻塞(见 progress.md B0 条目),未改回 CommonJS。
+3. **[已定案,见 §9.0#3]** lint 工具选型。指挥官已批:A0 只用 `tsc --noEmit`,不引 eslint;eslint 留到后续增量再补。
+4. **[已定案,见 §9.0#4]** `tags` 列序列化格式。指挥官已批:JSON 数组字符串(`JSON.stringify`/`JSON.parse`,配 try-catch),已在 `store.ts`/`errors.ts`(`MemoryTagsParseError`)落地。
+5. **[已定案,见 §9.0#5]** `replaceLatest` / persona 缺失路径测试的确切语义。指挥官已批:按语义自实现,不照抄 Verity 内网命名。`ConfirmationService.correct()` 处理"修正一条记忆的最新内容",已补齐"有既有确认记录"/"无既有确认记录"两条路径测试 + `correct()→reject()` 元数据边界测试(confirmation.test.ts,Zorro 复审本轮补充);persona loader 已补"角色文件缺失"路径测试。
 6. **风险(非 [?],是提醒)**:B2(store.ts)是本增量体量最大的单文件(建表+FTS5 触发器+CRUD+召回),建议在 B2 内部再细分小提交(建表→CRUD→FTS5 触发器→召回查询),避免一次性大改动不好审。
-7. **风险**:垂直切片测试(B9)是整个增量能否通过 Zorro 审的关键项,必须真实种子数据跑真实 SQLite 文件(或内存 db),不能 mock 掉 `ContextInjector`/`PromptComposer` 之间的调用来"造出"通过的假象——这正是 DESIGN §8.5 点名的方法论警示,Zorro 审查时会重点对抗式核这条。
+7. **风险**:垂直切片测试(B9)是整个增量能否通过 Zorro 审的关键项,必须真实种子数据跑真实 SQLite 文件(或内存 db),不能 mock 掉 `ContextInjector`/`PromptComposer` 之间的调用来"造出"通过的假象——这正是 DESIGN §8.5 点名的方法论警示,Zorro 审查时会重点对抗式核这条。**Zorro 首轮复审(2026-07-20)实测抓到 B9 走的是 `inject(undefined)`(绕开了真实 FTS5 召回路径)+ `ContextInjector` 的"核心全量"当时等于全表扫描(FTS5 召回分支是死代码)两个问题,均已在本轮修复(见 `injector.ts` 的 `CORE_MEMORY_TYPES` + `context-prompt.e2e.test.ts` 改用真实含连字符任务文本过 `inject()`)——印证本条风险提醒本身是准的。**
 
 ## 10. 项目约束检查
 

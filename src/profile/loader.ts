@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { load as loadYaml } from "js-yaml";
-import { ProfileConfigParseError, ProfileNotFoundError } from "./errors.js";
+import { isContainedRealpath, isSinglePathSegment } from "../shared/safe-path.js";
+import { InvalidProfileNameError, ProfileConfigParseError, ProfileNotFoundError } from "./errors.js";
 
 /**
  * Structural shape of a profile's `config.yaml` (docs/DESIGN.md §7).
@@ -91,12 +92,31 @@ export function resolveProfileDir(profile: string, profilesRoot: string = PROFIL
  *
  * `profilesRoot` is an injection point for tests; production callers
  * should omit it and rely on the package-relative default.
+ *
+ * **Path safety** (Zorro review, feature/issue-1-a0-a1-scaffold): `profile`
+ * is checked against `../shared/safe-path.js` *before* it ever reaches
+ * `path.join` — a traversal string like `"../../../CLAUDE"` or an absolute
+ * path throws typed `InvalidProfileNameError` rather than resolving to a
+ * path outside `profilesRoot`. A second containment check after resolving
+ * catches a symlink escape too. Both checks run before any filesystem read.
  */
 export function loadProfile(
   profile: string = readProfileEnv(),
   profilesRoot: string = PROFILES_ROOT,
 ): ProfileLoadResult {
+  if (!isSinglePathSegment(profile)) {
+    throw new InvalidProfileNameError(
+      profile,
+      "profile names must be a single path segment (no '/', '\\', '..', and not an absolute path)",
+    );
+  }
+
   const profileDir = resolveProfileDir(profile, profilesRoot);
+
+  if (!isContainedRealpath(profilesRoot, profileDir)) {
+    throw new InvalidProfileNameError(profile, `resolves outside ${profilesRoot} (possible symlink escape)`);
+  }
+
   const configPath = path.join(profileDir, "config.yaml");
 
   if (!existsSync(configPath)) {
@@ -119,8 +139,51 @@ export function loadProfile(
     );
   }
 
-  const config = substituteEnvPlaceholders(parsed) as ProfileConfig;
-  return { ok: true, profile, profileDir, configPath, config };
+  const substituted = substituteEnvPlaceholders(parsed);
+  assertProfileConfigShape(substituted, profile, configPath);
+  return { ok: true, profile, profileDir, configPath, config: substituted };
+}
+
+/**
+ * Minimal required-field check before handing `parsed` off as a
+ * `ProfileConfig` (Zorro review, feature/issue-1-a0-a1-scaffold: the prior
+ * code did a bare `as ProfileConfig` cast right after confirming the YAML
+ * root is *a* mapping — a `config.yaml` missing `providers`/`roles`
+ * entirely, or with `profile` as a number, would sail through as `ok:
+ * true` with a type that lied about its own shape). This intentionally
+ * stays shallow — it checks that `profile`/`providers`/`roles` exist and
+ * have the right *outer* shape (string / mapping), not that every nested
+ * field inside `providers`/`roles` is well-formed. Full schema validation
+ * belongs to the layer that actually consumes those nested shapes (the
+ * Harness layer, A2+, per PRD §5's note that this loader "只需解析出结
+ * 构"), not this loader.
+ */
+function assertProfileConfigShape(
+  config: Record<string, unknown>,
+  profile: string,
+  configPath: string,
+): asserts config is ProfileConfig {
+  if (typeof config["profile"] !== "string") {
+    throw new ProfileConfigParseError(
+      profile,
+      configPath,
+      new Error(`missing or non-string required field "profile"`),
+    );
+  }
+  if (!isPlainObject(config["providers"])) {
+    throw new ProfileConfigParseError(
+      profile,
+      configPath,
+      new Error(`missing or non-mapping required field "providers"`),
+    );
+  }
+  if (!isPlainObject(config["roles"])) {
+    throw new ProfileConfigParseError(
+      profile,
+      configPath,
+      new Error(`missing or non-mapping required field "roles"`),
+    );
+  }
 }
 
 function readProfileEnv(): string {

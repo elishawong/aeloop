@@ -27,28 +27,11 @@ import { z } from "zod";
 import type { ContextInjectionResult, InjectedMemory, InjectionWarning } from "../context/injector.js";
 import type { Role } from "../shared/types.js";
 import { loadPersona } from "./personas.js";
-import { CoderOutput, TesterOutput } from "./schema.js";
-
-/**
- * Role → output-schema lookup, DESIGN §1.7's "按角色名动态查 registry"
- * applied to schemas the same way `personas.ts` applies it to persona
- * files: a plain keyed lookup, never an `if (role === "coder")` branch.
- * Unlike personas (one `.md` file per role, discovered from disk), there is
- * no per-role schema *file* convention in this increment — B6 defines a
- * fixed, small set of named schemas — so the registry lives here as a plain
- * object rather than a filesystem scan. A role with no entry here (a future
- * role this increment doesn't know about) isn't an error: `compose()`
- * simply omits the "Output Schema" section for it rather than throwing,
- * which keeps "add a role" from requiring an edit to this file's error
- * handling — only an addition to this map when that new role does need
- * structured-output validation.
- */
-const OUTPUT_SCHEMAS: Readonly<Record<string, z.ZodType>> = {
-  coder: CoderOutput,
-  tester: TesterOutput,
-};
+import { DEFAULT_OUTPUT_SCHEMAS, SchemaNotRegisteredError, type SchemaRegistry } from "./schema-registry.js";
 
 export class PromptComposer {
+  private readonly schemas: SchemaRegistry;
+
   /**
    * `personasDir` is an explicit parameter (typically
    * `path.join(profileLoadResult.profileDir, "personas")`), matching the
@@ -56,15 +39,32 @@ export class PromptComposer {
    * `context/store.ts` (explicit `dbPath`) and `profile/loader.ts`
    * (explicit `profilesRoot`) — this module doesn't know about
    * `profile/loader.ts` at all.
+   *
+   * `schemas` is the role → output-schema `SchemaRegistry` (see
+   * `./schema-registry.js` for why it lives outside this file), defaulting
+   * to `DEFAULT_OUTPUT_SCHEMAS` (`{coder, tester}`) so existing callers of
+   * `new PromptComposer(personasDir)` don't need to change. A caller
+   * adding a new role's schema passes its own registry
+   * (`{ ...DEFAULT_OUTPUT_SCHEMAS, reviewer: ReviewerOutput }`) without
+   * ever editing this class.
    */
-  constructor(private readonly personasDir: string) {}
+  constructor(
+    private readonly personasDir: string,
+    schemas: SchemaRegistry = DEFAULT_OUTPUT_SCHEMAS,
+  ) {
+    this.schemas = schemas;
+  }
 
   compose(role: Role, context: ContextInjectionResult, task: string): string {
     const persona = loadPersona(role, this.personasDir).trim();
 
+    if (!(role in this.schemas)) {
+      throw new SchemaNotRegisteredError(role);
+    }
+
     const sections: string[] = [`# Persona\n\n${persona}`];
 
-    const schema = OUTPUT_SCHEMAS[role];
+    const schema = this.schemas[role];
     if (schema) {
       const jsonSchema = z.toJSONSchema(schema);
       sections.push(
