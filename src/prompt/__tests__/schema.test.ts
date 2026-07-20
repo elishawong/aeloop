@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ClaimSchema, CoderOutput, TesterOutput } from "./schema.js";
+import { ClaimSchema, CoderOutput, TesterOutput } from "../schema.js";
 
 describe("ClaimSchema", () => {
   it("accepts a minimal valid claim (only the required fields)", () => {

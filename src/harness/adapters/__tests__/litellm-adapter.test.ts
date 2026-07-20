@@ -1,9 +1,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { AdapterInvokeError } from "../errors.js";
-import type { InvokeRequest } from "../types.js";
-import { LiteLLMAdapter } from "./litellm-adapter.js";
+import { AdapterInvokeError } from "../../errors.js";
+import type { InvokeRequest } from "../../types.js";
+import { LiteLLMAdapter } from "../litellm-adapter.js";
 
 /**
  * Local `node:http` fake server standing in for a LiteLLM proxy — no real

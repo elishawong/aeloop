@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { AdapterRegistry } from "./adapter-registry.js";
-import { AdapterNotRegisteredError, RoleNotBoundError } from "./errors.js";
-import { ProviderRouter } from "./provider-router.js";
-import type { AvailabilityResult, InvokeRequest, InvokeResult, ModelAdapter } from "./types.js";
-import type { RoleBinding } from "../profile/loader.js";
+import { AdapterRegistry } from "../adapter-registry.js";
+import { AdapterNotRegisteredError, RoleNotBoundError } from "../errors.js";
+import { ProviderRouter } from "../provider-router.js";
+import type { AvailabilityResult, InvokeRequest, InvokeResult, ModelAdapter } from "../types.js";
+import type { RoleBinding } from "../../profile/loader.js";
 
 function fakeAdapter(id: string): ModelAdapter {
   return {

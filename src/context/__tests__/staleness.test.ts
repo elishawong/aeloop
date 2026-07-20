@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { MemoryStore } from "./store.js";
-import { SystemConfig } from "./config.js";
-import { StalenessEngine } from "./staleness.js";
-import type { Memory } from "./types.js";
+import { MemoryStore } from "../store.js";
+import { SystemConfig } from "../config.js";
+import { StalenessEngine } from "../staleness.js";
+import type { Memory } from "../types.js";
 
 const openStores: MemoryStore[] = [];
 function setup(): { store: MemoryStore; config: SystemConfig; staleness: StalenessEngine } {

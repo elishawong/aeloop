@@ -6,8 +6,8 @@ import {
   loadProfile,
   resolveProfileDir,
   substituteEnvPlaceholders,
-} from "./loader.js";
-import { InvalidProfileNameError, ProfileConfigParseError, ProfileNotFoundError } from "./errors.js";
+} from "../loader.js";
+import { InvalidProfileNameError, ProfileConfigParseError, ProfileNotFoundError } from "../errors.js";
 
 /** Directories created per-test under the OS tmp dir, cleaned up after each. */
 const tmpDirs: string[] = [];

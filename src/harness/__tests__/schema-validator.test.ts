@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { SchemaValidationError } from "./errors.js";
-import { SchemaValidator } from "./schema-validator.js";
-import type { InvokeRequest, InvokeResult } from "./types.js";
+import { SchemaValidationError } from "../errors.js";
+import { SchemaValidator } from "../schema-validator.js";
+import type { InvokeRequest, InvokeResult } from "../types.js";
 
 const TestSchema = z.object({ ok: z.boolean(), note: z.string().min(1) });
 

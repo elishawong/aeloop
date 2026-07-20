@@ -3,11 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveProfileDir } from "../profile/loader.js";
-import type { ContextInjectionResult } from "../context/injector.js";
-import { PromptComposer } from "./composer.js";
-import { PersonaNotFoundError } from "./personas.js";
-import { DEFAULT_OUTPUT_SCHEMAS, SchemaNotRegisteredError } from "./schema-registry.js";
+import { resolveProfileDir } from "../../profile/loader.js";
+import type { ContextInjectionResult } from "../../context/injector.js";
+import { PromptComposer } from "../composer.js";
+import { PersonaNotFoundError } from "../personas.js";
+import { DEFAULT_OUTPUT_SCHEMAS, SchemaNotRegisteredError } from "../schema-registry.js";
 
 const HELIX_PERSONAS_DIR = path.join(resolveProfileDir("helix"), "personas");
 
