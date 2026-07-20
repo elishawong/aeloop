@@ -9,6 +9,8 @@
 
 import { AdapterRegistry } from "./adapter-registry.js";
 import { LiteLLMAdapter } from "./adapters/litellm-adapter.js";
+import { ClaudeCliAdapter } from "./adapters/claude-cli-adapter.js";
+import { CodexCliAdapter } from "./adapters/codex-cli-adapter.js";
 import { InvalidProviderConfigError } from "./errors.js";
 import type { ProfileConfig, ProviderConfig } from "../profile/loader.js";
 
@@ -64,15 +66,19 @@ function assertValidProviderConfig(
  *
  * - `"direct-api"` → `LiteLLMAdapter` (the only direct-api adapter this
  *   increment knows how to build).
- * - `"cli-bridge"` → **explicitly skipped**. A3 adds the
- *   `ClaudeCliAdapter`/`CodexCliAdapter` construction branch here — this
- *   increment neither errors nor fabricates a placeholder adapter for a
- *   cli-bridge provider id.
+ * - `"cli-bridge"` → dispatches on `providerConfig.cmd` (A3, PRD §5):
+ *   `"claude"` → `ClaudeCliAdapter`, `"codex"` → `CodexCliAdapter`. An
+ *   unrecognized `cmd` value throws `InvalidProviderConfigError` — same
+ *   "surfaced as a typed error, not a silent no-op" posture as the
+ *   unrecognized-`kind` `default` branch below.
  *
- * Running this against the real `profiles/subscription/config.yaml` (both of its
- * providers are `cli-bridge`) is expected to return an **empty**
- * `AdapterRegistry` — that's the predicate `config.test.ts` pins down, not
- * a bug to "fix" by adding a placeholder branch later.
+ * Running this against the real `profiles/subscription/config.yaml` (both
+ * of its providers are `cli-bridge`, `cmd: claude` / `cmd: codex`) now
+ * returns a **populated** `AdapterRegistry` with both adapters — A2 pinned
+ * down the opposite behavior (empty registry) as the *expected* placeholder
+ * state for that increment; A3 deliberately supersedes that assertion here
+ * now that the construction branch is real (see `config.test.ts`'s updated
+ * test and its comment for the full "this is not a regression" account).
  */
 export function buildAdapterRegistry(config: ProfileConfig): AdapterRegistry {
   const registry = new AdapterRegistry();
@@ -90,10 +96,21 @@ export function buildAdapterRegistry(config: ProfileConfig): AdapterRegistry {
           }),
         );
         break;
-      case "cli-bridge":
-        // A3 补 ClaudeCliAdapter/CodexCliAdapter 的构造分支于此 —— 本增量
-        // 显式跳过,不报错、不造一个假 adapter (PRD §5)。
-        break;
+      case "cli-bridge": {
+        const cmd = providerConfig.cmd;
+        if (cmd === "claude") {
+          registry.register(new ClaudeCliAdapter(id, { cmd }));
+          break;
+        }
+        if (cmd === "codex") {
+          registry.register(new CodexCliAdapter(id, { cmd }));
+          break;
+        }
+        throw new InvalidProviderConfigError(
+          id,
+          `cli-bridge provider "cmd" must be "claude" or "codex", got ${JSON.stringify(cmd)}`,
+        );
+      }
       default:
         // Unrecognized `kind` used to fall through this switch silently —
         // no adapter registered, no error, no log: an invisible no-op a
