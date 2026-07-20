@@ -8,7 +8,14 @@ last_updated: 2026-07-20
 
 > 边写边更。每批做完追加一条:做了什么 + 本地自检结果 + 可追源的证据。
 
-> **▶ 下一步(RESUME 指针)**:B6 —— `src/prompt/schema.ts`(zod:`ClaimSchema`/`CoderOutput`/`TesterOutput`)+ `schema.test.ts`。B6 不依赖 Context 层(PRD §6:"B6 不依赖 Context,理论上可与 B2-B5 并行开发"),可独立开工。之后依序 B7(persona loader)→B8(PromptComposer,依赖 B5+B6+B7)→B9(硬性垂直切片端到端测试)。见 PRD §5 A1 Prompt 层 / §6 批次拆解。
+> **▶ 下一步(RESUME 指针)**:B10 —— 打包配置核实(`package.json` `files`/`.npmignore` 含 `profiles/*/personas/**/*.md`,已在 B0 落好,B10 只需复核)+ README/CLAUDE.md 打钩更新 + `docs/ROADMAP.md`/`docs/PROGRESS.md`/`CHANGELOG.md` 回写。B0-B9 全部完成,A0+A1 只剩 B10 这一个收尾批次。见 PRD §5 构建/分发相关 / §6 批次拆解。
+
+## B6-B9(Prompt 层 + 垂直切片)收尾摘要
+
+- 状态:**全部完成**,四批依序提交 + push 到 `feature/issue-1-a0-a1-scaffold`(commit `4e6ff3a`/`88852a5`/`64e8240`/`4eb97e4`)。
+- 质量门:`pnpm build`(tsc strict + noUncheckedIndexedAccess)/`pnpm lint`(tsc --noEmit)/`pnpm test`(vitest run)全绿,**96/96** 测试通过(61 既有 + 8 B6 + 6 B7... 精确分布见下方各批次条目;总计较上一段 61 条净增 35 条)。
+- 跨层依赖检查:`grep -n "^import" src/prompt/*.ts`(不含测试文件)确认 `composer.ts` 仅 `import type { ContextInjectionResult, InjectedMemory, InjectionWarning } from "../context/injector.js"`(输出类型)+ `Role` from `../shared/types.js`——零 import `MemoryStore`/`StalenessEngine`/`ContextInjector` 类本身,零 import harness/loop(不存在)。
+- 详情见下方 `### B6`-`### B9` 各批次条目。
 
 ## B2-B5(Context 层)收尾摘要
 
@@ -100,6 +107,48 @@ last_updated: 2026-07-20
 - 本地自检:`pnpm build`/`pnpm lint`/`pnpm test` 全绿,**61/61 通过**(新增 9 条:上述滤 rejected 2 条 + stale/unconfirmed 保留带警告 4 条(含双重命中优先级)+ 核心/召回合并去重 2 条 + RecallError 穿透 1 条)。
 - **跨层反向依赖检查**:`grep -rn "^import" src/context/*.ts` 逐行核对,全部命中要么是 `./`(context 内部)要么是 `../shared/types.js`,零命中 `../prompt`/`../harness`/`../loop`。`dist/` 未被 track(`git ls-files | grep '^dist/'` 空)。
 
+### B6 — prompt/schema.ts(ClaimSchema/CoderOutput/TesterOutput,zod)+ schema.test.ts
+- 状态:完成
+- commit:`4e6ff3a` — `feat(prompt): B6 — ClaimSchema/CoderOutput/TesterOutput (zod)`
+- 做了什么:
+  - `ClaimConfidence`(`verified`/`inferred`/`unconfirmed`/`stale`,对齐 DESIGN §5 `structured_claims.confidence`)、`VerifiedBy`(`tool_execution`/`human`/`unverified`,对齐 `structured_claims.verified_by`)两个 zod enum。
+  - `ClaimSchema`:`claimText`(非空字符串)+ `confidence`(必填)+ `sourceRef`/`verifiedBy`(均可选,`sourceRef` 非空字符串)。**范围决策**(已写进文件头注释):刻意排除 `structured_claims` 里只有引擎处理完模型输出后才会有的列——`id`/`run_id`/`created_at`(持久化簿记)、`model_used`/`provider_used`(Harness 才知道跑的是哪个模型)、`tool_exec_checked`(ToolExecVerifier 事后算出的结果,A3)。剩下的 `claim_text`/`confidence`/`source_ref`/`verified_by` 正是模型能合理自报的部分,对齐 PRD §5"不含持久化列如 run_id"。
+  - `CoderOutput`(`diff` 非空字符串 + `claims: ClaimSchema[]` + 整体 `confidence`)、`TesterOutput`(`verdict: "pass"|"reject"`,对齐 DESIGN §4 状态机"通过"/"打回" + `issues: string[]`(非空字符串)+ `claims` + `confidence`),均对齐 DESIGN §3 sequence 图的 `{diff, claims[], confidence}` / `{verdict, issues[], confidence}`。
+- 本地自检:`pnpm build`/`pnpm lint` 无报错;`pnpm test`:**+18 条新增**(合法/非法输入各字段边界:缺字段、空字符串 min-length、枚举外的值、数组元素非法、`claims`/`issues` 非数组)。
+
+### B7 — prompt/personas.ts(动态角色 persona loader)+ personas.test.ts
+- 状态:完成
+- commit:`88852a5` — `feat(prompt): B7 — dynamic persona loader (role -> personas/<role>.md)`
+- 做了什么:
+  - `resolvePersonaPath(role, personasDir)` + `loadPersona(role, personasDir)`:纯字符串键查找 `<personasDir>/<role>.md`,**零 `if role === ...` 分支**(DESIGN §1.7)——`personas/` 目录本身就是角色 registry,加角色只需落一个新 `.md` 文件,不改这个 loader 的代码。`personasDir` 是显式参数(不隐式耦合 profile),延续 `store.ts`(显式 `dbPath`)/`profile/loader.ts`(显式 `profilesRoot`)已有的模式。
+  - `PersonaNotFoundError`(role + personaPath):文件缺失时的类型化错误,不裸抛 `ENOENT`。
+- **必修项断言点**(角色 persona 文件缺失路径,PRD §8):`describe("loadPersona — missing persona file...")` 两条 `it`——① 目录存在但目标角色 `.md` 缺失;② 整个 `personasDir` 目录都不存在。均断言 `instanceof PersonaNotFoundError` + `.role`/`.personaPath` 字段正确。另有一条"动态加载任意新角色,只需落文件不改代码"的针对性测试(临时目录写一个 `reviewer.md`,验证零代码改动即可加载)。
+- 本地自检:`pnpm build`/`pnpm lint` 无报错;`pnpm test`:**+8 条新增**(真实 helix coder/tester persona 加载 2 条 + 动态新角色 1 条 + 缺失路径 2 条 + `resolvePersonaPath` 单测 1 条,共细分见测试文件)。
+
+### B8 — prompt/composer.ts(PromptComposer)+ composer.test.ts
+- 状态:完成
+- commit:`64e8240` — `feat(prompt): B8 — PromptComposer (persona + schema + injected memories)`
+- 做了什么:
+  - `PromptComposer`(构造函数接受显式 `personasDir`)`.compose(role, context: ContextInjectionResult, task): string`——拼出:persona 文本(`loadPersona`)+(角色在 schema registry 里有条目时)schema 说明(`z.toJSONSchema(schema)` 序列化成 JSON,不是手写重复一份和 zod 定义可能漂移的文字说明)+ 注入的记忆(逐条渲染 `- [warning: stale|unconfirmed] 标题\n  内容`,`warning: null` 时不带标记)+ 任务描述。
+  - **schema registry**(`OUTPUT_SCHEMAS: Record<string, z.ZodType>` = `{coder: CoderOutput, tester: TesterOutput}`)——DESIGN §1.7"persona/schema 按角色名动态查 registry"的 schema 半落地:纯键查找,不是 `if role===` 分支。角色不在 registry 里(有 persona 但没结构化 schema)→ 静默省略"Output Schema"小节,不抛错(已写进类注释,标注为实现层选择:加角色不强制要求同时有 schema)。
+  - **依赖方向**(PRD §10 约束,已用 `grep` 核实):只对 `../context/injector.js` 做**类型 only** import(`ContextInjectionResult`/`InjectedMemory`/`InjectionWarning`),零 import `MemoryStore`/`StalenessEngine`/`ContextInjector` 类本身——composer 不知道记忆是怎么查出来、怎么过滤的,只认输出形状。
+  - **不重复过滤**:composer 对 `confidenceState` 完全无感,只认 injector 给的 `warning` 字段;`composer.test.ts` 里专门一条测试手工构造一个"混入 `confidenceState: 'rejected'`"的 `ContextInjectionResult`,证明 composer 依然原样渲染——过滤只在 injector 一处发生,不在两处重复/可能矛盾。
+- 本地自检:`pnpm build`/`pnpm lint` 无报错;`pnpm test`:**+9 条新增**(coder/tester 角色的 persona+schema+task+记忆渲染、warning 有/无标记、无 schema 条目角色的省略行为、未知角色 persona 缺失时 `PersonaNotFoundError` 透传、不重复过滤断言、空记忆列表渲染)。
+
+### B9 — src/context-prompt.e2e.test.ts(硬性垂直切片,A1 收尾)
+- 状态:完成
+- commit:`4eb97e4` — `test(e2e): B9 — Context -> Prompt vertical slice, no mocking across the seam`
+- 做了什么(真实数据流,零 mock 跨层调用):
+  1. **真实 `MemoryStore`**(`:memory:` 真 SQLite,非 stub)`insertMemory()` 写 3 条真实记忆:confirmed(`"aeloop uses pnpm as its package manager."`)/ unconfirmed(`"The API rate limit is believed to be 100 requests/min."`)/ rejected(`"The context store uses MySQL for persistence."`);写入后立即 `store.listMemories()` 核对 3 条真的落库,不是空跑。
+  2. **真实 `ContextInjector`**(接同一个 `store` + 真实 `StalenessEngine`/`SystemConfig`)`.inject()` —— 断言其返回值本身(不是任何加工后的副本)已滤掉 rejected、保留 confirmed/unconfirmed。
+  3. **真实 `PromptComposer`**(指向真实已提交的 `profiles/helix/personas/`)`.compose("coder", injected, "Implement the retry-backoff helper.")`——`injected` 是上一步 `injector.inject()` 的**原始返回值**直接传入,composer 内部零改造直接消费。
+  4. **断言最终 prompt 字符串**:包含 confirmed 内容(`"aeloop uses pnpm as its package manager."`,含精确格式 `"- Build tooling\n  aeloop uses..."`)、**不包含** rejected 内容(两种断言:内容原文 + 标题)、包含 unconfirmed 内容且带 `"[warning: unconfirmed] Rate limit guess"` 可见标记、包含 persona 文本(`"You are the Coder in a two-model coder/tester loop."`)、包含 schema 片段(`'"diff"'`)、包含任务描述。
+  - **第二条测试**(同一切片,走 `ConfirmationService.reject()` 而非插入时直接给 `confidenceState: "rejected"`):证明"记忆先 unconfirmed、之后经服务被拒绝"这条更真实的路径,过滤同样在端到端链路里生效,不只是插入时的捷径特例。
+  - **未 mock 任何跨层调用**:`grep` 该测试文件的 import,只有 `MemoryStore`/`SystemConfig`/`StalenessEngine`/`ContextInjector`/`PromptComposer`/`ConfirmationService`(动态 `import()`)真实类 + `resolveProfileDir` 定位真实 profile 目录,零 `vi.mock`/`vi.spyOn`。
+  - **顺手补齐**:`src/index.ts` 追加 `export * from "./prompt/{schema,personas,composer}.js"`(此前 B6-B8 各批次都专注单文件未回头补 barrel,B9 作为"全部接通"的收尾点一并补上,和 profile/context 层已有模式一致)。
+- 本地自检:`pnpm build`/`pnpm lint` 无报错(含新增 barrel export 无命名冲突,已验证 `CoderOutput` 类型+常量同名的 TS 声明合并不冲突);`pnpm test`:**全绿 96/96**(B6-B9 净增 35 条:18(B6)+6(B7)+9(B8)+2(B9)=35,61+35=96,与 vitest 实测总数一致)。
+- `git status`/`find dist -name "*.test.*"` 确认:测试文件未泄进 `dist/`,`profiles/verity/` 未被误建。
+
 ## 决策记录(可追源)
 - 2026-07-20:包管理器从 npm 切到 **pnpm**(军师本轮口径更正,mid-task 消息)。B0 起未产生任何 npm 遗留物(`package-lock.json`/扁平 `node_modules`)——package.json 写好后先切到 pnpm 才跑的第一次 `install`,无需清理。lockfile = `pnpm-lock.yaml`。
 - 2026-07-20:`build` script 用 `tsc -p tsconfig.build.json`(新增文件)而非 PRD §5 字面写的裸 `tsc`,理由见上方 B0 记录(dist 干净度)。`lint` 仍是裸 `tsc --noEmit`,未偏离。
@@ -107,3 +156,7 @@ last_updated: 2026-07-20
 - 2026-07-20(B2):FTS5 `MATCH` 条件必须用虚拟表真实名字(`memories_fts MATCH ?`),不能用 `FROM ... alias` 里的别名(`f MATCH ?` → `SqliteError: no such column: f`)。真机 spike 实测发现,非凭空假设。
 - 2026-07-20(B4):`ConfirmationService.reject()` 不清空 `memories.confirmed_at`/`confirmed_by`(保留历史确认事实),仅通过 `memory_confirmations` 审计行记录 reject 本身的 actor/时间——这是 PRD §9.0#5"按语义自实现"授权范围内的具体设计选择,未回头问指挥官(理由已写进 `confirmation.ts` 类注释,可追源)。
 - 2026-07-20(B5):`ContextInjector` 中"stale 优先于 unconfirmed"的警告优先级是实现层选择(DESIGN §3 未指定两者同时为真时如何呈现),已在 `injector.ts` 注释中明确标注为非规格事实。
+- 2026-07-20(B6):`ClaimSchema` 的字段范围是实现层选择——只保留模型能自报的部分(`claimText`/`confidence`/`sourceRef`/`verifiedBy`),排除 `structured_claims` 里 Harness/Loop 事后才填的列(`model_used`/`provider_used`/`tool_exec_checked`/`run_id`/`id`/`created_at`)。未回头问指挥官,理由已写进 `schema.ts` 文件头注释,PRD §5 措辞("不含持久化列如 run_id")本身就授权了这个范围收窄。
+- 2026-07-20(B8):角色→schema 的映射用一个 `Record<string, z.ZodType>` 常量(`OUTPUT_SCHEMAS`)而不是文件系统扫描——因为本增量的 schema(`CoderOutput`/`TesterOutput`)是 B6 定义的固定具名导出,不像 persona 走"目录即 registry"的文件约定;这是 DESIGN §1.7"按角色名动态查 registry"的字面落地(键查找,零 `if role===` 分支),但落地形态和 persona loader 不同,已在 `composer.ts` 注释中说明二者为何不对称。
+- 2026-07-20(B8):角色不在 `OUTPUT_SCHEMAS` 里(有 persona 但没结构化 schema)时,`compose()` 静默省略"Output Schema"小节而不抛错——非规格事实,是"加角色不强制同时要求 schema"这个可扩展性考量下的实现选择。
+- 2026-07-20(B9):`src/index.ts` barrel 补齐 `prompt/*` 三个模块的 re-export,放在 B9(而非各自批次)一并做——因为 B9 本身就是"证明层与层真的接通"的收尾点,顺带把 barrel 也接通,逻辑上一致;此前 B6/B7/B8 各批次专注单文件未回头补,不是遗漏,是延后到收尾批次统一处理。
