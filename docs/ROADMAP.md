@@ -20,13 +20,15 @@
 
 ## ⬜ 待办(里程碑 A0-A6,详见 DESIGN §8)
 ### A0. 脚手架
-- [ ] 新仓 src/ 骨架 + package.json + tsconfig + vitest + profile loader 空壳
+- [x] 新仓 src/ 骨架 + package.json + tsconfig + vitest + profile loader 空壳 —— B0(`c19dff3`)+ B1(`948fd24`),分支 `feature/issue-1-a0-a1-scaffold`,详见 `docs/feature/a0-a1-engine-scaffold-context-prompt/progress.md`
 
-### A1. Context + Prompt(先立防幻觉钻石)
-- [ ] ClaimSchema/CoderOutput/TesterOutput(zod)+ SchemaValidator
-- [ ] SQLite+FTS5 store(RecallError 不静默)+ StalenessEngine + ConfirmationService(三态,db.transaction 包裹)
-- [ ] ContextInjector(醒来注入 + 滤 rejected)—— Verity 未做,aeloop 补
-- [ ] persona loader(按角色名动态查 registry)+ PromptComposer
+### A1. Context + Prompt(先立防幻觉钻石)—— B2-B10 全部完成,详见 `docs/feature/a0-a1-engine-scaffold-context-prompt/progress.md`
+- [x] ClaimSchema/CoderOutput/TesterOutput(zod)—— B6(`4e6ff3a`)。SchemaValidator 留 A2(Harness 范围,不在本增量)
+- [x] SQLite+FTS5 store(RecallError 不静默)+ StalenessEngine + ConfirmationService(三态,db.transaction 包裹)—— B2(`0eea001`)+ B3(`d2af34d`)+ B4(`b24fa3f`)
+- [x] ContextInjector(醒来注入 + 滤 rejected)—— Verity 未做,aeloop 补 —— B5(`06259c9`)
+- [x] persona loader(按角色名动态查 registry)+ PromptComposer —— B7(`88852a5`)+ B8(`64e8240`)
+- [x] 硬性垂直切片测试(Context→Prompt 真接通,含 rejected 过滤断言)—— B9(`4eb97e4`)
+- [x] 打包配置核实 + 文档回写(本文件/PROGRESS/CHANGELOG/根 CLAUDE.md)—— B10;96/96 测试绿,待 Zorro 独立审(`/verify`)
 
 ### A2. Harness
 - [ ] ProviderRouter + LiteLLMAdapter + SchemaValidator 统一入口
