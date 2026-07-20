@@ -6,4 +6,5 @@
 
 ---
 
+- **2026-07-20** — DESIGN 补 §8.5「Verity M2/M3 洞 → aeloop 必修清单」:8 项 PRD 硬验收(ProviderRouter 真做 / ContextInjector 接线 / 重试喂回错误 / InvokeResult 带 provider·model / JSON.parse 包错 / HTTP 错误覆盖 / 事务+补缺列 / rejected 过滤)+ 每里程碑「垂直切片必接通」纪律。依据 Verity M2/M3 对抗式审查。
 - **2026-07-20** — 项目接入 Helix:铺项目自带层(CLAUDE / docs 体系 / aigit·run skills / .gitignore)+ 落设计权威 `docs/DESIGN.md`。src/ 引擎代码待 `/spec`→build 起(里程碑 A0-A6)。

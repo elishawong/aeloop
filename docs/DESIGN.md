@@ -434,6 +434,27 @@ workflow:
 
 ---
 
+## 8.5 Verity M2/M3 已暴露的洞 → aeloop 必修清单(PRD 验收项来源)
+
+> 依据:Verity 侧 M2/M3 对抗式审查证据(2026-07-17)。这些是 Verity clean-room 实现**连续两个里程碑没做到**的地方,aeloop 从第一天避开,PRD 把它们写成硬验收项。
+
+**⚠️ 方法论警示(最重要)**:Verity M2/M3 都是「层写完、测试绿、但没接线」—— 三层各自测试全绿,却没有胶水串起来(ContextInjector 是那瓶空瓶子)。**aeloop 每个里程碑收尾必须有一条薄垂直切片真正接通**(哪怕 mock 下游),证明胶水存在,不许只堆孤立的绿测试。
+
+| # | Verity 的洞 | aeloop 必修(验收项) | 落在 |
+|---|---|---|---|
+| 1 | ProviderRouter 不存在,LiteLLMAdapter 硬编码 provider、忽略 `RoleConfig.provider` → 实际只能用 LiteLLM | **ProviderRouter 真做**:读 `RoleConfig.provider` → 选 adapter;加 provider 零改编排代码(aeloop 天生 2+ adapter,躲不过) | A2 |
+| 2 | ContextInjector 不存在,Context→Prompt→Harness 闭环没形成 | **ContextInjector + 真闭环**是一等交付;A1 收尾要有 Context→Prompt 垂直切片跑通 | A1 |
+| 3 | SchemaValidator 重试发一模一样的请求(无助修复) | 重试**把上次校验错误喂回模型**,不是重发相同请求 | A2 |
+| 4 | InvokeResult 只有 content/httpStatus | **带 `provider`/`model`(+ aeloop 的 `tool_exec_checked`)**,审计能知道实际谁回的 | A2/A3 |
+| 5 | adapter `JSON.parse` 无 try-catch → 抛裸 SyntaxError | 包 try-catch → 统一 `AdapterInvokeError` | A2 |
+| 6 | HTTP 错误只覆盖 400;baseUrl 尾斜线 / api_key 缺失未测 | 401/403/429/5xx + 尾斜线 + api_key 缺失**都要有测试** | A2 |
+| 7 | confirmation 三方法无 `db.transaction`;memories 缺 confirmed_at/by、confirmations 缺 actor、system_config 缺 updated_at | 事务包裹 + 补齐所有缺列(对齐 §5 ER) | A1 |
+| 8 | rejected 过滤无处承担;replaceLatest/persona 缺失路径无测试;dist 不拷 .md;无 lint | ContextInjector 滤 rejected;补这些测试;build 拷 personas/*.md;配 lint 脚本 | A0/A1 |
+
+**验收总纲**:aeloop 的「完成」= 不只测试绿,而是**该里程碑的垂直切片真的接通 + 上表对应项都过**。Zorro 审时拿这张表逐条核(尤其"有没有接线"),照 Verity M3 审查那种**对抗式、真跑命令、不采信文档自我声明**的做法。
+
+---
+
 ## 9. 开工前必跑的 spike
 
 1. `[需 spike]` **codex exec 非交互模式**(A3 前置;`claude -p` 已验证,codex `--help` 空返回未验成)。
