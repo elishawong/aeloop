@@ -14,3 +14,4 @@ export * from "./context/store.js";
 export * from "./context/config.js";
 export * from "./context/staleness.js";
 export * from "./context/confirmation.js";
+export * from "./context/injector.js";
