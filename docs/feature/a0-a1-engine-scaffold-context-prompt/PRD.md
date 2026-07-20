@@ -6,7 +6,7 @@
 - **项目**:aeloop(`elishawong/aeloop`,私有仓)
 - **分支**:`feature/issue-1-a0-a1-scaffold`(单分支,批次内顺序提交 —— 理由见 §7 分支策略)
 - **优先级**:P1
-- **状态**:草稿(待 Elisha 确认)
+- **状态**:已批(2026-07-20 Elisha 批准,5 个 `[?]` 已定案 —— 见 §9.0)
 - **最后更新**:2026-07-20
 - **关联 issue**:[elishawong/aeloop#1](https://github.com/elishawong/aeloop/issues/1)(本增量)· 上游追踪 [elishawong/ai-agent#120](https://github.com/elishawong/ai-agent/issues/120)(统一引擎架构总 issue)
 - **设计权威**:`aeloop/docs/DESIGN.md`(§1.5-1.7 四层关系 / §5 DB schema / §6 文件结构 / §8 里程碑 / §8.5 必修清单)
@@ -171,6 +171,13 @@
 - [ ] `docs/ROADMAP.md` 对应 A0/A1 勾选项更新、`docs/PROGRESS.md` 清空或更新、`CHANGELOG.md` 加行、`profiles/verity/` 未被误提交(`git status` 确认 `.gitignore` 生效)。
 
 ## 9. 依赖 / 风险
+
+### 9.0 决策已定(2026-07-20 指挥官批,下方 `[?]` 据此收敛,不再当未决项)
+1. **SQLite 驱动 = better-sqlite3**(稳定优先;node:sqlite 实测 FTS5 可用但仍 Experimental,留作未来减依赖备选)。
+2. **模块系统 = ESM**(`"type":"module"` + NodeNext);B0 若发现 vitest/better-sqlite3 在 ESM 下有坑,当场报告不硬扛。
+3. **lint = A0 只用 `tsc --noEmit`,不引 eslint**;eslint 留到后续增量再补(引擎长期要养,但非 A0 范围)。
+4. **`tags` 序列化 = JSON 数组字符串**(`JSON.stringify`/`JSON.parse` + try-catch)。
+5. **`replaceLatest` 语义 = 按语义自实现**(Verity 源码在公司内网、越界不读,不照抄外部命名);`ConfirmationService.correct()` 承载「修正最新内容」,补有/无既有确认记录两条路径测试。
 
 **依赖**:
 - Node v24(已确认本机 `v24.1.0`,与 `CLAUDE.md` §2 一致)。
