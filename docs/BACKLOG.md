@@ -7,7 +7,7 @@
 ## 在途 / 待办(过了指挥官分诊的)
 | 优先级 | 标题 | 状态 | Issue |
 |---|---|---|---|
-| _（暂无 —— 骨架由 /spec 起,PRD 定案后建 issue）_ | | | |
+| P2 | Conductor 层(最外层对话协调) | 已定方向,排期 **A6 之后**,当前不进代码 | [#2](https://github.com/elishawong/aeloop/issues/2) |
 
 ## inbox idea(未过指挥官,不算在途,仅记录)
 _（随手 `gh issue create --label idea --repo elishawong/aeloop`,过指挥官分诊后才升到上面看板。）_
