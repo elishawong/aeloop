@@ -92,6 +92,43 @@ describe("buildAdapterRegistry — cli-bridge provider (A3)", () => {
       expect((err as Error).message).toContain("gemini");
     }
   });
+
+  it('an optional "bin" overrides the spawn target while "cmd" keeps dispatching by strict flavor equality (config.ts extractBin(), unrelated to the fuzzy-matching this superseded)', async () => {
+    const config: ProfileConfig = {
+      profile: "fixture",
+      providers: {
+        // `bin` deliberately points at a path that cannot possibly exist —
+        // not the fixture script. This makes the assertion below
+        // deterministic and machine-independent: if `bin` were being
+        // ignored (a regression back to spawning the literal `cmd` value
+        // "codex"), `checkAvailability()` would very likely report
+        // available:true on any machine with the real codex CLI on PATH
+        // (silently masking the bug). Pointing `bin` at a definitely-bogus
+        // path makes a broken override fail loudly instead of passing by
+        // coincidence.
+        "codex-cli": { kind: "cli-bridge", cmd: "codex", bin: "/nonexistent/path/definitely-not-a-real-binary-xyz" },
+      },
+      roles: { coder: { provider: "codex-cli" } },
+    };
+
+    const registry = buildAdapterRegistry(config);
+    const adapter = registry.get("codex-cli");
+
+    // Dispatch still went by cmd: "codex" (flavor), same as the plain
+    // cmd-only test above — bin doesn't change which adapter class gets
+    // built, only what it spawns.
+    expect(adapter).toBeInstanceOf(CodexCliAdapter);
+    expect(adapter?.id).toBe("codex-cli");
+
+    // Proof the constructed adapter's actual spawn target really is `bin`,
+    // not `cmd`: `checkAvailability()` really spawns `<spawn target>
+    // --version`, and the bogus `bin` path can't be spawned at all —
+    // available:false with a reason is only possible if the adapter is
+    // truly using `bin`, not silently falling back to "codex".
+    const availability = await adapter?.checkAvailability();
+    expect(availability?.available).toBe(false);
+    expect(availability?.reason).toBeTruthy();
+  });
 });
 
 // 🔴 Deliberately supersedes A2's assertion for this same test (Zorro:
