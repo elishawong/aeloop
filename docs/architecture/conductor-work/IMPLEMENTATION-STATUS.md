@@ -34,3 +34,12 @@ existing `apikey`/LiteLLM configuration) and company brain assets. The public
 engine only requires the profile to satisfy the existing `config.yaml`
 contract. No company credentials, PRDs, repository content, or memory database
 belongs in this repository.
+
+Run the credential-free architecture demo with:
+
+```bash
+pnpm run demo:company
+```
+
+It validates a company contract and deterministically selects the built-in
+workflow; it intentionally does not call a model or access a repository.
