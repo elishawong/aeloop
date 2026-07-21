@@ -197,6 +197,35 @@ export interface NewStepMarkerInput {
   claimCount: number;
 }
 
+/**
+ * A durable record of one memory `ContextBudgetManager` left out of a run's
+ * injected context (issue #36 slice 3, following on slice 2's in-memory-only
+ * `RunStartedEvent.contextOmitted`/`EvidenceBundle.omittedContext`). Slice
+ * 2's README explicitly scoped "wiring `omitted` context into a persistent
+ * evidence/audit store" out as a separate follow-up — this table is that
+ * follow-up: `runner.ts`'s `startRun()` now writes one row per
+ * `input.injectedContext.omitted` entry into the same `AuditStore`
+ * transaction as its `workflow_runs` insert, so the omission list survives
+ * process restarts the same way `structured_claims`/`approvals` already do.
+ */
+export interface ContextOmission {
+  id: number;
+  runId: number;
+  memoryId: number;
+  memoryType: string;
+  title: string;
+  reason: string;
+  createdAt: string;
+}
+
+export interface NewContextOmissionInput {
+  runId: number;
+  memoryId: number;
+  memoryType: string;
+  title: string;
+  reason: string;
+}
+
 // ---- raw SQLite row shapes (snake_case) ----
 
 interface WorkflowRunRow {
@@ -252,6 +281,16 @@ interface StepMarkerRow {
   created_at: string;
 }
 
+interface ContextOmissionRow {
+  id: number;
+  run_id: number;
+  memory_id: number;
+  memory_type: string;
+  title: string;
+  reason: string;
+  created_at: string;
+}
+
 /**
  * SQLite-backed store for `workflow_runs`/`structured_claims`/`approvals`
  * (DESIGN §5, A4b PRD §4.2). Takes an explicit `dbPath` (a file path, or
@@ -274,12 +313,15 @@ export class AuditStore {
   private readonly insertClaimStmt: Database.Statement<unknown[]>;
   private readonly insertApprovalStmt: Database.Statement<unknown[]>;
   private readonly insertStepMarkerStmt: Database.Statement<unknown[]>;
+  private readonly insertContextOmissionStmt: Database.Statement<unknown[]>;
   private readonly getClaimByIdStmt: Database.Statement<[number], StructuredClaimRow>;
   private readonly getApprovalByIdStmt: Database.Statement<[number], ApprovalRow>;
   private readonly getStepMarkerByIdStmt: Database.Statement<[number], StepMarkerRow>;
+  private readonly getContextOmissionByIdStmt: Database.Statement<[number], ContextOmissionRow>;
   private readonly listClaimStepRefsByRunStmt: Database.Statement<[number], { step_ref: string }>;
   private readonly listApprovalStepRefsByRunStmt: Database.Statement<[number], { step_ref: string }>;
   private readonly listStepMarkerStepRefsByRunStmt: Database.Statement<[number], { step_ref: string }>;
+  private readonly listContextOmissionsByRunStmt: Database.Statement<[number], ContextOmissionRow>;
 
   constructor(dbPath: string) {
     this.db = new Database(dbPath);
@@ -313,9 +355,17 @@ export class AuditStore {
         (run_id, step_ref, node, actor, claim_count, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
     );
+    this.insertContextOmissionStmt = this.db.prepare(
+      `INSERT INTO context_omissions
+        (run_id, memory_id, memory_type, title, reason, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
     this.getClaimByIdStmt = this.db.prepare<[number], StructuredClaimRow>(`SELECT * FROM structured_claims WHERE id = ?`);
     this.getApprovalByIdStmt = this.db.prepare<[number], ApprovalRow>(`SELECT * FROM approvals WHERE id = ?`);
     this.getStepMarkerByIdStmt = this.db.prepare<[number], StepMarkerRow>(`SELECT * FROM step_markers WHERE id = ?`);
+    this.getContextOmissionByIdStmt = this.db.prepare<[number], ContextOmissionRow>(
+      `SELECT * FROM context_omissions WHERE id = ?`,
+    );
     this.listClaimStepRefsByRunStmt = this.db.prepare<[number], { step_ref: string }>(
       `SELECT step_ref FROM structured_claims WHERE run_id = ?`,
     );
@@ -324,6 +374,9 @@ export class AuditStore {
     );
     this.listStepMarkerStepRefsByRunStmt = this.db.prepare<[number], { step_ref: string }>(
       `SELECT step_ref FROM step_markers WHERE run_id = ?`,
+    );
+    this.listContextOmissionsByRunStmt = this.db.prepare<[number], ContextOmissionRow>(
+      `SELECT * FROM context_omissions WHERE run_id = ? ORDER BY id`,
     );
   }
 
@@ -425,6 +478,26 @@ export class AuditStore {
         created_at TEXT NOT NULL,
         UNIQUE (run_id, step_ref)
       );
+
+      -- Issue #36 slice 3: durable persistence for slice 2's
+      -- in-memory-only RunStartedEvent.contextOmitted /
+      -- EvidenceBundle.omittedContext. runner.ts's startRun() writes
+      -- one row here per input.injectedContext.omitted entry, inside the
+      -- same AuditStore.runInTransaction call as that run's
+      -- workflow_runs insert (B3-style atomicity, same posture as
+      -- step_markers above). UNIQUE (run_id, memory_id) is the same cheap
+      -- defense-in-depth as approvals'/step_markers' UNIQUE constraints --
+      -- a given memory can only be recorded once as omitted per run.
+      CREATE TABLE IF NOT EXISTS context_omissions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL REFERENCES workflow_runs(id),
+        memory_id INTEGER NOT NULL,
+        memory_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE (run_id, memory_id)
+      );
     `);
   }
 
@@ -471,6 +544,18 @@ export class AuditStore {
       node: row.node,
       actor: row.actor as StepMarker["actor"],
       claimCount: row.claim_count,
+      createdAt: row.created_at,
+    };
+  }
+
+  private mapContextOmissionRow(row: ContextOmissionRow): ContextOmission {
+    return {
+      id: row.id,
+      runId: row.run_id,
+      memoryId: row.memory_id,
+      memoryType: row.memory_type,
+      title: row.title,
+      reason: row.reason,
       createdAt: row.created_at,
     };
   }
@@ -684,5 +769,41 @@ export class AuditStore {
       throw new AuditReadError(`Failed to read back step_markers row ${id} immediately after insert`);
     }
     return this.mapStepMarkerRow(row);
+  }
+
+  // ---- context_omissions -------------------------------------------------
+
+  /** See `ContextOmission`'s doc comment (issue #36 slice 3) for why this table/method exists. */
+  insertContextOmission(input: NewContextOmissionInput, now: string = nowIso()): ContextOmission {
+    const result = this.insertContextOmissionStmt.run(
+      input.runId,
+      input.memoryId,
+      input.memoryType,
+      input.title,
+      input.reason,
+      now,
+    );
+    const id = Number(result.lastInsertRowid);
+    let row: ContextOmissionRow | undefined;
+    try {
+      row = this.getContextOmissionByIdStmt.get(id);
+    } catch (cause) {
+      throw new AuditReadError(`Failed to read back context_omissions row ${id} immediately after insert`, cause);
+    }
+    if (!row) {
+      throw new AuditReadError(`Failed to read back context_omissions row ${id} immediately after insert`);
+    }
+    return this.mapContextOmissionRow(row);
+  }
+
+  /** Every `context_omissions` row recorded for `runId`, in insertion order. */
+  listContextOmissionsByRun(runId: number): ContextOmission[] {
+    let rows: ContextOmissionRow[];
+    try {
+      rows = this.listContextOmissionsByRunStmt.all(runId);
+    } catch (cause) {
+      throw new AuditReadError(`Failed to list context_omissions for run ${runId}`, cause);
+    }
+    return rows.map((row) => this.mapContextOmissionRow(row));
   }
 }

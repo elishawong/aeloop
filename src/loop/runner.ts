@@ -845,15 +845,35 @@ async function runStreamAndPersistCore(
  */
 export async function startRun(deps: StartRunDeps, input: StartRunInput): Promise<RunHandle> {
   const threadId = randomUUID();
-  const run: WorkflowRun = deps.audit.insertRun({
-    task: input.task,
-    workflowDefId: input.workflowDefId,
-    profile: input.profile,
-    status: "running",
-    rejectCount: 0,
-    rejectThreshold: input.rejectThreshold,
-    currentState: LOOP_NODES.draft,
-    langgraphThreadId: threadId,
+  // Issue #36 slice 3: the `workflow_runs` insert and this run's
+  // `context_omissions` rows (one per `input.injectedContext.omitted`
+  // entry, if any) go inside a single `AuditStore.runInTransaction` call —
+  // same B3-style atomicity `step_markers`/its claims already use — so a
+  // telemetry-write failure rolls back the run row too, instead of leaving
+  // a `workflow_runs` row with no matching omission trail. When
+  // `input.injectedContext.omitted` is absent or empty, no `context_omissions`
+  // rows are written and behavior is unchanged from before this slice.
+  const run: WorkflowRun = deps.audit.runInTransaction(() => {
+    const insertedRun = deps.audit.insertRun({
+      task: input.task,
+      workflowDefId: input.workflowDefId,
+      profile: input.profile,
+      status: "running",
+      rejectCount: 0,
+      rejectThreshold: input.rejectThreshold,
+      currentState: LOOP_NODES.draft,
+      langgraphThreadId: threadId,
+    });
+    for (const entry of input.injectedContext.omitted ?? []) {
+      deps.audit.insertContextOmission({
+        runId: insertedRun.id,
+        memoryId: entry.id,
+        memoryType: entry.type,
+        title: entry.title,
+        reason: entry.reason,
+      });
+    }
+    return insertedRun;
   });
 
   // Issue #29 PRD §9.1 decision 1: `deps.events` is optional, defaulted to a
