@@ -33,6 +33,30 @@ export interface ProfileConfig {
     reject_threshold?: number;
     [key: string]: unknown;
   };
+  /**
+   * Optional Context-layer knobs (issue #36 slice 1: wiring `ContextBudgetManager`
+   * into the real `ContextInjector` -> `PromptComposer` path).
+   *
+   * `token_budget` is the max total token estimate (see
+   * `context/budget.ts`'s `estimateTokens()`) of memories `ContextInjector`
+   * will inject into a single prompt. It is **entirely optional and has no
+   * implicit default** — a profile that omits `context` (or omits
+   * `context.token_budget` within it) gets exactly today's unbounded
+   * behavior: every core/recalled, non-rejected memory is injected,
+   * regardless of size. This is a deliberate backward-compatibility
+   * choice, not an oversight: turning budget enforcement on for existing
+   * profiles by default could silently start omitting memories that used
+   * to always appear.
+   *
+   * `DEFAULT_CONTEXT_TOKEN_BUDGET` (exported from `../context/injector.js`)
+   * is a documented, *recommended* value for profiles that want to opt in
+   * — set `context: { token_budget: 8000 }` explicitly to use it. It is
+   * never applied automatically.
+   */
+  context?: {
+    token_budget?: number;
+    [key: string]: unknown;
+  };
   [key: string]: unknown;
 }
 

@@ -28,6 +28,21 @@ export interface EvidenceItem {
   readonly passed?: boolean;
 }
 
+/**
+ * Mirrors `RunStartedEvent["contextOmitted"]`'s element shape
+ * (`src/loop/events.ts`, issue #36 slice 2) — kept as its own named type
+ * here rather than importing `RunStartedEvent`'s inline element type
+ * directly, matching this file's existing convention of not depending on
+ * `LoopEvent`'s per-event-type fields beyond `event.type` (see
+ * `EvidenceEventProjector.accept`).
+ */
+export interface OmittedContextEntry {
+  readonly id: number;
+  readonly type: string;
+  readonly title: string;
+  readonly reason: string;
+}
+
 export interface TokenUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
@@ -49,6 +64,16 @@ export interface EvidenceBundle {
   readonly usage: TokenUsage;
   readonly eventTypes: readonly string[];
   readonly unprovenItems: readonly string[];
+  /**
+   * Issue #36 slice 2: memories `ContextBudgetManager` omitted for lack of
+   * token budget on this run's `run_started` event, if any. Empty (not
+   * absent) when no `run_started` event has been recorded yet, or when it
+   * was recorded without a `contextOmitted` payload (budgeting off, or
+   * nothing omitted) — matches this class's existing convention of
+   * defaulting derived collections to `[]` rather than `undefined`
+   * (`requirements`/`claims`/`evidence`/`eventTypes` all do the same).
+   */
+  readonly omittedContext: readonly OmittedContextEntry[];
 }
 
 export interface EvidenceBundleInput {
@@ -73,6 +98,7 @@ export class EvidenceBundleBuilder {
   private readonly eventTypes = new Set<string>();
   private usage: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, retryTokens: 0, estimated: false };
   private status: EvidenceBundle["status"] = "running";
+  private omittedContext: readonly OmittedContextEntry[] = [];
 
   constructor(private readonly input: EvidenceBundleInput = {}) {
     for (const requirementId of input.requirementIds ?? []) {
@@ -83,6 +109,13 @@ export class EvidenceBundleBuilder {
   recordEvent(event: LoopEvent): this {
     this.eventTypes.add(event.type);
     this.status = event.type === "run_completed" ? "completed" : event.type === "run_cancelled" ? "cancelled" : event.type === "run_failed" ? "failed" : this.status;
+    // Issue #36 slice 2: `run_started` is the only event carrying
+    // `contextOmitted` (`RunStartedEvent`, `src/loop/events.ts`) — an old
+    // `run_started` event (or any other event type) without this field
+    // simply leaves `omittedContext` at its `[]` default, never throws.
+    if (event.type === "run_started" && event.contextOmitted) {
+      this.omittedContext = [...event.contextOmitted];
+    }
     return this;
   }
 
@@ -140,6 +173,7 @@ export class EvidenceBundleBuilder {
       usage: this.usage,
       eventTypes: [...this.eventTypes],
       unprovenItems: requirements.filter((item) => item.status !== "verified").map((item) => item.requirementId),
+      omittedContext: this.omittedContext,
     };
   }
 }

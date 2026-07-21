@@ -33,6 +33,17 @@ export interface RunStartedEvent extends LoopEventBase {
   profile: string;
   workflowDefId: string;
   rejectThreshold: number;
+  /**
+   * Issue #36 slice 2: a snapshot of `ContextInjectionResult["omitted"]`
+   * (`src/context/injector.ts`'s `OmittedMemory[]`, re-shaped here so
+   * `events.ts` doesn't take on a dependency on `src/context/*`) — present
+   * only when `startRun()`'s `input.injectedContext.omitted` was itself
+   * present and non-empty; `undefined` otherwise (same "absent means
+   * nothing to report" convention `ContextInjectionResult.omitted` already
+   * uses, kept for backward compatibility with subscribers/fixtures written
+   * before this field existed).
+   */
+  contextOmitted?: readonly { id: number; type: string; title: string; reason: string }[];
 }
 
 /**

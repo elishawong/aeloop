@@ -1280,6 +1280,49 @@ describe("issue #29 — LoopEvent instrumentation (streamMode: [\"updates\",\"ta
     expect(runStarted).toMatchObject({ type: "run_started", runId: handle.runId, threadId: handle.threadId, task: "add a function", profile: "subscription", rejectThreshold: 2 });
   });
 
+  it("issue #36 slice 2: run_started carries contextOmitted when input.injectedContext.omitted is present and non-empty", async () => {
+    const dbPath = tmpDbPath("events-run-started-context-omitted.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+    const { events, emitter } = collectEvents();
+
+    await startRun(
+      { ...deps, events: emitter },
+      {
+        task: "add a function",
+        profile: "subscription",
+        workflowDefId: "coder-tester-loop",
+        injectedContext: {
+          memories: [],
+          omitted: [{ id: 7, type: "idea", title: "old idea", reason: "token_budget_exceeded" }],
+        },
+        rejectThreshold: 2,
+      },
+    );
+
+    const runStarted = events[0];
+    expect(runStarted).toMatchObject({
+      type: "run_started",
+      contextOmitted: [{ id: 7, type: "idea", title: "old idea", reason: "token_budget_exceeded" }],
+    });
+  });
+
+  it("issue #36 slice 2: run_started omits contextOmitted (stays undefined) when input.injectedContext.omitted is absent", async () => {
+    const dbPath = tmpDbPath("events-run-started-context-omitted-absent.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+    const { events, emitter } = collectEvents();
+
+    await startRun(
+      { ...deps, events: emitter },
+      { task: "add a function", profile: "subscription", workflowDefId: "coder-tester-loop", injectedContext: { memories: [] }, rejectThreshold: 2 },
+    );
+
+    const runStarted = events[0] as { contextOmitted?: unknown };
+    expect(runStarted.contextOmitted).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(runStarted, "contextOmitted")).toBe(false);
+  });
+
   it("a full G1-approve -> review(pass) -> G3-approve -> apply run: for every node visited, node_started(X) appears before node_completed(X)/agent_completed(X)/gate_decided(X)/gate_requested(X), ending in node_started(apply)+node_completed(apply)+run_completed", async () => {
     const dbPath = tmpDbPath("events-full-pass.sqlite");
     const { deps, audit } = buildDeps(dbPath, ["pass"]);

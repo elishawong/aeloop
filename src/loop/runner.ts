@@ -872,6 +872,14 @@ export async function startRun(deps: StartRunDeps, input: StartRunInput): Promis
     profile: input.profile,
     workflowDefId: input.workflowDefId,
     rejectThreshold: input.rejectThreshold,
+    // Issue #36 slice 2: only set when `input.injectedContext.omitted` is
+    // itself present and non-empty — mirrors `ContextInjectionResult`'s own
+    // "absent means nothing to report" convention rather than forcing an
+    // empty array on every run (which would break existing subscribers'
+    // `toMatchObject`-style assertions that don't expect this field at all).
+    ...(input.injectedContext.omitted && input.injectedContext.omitted.length > 0
+      ? { contextOmitted: input.injectedContext.omitted.map((entry) => ({ id: entry.id, type: entry.type, title: entry.title, reason: entry.reason })) }
+      : {}),
   });
 
   const compiled = compileLoopGraph(buildLoopGraph({ router: deps.router, composer: deps.composer }), deps.checkpointer);
