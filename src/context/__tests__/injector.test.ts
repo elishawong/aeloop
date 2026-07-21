@@ -110,7 +110,7 @@ describe("ContextInjector — stale/unconfirmed are kept, not filtered, and carr
   });
 });
 
-describe("ContextInjector — core vs. recalled (Zorro review: the old implementation made FTS5 recall dead code)", () => {
+describe("ContextInjector — core vs. recalled (review: the old implementation made FTS5 recall dead code)", () => {
   it("CORE_MEMORY_TYPES is the documented always-want set: identity/constraint/decision", () => {
     expect([...CORE_MEMORY_TYPES].sort()).toEqual(["constraint", "decision", "identity"]);
   });

@@ -75,7 +75,7 @@ describe("resolvePersonaPath", () => {
   });
 });
 
-describe("loadPersona — path traversal is blocked (Zorro review, feature/issue-1-a0-a1-scaffold)", () => {
+describe("loadPersona — path traversal is blocked (review, feature/issue-1-a0-a1-scaffold)", () => {
   it("real repro: a '../../../CLAUDE'-style role no longer leaks the repo's own CLAUDE.md", () => {
     // Before the fix, this exact call returned the repo root CLAUDE.md's
     // content — `path.join` happily collapsed the ".." segments and

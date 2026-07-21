@@ -1,7 +1,8 @@
 /**
  * Checkpoint cross-process resume — **production-hardened** version of
- * A4a's `checkpoint.test.ts` (A4b PRD §5/§6 B5, §9.2 决策4, §8's "checkpoint
- * 跨进程生产化真做" acceptance criterion).
+ * A4a's `checkpoint.test.ts` (A4b PRD §5/§6 B5, §9.2 Decision 4, §8's
+ * "checkpoint cross-process productionization actually done" acceptance
+ * criterion).
  *
  * A4a's `checkpoint.test.ts` proved LangGraph's own checkpoint mechanism
  * survives a same-process, two-phase "object falls out of scope" simulation

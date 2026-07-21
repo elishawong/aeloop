@@ -3,10 +3,11 @@
  * declared technical risk core: `addConditionalEdges` is the one
  * LangGraph mechanism none of spike-findings.md's 5 Qs exercised (all toy
  * graphs there were linear or used a single unconditional `interrupt()`).
- * This file's first job (§6 B3: "第一件事验证 addConditionalEdges") is
+ * This file's first job (§6 B3: "the first thing to verify is
+ * addConditionalEdges") is
  * clearing that risk before trusting `graph.ts`'s real wiring.
  *
- * **Zorro Round-1 B1 rework**: this file used to build a *local replica* of
+ * **Review Round-1 B1 rework**: this file used to build a *local replica* of
  * `graph.ts`'s edge topology (`buildToyGraph()`, same real `gates.ts`
  * nodes/routers, but never calling `buildLoopGraph()` itself) because toy
  * `draft`/`review` nodes couldn't be substituted into the real
@@ -330,14 +331,14 @@ describe("buildLoopGraph()/compileLoopGraph() — A4b Escalation subtree driven 
   });
 
   /**
-   * Zorro Round-1 B1 rework (`docs/feature/a4b-loop/test-report.md`): the
+   * Review Round-1 B1 rework (`docs/feature/a4b-loop/test-report.md`): the
    * boundary test above only ever drives `rejectCount` up to *exactly*
    * `rejectThreshold` (2 == 2), which can't distinguish `gates.ts`'s real
    * `routeAfterReview`'s `rejectCount >= rejectThreshold` from a mutant
-   * `rejectCount === rejectThreshold` — both agree at the boundary. Zorro's
+   * `rejectCount === rejectThreshold` — both agree at the boundary. The
    * mutation run confirmed this: flipping `>=` to `===` left every existing
-   * test green. DESIGN §4 calls escalation-on-threshold "不可绕"
-   * (un-bypassable) specifically because `rejectCount` keeps climbing past
+   * test green. DESIGN §4 calls escalation-on-threshold "un-bypassable"
+   * specifically because `rejectCount` keeps climbing past
    * `rejectThreshold` on a `revise` loop-back (a human can route out of
    * escalation back to `draft`, tester can reject *again*) — `>=` must keep
    * escalating every time, `===` would silently stop escalating and route
@@ -383,15 +384,15 @@ describe("buildLoopGraph()/compileLoopGraph() — A4b Escalation subtree driven 
   });
 
   /**
-   * Zorro Round-2 R2-1 (`docs/feature/a4b-loop/test-report.md`): every
+   * Review Round-2 R2-1 (`docs/feature/a4b-loop/test-report.md`): every
    * threshold test above this one exercises `rejectThreshold` values of 1
    * or 2 — none drives `rejectCount` up while `rejectThreshold` is a real
    * variable *greater than* 2. That leaves a mutation like `rejectCount >=
    * Math.min(rejectThreshold, 2)` — which is only wrong once `rejectThreshold
    * > 2` — completely undetected: for threshold 1/2, `Math.min(threshold, 2)`
    * equals `threshold` itself, so the mutant agrees with the real
-   * `routeAfterReview` on every case those tests drive. Zorro hand-ran this
-   * exact mutation and confirmed all 23 pre-R2 threshold-related assertions
+   * `routeAfterReview` on every case those tests drive. A manual run of this
+   * exact mutation confirmed all 23 pre-R2 threshold-related assertions
    * stayed green. This test sets `rejectThreshold: 5` and drives
    * `rejectCount` to 2 via two reject/g2-approve rounds — real `>=`: `2 >= 5`
    * is false, routes to `g2` both times; the `Math.min(5, 2)` mutant would
@@ -480,12 +481,12 @@ describe("buildLoopGraph()/compileLoopGraph() — A4b Escalation subtree driven 
     expect(snapshot.next).toEqual([]); // cancel -> END, graph is done.
   });
 
-  it("G2 receiving 'escalate' (DESIGN §4's 主动升级 edge) routes to escalation, not draft — distinct from G2's existing 'approved'->draft path", async () => {
+  it("G2 receiving 'escalate' (DESIGN §4's 'proactively escalate' edge) routes to escalation, not draft — distinct from G2's existing 'approved'->draft path", async () => {
     const { deps } = buildDeps(["reject"]);
     const compiled = compileLoopGraph(buildLoopGraph(deps), new MemorySaver());
     const cfg = threadConfig("g2-escalate");
 
-    // Threshold high enough that the first reject still routes to g2, not straight to escalation via the threshold path — isolates this test to G2's own "主动升级" edge.
+    // Threshold high enough that the first reject still routes to g2, not straight to escalation via the threshold path — isolates this test to G2's own "proactively escalate" edge.
     await compiled.invoke(initialState({ rejectThreshold: 5 }), cfg);
     await compiled.invoke(resumeCommand({ decision: "approved" }), cfg); // -> review(reject) -> rejectCount=1 < 5 -> g2
 

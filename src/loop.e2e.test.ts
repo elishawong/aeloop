@@ -1,6 +1,7 @@
 /**
- * B5 — A4a's hardest requirement (PRD §5 "垂直切片(A4a 收尾,硬性交付)" /
- * DESIGN §8.5's "aeloop 每个里程碑收尾必须有一条薄垂直切片真正接通"),
+ * B5 — A4a's hardest requirement (PRD §5 "vertical slice (A4a wrap-up,
+ * hard deliverable)" / DESIGN §8.5's "every aeloop milestone wrap-up must
+ * have one thin vertical slice actually wired end-to-end"),
  * this time proving the *Loop* seam: that a real, composed prompt flows
  * all the way from Context through a real cli-bridge `ModelAdapter`
  * (controlled fixture subprocess, mirroring `harness-cli.e2e.test.ts`'s
@@ -204,7 +205,7 @@ describe("Context -> Prompt -> Harness (real cli-bridge fixtures) -> Loop (real 
 
   /**
    * A4b's hardest requirement (docs/feature/a4b-loop/PRD.md §2/§8's
-   * "垂直切片必接通(含 escalation)"): the same real chain as the happy-path
+   * "vertical slice must be wired end-to-end (including escalation)"): the same real chain as the happy-path
    * slice above, but driven through `runner.ts`'s `startRun()`/
    * `resumeRun()` — not raw `compiled.invoke()`/`Command` — because
    * `runner.ts` is the only layer that actually writes `AuditStore`'s
@@ -216,7 +217,7 @@ describe("Context -> Prompt -> Harness (real cli-bridge fixtures) -> Loop (real 
    * at it, routed to `escalation` instead — happen purely from the graph's
    * own `reject_count` bookkeeping, not from varying what the fixture
    * emits. `AuditStore` and the checkpointer share one on-disk file (PRD
-   * §9.2 决策3, exercised here with real cli-bridge adapters, not just
+   * §9.2 Decision 3, exercised here with real cli-bridge adapters, not just
    * `runner.test.ts`'s FakeAdapter).
    */
   it("a real run that hits rejectThreshold routes to escalation, force_pass reaches G3/apply, and the three audit tables hold the run's full decision history", async () => {

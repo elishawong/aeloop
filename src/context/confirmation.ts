@@ -16,7 +16,7 @@ import { nowIso } from "./util.js";
  * `MemoryStore.runInTransaction` delegates to `better-sqlite3`'s
  * `db.transaction()`, which auto-rolls-back on any thrown error.
  *
- * **`correct()` semantics (PRD §9.0#5, self-implemented — Verity's
+ * **`correct()` semantics (PRD §9.0#5, self-implemented — a prior internal implementation's
  * `replaceLatest` lives in a company-internal repo this project does not
  * read, so this is not a port of that method's name/signature, just the
  * same underlying idea worked out independently)**: "correct the memory's

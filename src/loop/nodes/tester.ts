@@ -20,8 +20,9 @@ export interface ReviewNodeDeps {
  * Node body:
  * 1. Defensive check that `state.coderOutput` exists — the graph's edges
  *    guarantee `review` only runs after `draft`, but a node function
- *    should not trust that implicitly (PRD §5: "节点函数不应该信任图结构
- *    保证了这一点这种隐式假设"). Missing → throws a plain, explicit
+ *    should not trust that implicitly (PRD §5: "a node function shouldn't
+ *    implicitly trust that the graph structure already guarantees this").
+ *    Missing → throws a plain, explicit
  *    `Error`, never a bare `undefined.diff` crash.
  * 2. Build the tester's task text: original task + coder's diff + coder's
  *    claims — the tester persona's house rules

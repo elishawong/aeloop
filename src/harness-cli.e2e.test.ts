@@ -1,6 +1,7 @@
 /**
- * B6 — A3's hardest requirement (PRD §5 "垂直切片(A3 收尾,硬性交付)" /
- * DESIGN §8.5's "aeloop 每个里程碑收尾必须有一条薄垂直切片真正接通"),
+ * B6 — A3's hardest requirement (PRD §5 "vertical slice (A3 wrap-up,
+ * hard deliverable)" / DESIGN §8.5's "every aeloop milestone wrap-up must
+ * have one thin vertical slice actually wired end-to-end"),
  * proving the *cli-bridge* seam this time: that a real `PromptComposer`
  * output string flows all the way through a real `cli-bridge` `ModelAdapter`
  * — real subprocess spawn, real JSONL parsing, real `ToolExecVerifier`

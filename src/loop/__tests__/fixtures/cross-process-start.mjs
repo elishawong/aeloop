@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // cross-process-start.mjs — "Process A" of the A4b checkpoint
-// production-hardening test (docs/feature/a4b-loop/PRD.md §5/§9.2 决策4).
+// production-hardening test (docs/feature/a4b-loop/PRD.md §5/§9.2 Decision 4).
 //
 // A real, independent `node` invocation (not a same-process two-phase
 // simulation like A4a's `checkpoint.test.ts`) — this script starts a real
@@ -9,7 +9,7 @@
 // process (no live object, no closure) is available to the second process
 // (`cross-process-resume.mjs`) — the only channel between them is the
 // on-disk SQLite file at `dbPath` (checkpoint + audit tables, sharing the
-// file per PRD §9.2 决策3) and this script's stdout.
+// file per PRD §9.2 Decision 3) and this script's stdout.
 //
 // Imports from **`dist/`, not `src/`** — plain Node ESM has no built-in
 // `.js`-import-resolves-to-sibling-`.ts`-file remapping (verified: running
@@ -19,7 +19,7 @@
 // what `pnpm build` already produces). Using the real compiled output here
 // is also a more faithful "production" cross-process proof than reinventing
 // module resolution just for this test — aeloop genuinely ships as a
-// compiled CLI (CLAUDE.md §2: "部署:CLI 工具...非 server"). The test file
+// compiled CLI (CLAUDE.md §2: "Deployment: CLI tool...not a server"). The test file
 // that spawns this script runs `pnpm build` first so `dist/` is current.
 import { AdapterRegistry } from "../../../../dist/harness/adapter-registry.js";
 import { ProviderRouter } from "../../../../dist/harness/provider-router.js";
@@ -92,8 +92,8 @@ if (!dbPath) {
   audit.close();
 
   // Process B is handed *only* this — no in-memory reference, no
-  // `stepCounters` (PRD §9.2 决策4: this proves the business-layer lookup,
-  // not just LangGraph's own already-proven checkpoint mechanism).
+  // `stepCounters` (PRD §9.2 Decision 4: this proves the business-layer
+  // lookup, not just LangGraph's own already-proven checkpoint mechanism).
   process.stdout.write(JSON.stringify({ runId: handle.runId, interruptGate: handle.interrupt?.gate ?? null }) + "\n");
   process.exitCode = 0;
 }

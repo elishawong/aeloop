@@ -32,7 +32,7 @@ describe("checkToolExecution", () => {
     expect(checkToolExecution(content, trace)).toBe("pass");
   });
 
-  it('returns "fail" when a claim asserts tool_execution but the trace is empty — the core "声称≠行为" hallucination this verifier exists to catch', () => {
+  it('returns "fail" when a claim asserts tool_execution but the trace is empty — the core "claimed ≠ done" hallucination this verifier exists to catch', () => {
     const content = contentWithClaims([
       { claimText: "I definitely ran the tests", confidence: "verified", verifiedBy: "tool_execution" },
     ]);

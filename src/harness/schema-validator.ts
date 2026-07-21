@@ -74,8 +74,8 @@ export class SchemaValidator {
  * Appends the prior failure to the original prompt rather than replacing
  * it — the retry request is a strictly longer, different string than the
  * first, and literally contains the failure text (PRD §5/§8.5#3's
- * verbatim acceptance test: "第二次 invoke 收到的 req.prompt 字符串 ≠
- * 第一次、且包含上一次的错误信息").
+ * verbatim acceptance test: "the req.prompt string received by the second
+ * invoke ≠ the first, and contains the previous error message").
  */
 function buildRetryPrompt(originalPrompt: string, failureDescription: string): string {
   return (
@@ -88,7 +88,7 @@ function buildRetryPrompt(originalPrompt: string, failureDescription: string): s
 
 /**
  * `JSON.parse` failure and `schema.safeParse()` failure share this one
- * function/return path (PRD §5: "不是两套代码") — both just become a
+ * function/return path (PRD §5: "not two separate code paths") — both just become a
  * `{ ok: false, error }` outcome the caller retries the same way.
  */
 function tryValidate<T>(schema: z.ZodType<T>, content: string): ValidateOutcome<T> {

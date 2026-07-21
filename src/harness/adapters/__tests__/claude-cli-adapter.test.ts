@@ -146,7 +146,7 @@ describe("ClaudeCliAdapter", () => {
     ).rejects.toBeInstanceOf(AdapterInvokeError);
   });
 
-  // Zorro A3 round-1 regression tests (blocker B2, minor Y1, minor Y2).
+  // A3's Review Round-1 regression tests (blocker B2, minor Y1, minor Y2).
 
   it('B2 regression: an adapter constructed with an empty provider id throws AdapterInvokeError on invoke(), never returns provider:""', async () => {
     const adapter = new ClaudeCliAdapter("", { cmd: FIXTURE });

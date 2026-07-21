@@ -1,33 +1,33 @@
-# aeloop — 文档体系 (Doc System)
+# aeloop — Doc System
 
-> 📌 文档体系索引 + 规则。开工先读。沿用 Helix 纪律:**单一事实来源、完成即删、历史归 git**。
+> 📌 Index + rules for the doc system. Read this first before starting work. Same discipline throughout: **single source of truth, delete once done, full history lives in git.**
 
-## 0. 黄金法则(焊死)
-1. **每份文档只回答一个问题,只有一份真相。** 别存两份。
-2. **文档跟着它描述的代码走。** 引擎设计权威在本仓 `docs/DESIGN.md`;Helix 侧战略判断在 ai-agent,这里链接过去不复制。
-3. **进度可中断、可恢复。** 长任务状态落 `PROGRESS.md`。
-4. **防膨胀。** 看板/进度只留未完成;做完归 `CHANGELOG.md`(最近)+ `git log`(完整)。
+## 0. Golden Rules (locked in)
+1. **Each doc answers exactly one question, and there's only one truth for it.** Don't keep two copies.
+2. **Docs follow the code they describe.** Design authority for the engine lives in this repo at `docs/DESIGN.md`; upstream strategic rationale lives in a private internal repo — link to it, don't duplicate it here.
+3. **Progress is interruptible and resumable.** Long-running task state lives in `PROGRESS.md`.
+4. **Anti-bloat.** Boards/progress docs only keep what's unfinished; done items move to `CHANGELOG.md` (recent) + `git log` (full history).
 
-## 1. 文档地图
-| 文档 | 位置 | 回答 | 淘汰规则 |
+## 1. Doc Map
+| Doc | Location | Answers | Retirement rule |
 |---|---|---|---|
-| **设计权威** | `docs/DESIGN.md` | 引擎做成什么样(四层/DB/文件结构/里程碑) | 方向变则更;本仓权威源 |
-| 战略判断 | `ai-agent/docs/verity-port/UNIFIED-ARCHITECTURE-JUDGMENT.md` | 为什么这么建(Helix 侧决策) | 不在本仓,链接过去 |
-| 总进度看板 | `docs/ROADMAP.md` | 现在到哪了 / 全貌 | 已完成**保留勾选**;含 idea 插入规则 |
-| 在途看板 | `docs/BACKLOG.md` | 现在/接下来做什么 | 只留未完成,做完即删 |
-| 恢复点 | `docs/PROGRESS.md` | 跑到一半停哪、从哪续 | 批次完则清 |
-| 变更日志 | `CHANGELOG.md` | 最近做完了什么 | 最近 ~15 条/90 天 |
-| 完整历史 | `git log` / `git blame` | 谁何时改了什么、为什么 | git 自带,不手抄 |
+| **Design authority** | `docs/DESIGN.md` | What the engine looks like (four layers / DB / file layout / milestones) | Updated when direction changes; authoritative source in this repo |
+| Strategic rationale | (lives in a private internal repo) | Why it was built this way (upstream planning decision) | Not in this repo — linked externally, not duplicated here |
+| Overall progress board | `docs/ROADMAP.md` | Where things stand now / the full picture | Completed items **keep their checkmark**; includes the idea-insertion rule |
+| In-progress board | `docs/BACKLOG.md` | What's being worked on / up next | Only keeps unfinished items, deleted once done |
+| Resume point | `docs/PROGRESS.md` | Where a run stopped mid-way and how to resume it | Cleared once the batch is done |
+| Changelog | `CHANGELOG.md` | What was recently completed | Last ~15 entries / 90 days |
+| Full history | `git log` / `git blame` | Who changed what, when, and why | Comes with git, not hand-copied |
 
-## 2. 在途 backlog 规则
-队列 = 本 repo GitHub Issues + `docs/BACKLOG.md` 镜像。label:`idea`/`quick-fix`/`P0-2`/`status:*`。`gh ... --repo elishawong/aeloop`。idea 未过指挥官不进看板;做完从镜像删 + 关 Issue。
+## 2. In-progress Backlog Rules
+The queue = this repo's GitHub Issues + the `docs/BACKLOG.md` mirror. Labels: `idea`/`quick-fix`/`P0-2`/`status:*`. `gh ... --repo elishawong/aeloop`. Ideas not yet approved by the commander don't go on the board; once done, delete from the mirror + close the Issue.
 
-## 3. 维护触发点(每次都做)
-1. 每完成一件实质事项 → BACKLOG 删那条 + CHANGELOG 加行 + 关 Issue。
-2. commit 前(`/aigit`)确认已回写。
-3. 会话/任务收尾主动报「doc 已更 / 无需更」。
-4. 批次跑到一半要停 → 写 PROGRESS(见 §4)。
+## 3. Maintenance Triggers (every time)
+1. Every time something substantive is completed → delete that item from BACKLOG + add a CHANGELOG line + close the Issue.
+2. Before committing, confirm this has already been written back.
+3. At the end of a session/task, proactively report "docs updated / no update needed."
+4. If a batch stops partway through → write PROGRESS (see §4).
 
-## 4. 「跑到一半关机还能继续」(resume)
-进度永远落磁盘,不靠会话记忆。每批结束/中断前更 `docs/PROGRESS.md`。
-**新会话/关机重开开场:读 PROGRESS → `git status` → 从「进行中」续。** 批次完 → 清 PROGRESS、写 CHANGELOG。
+## 4. "Stop halfway, resume later" (resume)
+Progress always lives on disk, never relies on session memory. Update `docs/PROGRESS.md` before every batch wrap-up/interruption.
+**New session / restart opening move: read PROGRESS → `git status` → resume from "in progress."** Once a batch is done → clear PROGRESS, write CHANGELOG.

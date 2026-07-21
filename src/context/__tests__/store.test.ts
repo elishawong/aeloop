@@ -255,7 +255,7 @@ describe("MemoryStore — FTS5 recall", () => {
   });
 });
 
-describe("MemoryStore — FTS5 recall: natural-language query safety (Zorro review, feature/issue-1-a0-a1-scaffold)", () => {
+describe("MemoryStore — FTS5 recall: natural-language query safety (review, feature/issue-1-a0-a1-scaffold)", () => {
   it("searches text containing a hyphenated compound word without throwing a syntax error", () => {
     const store = openStore();
     const m = store.insertMemory(

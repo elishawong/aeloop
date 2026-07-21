@@ -28,7 +28,7 @@
 // captured a non-zero exit, or produced a malformed agent_message/JSONL
 // line, so there is no verbatim sample for those — needed to exercise
 // ToolExecVerifier's "fail"/"pass" paths, AdapterInvokeError's non-zero-exit
-// path, and (Zorro A3 round-1 B1/Y2) the "don't silently fall back to an
+// path, and (A3's Review Round-1 B1/Y2) the "don't silently fall back to an
 // earlier answer" and "don't crash on a non-object JSONL line" regressions,
 // at the adapter (and, for `claims-with-trace`, the full
 // harness-cli.e2e.test.ts B6 slice) level, built with the same real event
@@ -39,8 +39,8 @@
 // (needed for B6's "pass" assertion; A3 PRD §5/§6's B6 task description).
 //
 // **A4a addition**: `tester-pass` (added for `src/loop.e2e.test.ts`'s B5
-// vertical slice, PRD §5's "如果没有完全匹配的,按 A3 B3/B4 已经建立的
-// 模式各自新增一个,不复制整份新文件"). Every prior scenario here emits
+// vertical slice, PRD §5's "if there's no exact match, add one following
+// the pattern already established by A3 B3/B4, don't duplicate a whole new file"). Every prior scenario here emits
 // `CoderOutput`-shaped JSON (`{diff, claims[], confidence}`) because A3's
 // own tests only ever routed `codex-cli` to the `coder` role; A4a's
 // vertical slice binds `codex-cli` to the `tester` role instead (DESIGN
@@ -49,7 +49,7 @@
 // (`{verdict, issues[], claims[], confidence}`) instead — constructed, no
 // verbatim spike capture exists for a tester-shaped response either.
 //
-// **Zorro A3 round-1 minor Y4**: every branch sets `process.exitCode`
+// **A3's Review Round-1 minor Y4**: every branch sets `process.exitCode`
 // instead of calling `process.exit()` — `process.exit()` called
 // immediately after an async `stdout.write()` can truncate output that
 // hasn't finished flushing through the pipe yet (Node's docs explicitly
@@ -235,7 +235,7 @@ if (args[0] === "--version") {
 
   case "tester-reject": {
     // Constructed (A4b addition, docs/feature/a4b-loop/PRD.md §5's B6 —
-    // "连续返回 verdict: reject 的 tester fixture 场景") — a final
+    // "a tester fixture scenario that keeps returning verdict: reject") — a final
     // agent_message whose text is TesterOutput-shaped JSON with `verdict:
     // "reject"`, used by `src/loop.e2e.test.ts`'s threshold-escalation
     // vertical slice. Emits the same reject verdict on every invocation
@@ -286,7 +286,7 @@ if (args[0] === "--version") {
   }
 
   case "final-text-non-string": {
-    // Constructed (Zorro A3 round-1 blocker B1's regression fixture): an
+    // Constructed (A3's Review Round-1 blocker B1's regression fixture): an
     // early, valid-looking agent_message, followed by the TRUE final
     // agent_message whose `.text` is an object, not a string. Before the
     // B1 fix, `extractLastAgentMessageText` only updated its "last seen"
@@ -318,7 +318,7 @@ if (args[0] === "--version") {
   }
 
   case "null-line-then-hello": {
-    // Constructed (Zorro A3 round-1 minor Y2's regression fixture): a raw
+    // Constructed (A3's Review Round-1 minor Y2's regression fixture): a raw
     // `null` JSONL line (valid JSON, not an object) mixed in among
     // otherwise-valid lines. Before the Y2 fix, `parseJsonlEvents` accepted
     // any value `JSON.parse` could produce, so this `null` line became an

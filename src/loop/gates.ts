@@ -5,7 +5,7 @@
  * spike-findings.md Q3 verified, applied three times.
  *
  * **The one hard rule every gate node here obeys** (spike-findings.md Q3's
- * "⚠️ 一个不算 bug 但影响写 nodes/ 代码的行为"): resume re-runs the entire
+ * "⚠️ not a bug, but a behavior that affects how nodes/ code is written"): resume re-runs the entire
  * node body from the top, including everything *before* `interrupt()`. So
  * `buildPayload()` — called before `interrupt()` — must be a pure function
  * of `state` with no side effects; only after `interrupt()` returns is it
@@ -24,8 +24,9 @@ type GateDecisionField = "g1Decision" | "g2Decision" | "g3Decision";
 /**
  * Shared node body for all three gates. `decisionField` says which of
  * `LoopState`'s three per-gate decision fields this gate writes — the
- * factory itself never guesses this from `gate` (PRD §5: "由调用
- * createGateNode 的三个具体门各自指定,不是这个共享工厂自己猜"); it's an
+ * factory itself never guesses this from `gate` (PRD §5: "specified by
+ * each of the three concrete gates that call createGateNode, not guessed
+ * by this shared factory itself"); it's an
  * explicit parameter, resolved below via a plain switch rather than a
  * computed property key, so the returned `Partial<LoopStateType>` stays
  * precisely typed (a computed key typed from a 3-way string-literal union
@@ -108,12 +109,12 @@ export function createG3Node(): (state: LoopStateType) => Partial<LoopStateType>
 /**
  * Routers below feed `graph.ts`'s `addConditionalEdges` calls. G1/G3's
  * `default: throw` branches are a defensive runtime backstop, **not** a
- * type-system-ruled-out case (Zorro Round-1 M3,
+ * type-system-ruled-out case (Review Round-1 M3,
  * `docs/feature/a4b-loop/test-report.md`: `GateDecision` has *three*
  * values as of A4b — `"approved" | "rejected" | "escalate"` — this
  * comment used to say "only two", which stopped being true the moment
  * `"escalate"` was added). G1/G3 are simply never *supposed* to receive
- * `"escalate"` (only `routeAfterG2`'s "主动升级→Esc" edge ever produces
+ * `"escalate"` (only `routeAfterG2`'s "Proactively escalate→Esc" edge ever produces
  * it) — the `default: throw` here is the same runtime backstop it always
  * was, just for a value that's undocumented for these two gates rather
  * than one TypeScript itself excludes. Not silent, per PRD §5, but a
@@ -140,7 +141,7 @@ export function routeAfterG1(state: LoopStateType): "review" | "draft" {
  * this round — LangGraph merges a node's `Partial<State>` return into state
  * before evaluating that node's own conditional-edge router, so
  * `routeAfterReview` never sees a stale, pre-increment value (PRD §9.2
- * 决策6 spells out why this doesn't require touching `nodes/tester.ts`).
+ * Decision 6 spells out why this doesn't require touching `nodes/tester.ts`).
  */
 export function routeAfterReview(state: LoopStateType): "g3" | "g2" | "escalation" {
   if (!state.testerOutput) {
@@ -152,7 +153,7 @@ export function routeAfterReview(state: LoopStateType): "g3" | "g2" | "escalatio
 
 /**
  * A4a's G2 had exactly one routing target: `"approved" -> "draft"`. A4b
- * (PRD §5 "gates.ts") adds a second, DESIGN §4's `G2-- 主动升级 -->Esc`
+ * (PRD §5 "gates.ts") adds a second, DESIGN §4's `G2-- Proactively escalate -->Esc`
  * edge: `"escalate" -> "escalation"`. Any other decision (most notably
  * `"rejected"`, which DESIGN's G2 gate draws no edge for) still throws
  * `UnhandledGateDecisionError` — PRD §2 non-goal #2's explicit, documented

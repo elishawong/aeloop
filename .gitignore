@@ -3,22 +3,22 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# 运行态(每 profile 独立记忆库,不入 git)
+# Runtime state (per-profile memory store, not tracked in git)
 *.db
 *.db-journal
 *.db-wal
 memory.db
 
-# pipeline 运行态(advance CLI 单次 build 工作态,本地各自维护,不入 git)
+# Pipeline runtime state (advance CLI single-build working state, kept local per checkout, not tracked in git)
 .helix/
 
-# 公司 overlay 永不进本仓(只在公司内部 git)
+# Company overlay never enters this repo (lives in an internal git only)
 profiles/apikey/
 
-# 环境
+# Environment
 .env
 .env.local
 
-# 杂
+# Misc
 .DS_Store
 *.log

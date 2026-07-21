@@ -16,7 +16,7 @@
 // `claude -p ... --output-format stream-json --verbose` capture, PLUS a
 // leading `system`/`subtype:"init"` event — that event type IS real (it's
 // how ClaudeCliAdapter extracts `model`) but spike-findings.md's §2.2
-// "关键行节选" only quoted the tool_use/tool_result/result lines, not the
+// "key lines excerpted" only quoted the tool_use/tool_result/result lines, not the
 // init line verbatim; the model value used here ("claude-sonnet-5") and
 // permissionMode ("bypassPermissions") are the real values observed
 // earlier in the same spike session, not invented.
@@ -32,11 +32,11 @@
 // ToolExecVerifier's "fail" path and the "result event reports failure"
 // path at the adapter level; spike never ran either scenario.
 //
-// `result-is-error-missing` and `null-line-then-hello` are Zorro A3
-// round-1 regression fixtures (minor Y1/Y2) — see their case bodies below
+// `result-is-error-missing` and `null-line-then-hello` are A3's Review
+// Round-1 regression fixtures (minor Y1/Y2) — see their case bodies below
 // for what each one guards against.
 //
-// **Zorro A3 round-1 minor Y4**: every branch sets `process.exitCode`
+// **A3's Review Round-1 minor Y4**: every branch sets `process.exitCode`
 // instead of calling `process.exit()` (which can truncate an async
 // `stdout.write()` that hasn't finished flushing through the pipe yet).
 // No branch in this file calls `process.exit()` — the whole script is one
@@ -256,7 +256,7 @@ if (args[0] === "--version") {
   }
 
   case "result-is-error-missing": {
-    // Constructed (Zorro A3 round-1 minor Y1's regression fixture):
+    // Constructed (A3's Review Round-1 minor Y1's regression fixture):
     // subtype:"success", but the "result" event has no `is_error` field
     // at all (omitted, not `false`). Before the Y1 fix, the check was
     // `subtype !== "success" || is_error === true` — only a literal
@@ -280,7 +280,7 @@ if (args[0] === "--version") {
   }
 
   case "null-line-then-hello": {
-    // Constructed (Zorro A3 round-1 minor Y2's regression fixture): a raw
+    // Constructed (A3's Review Round-1 minor Y2's regression fixture): a raw
     // `null` JSONL line (valid JSON, not an object) mixed in among
     // otherwise-valid lines. Before the Y2 fix, `parseJsonlEvents`
     // accepted any value `JSON.parse` could produce, so this `null` line

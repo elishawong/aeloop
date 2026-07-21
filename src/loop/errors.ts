@@ -9,17 +9,17 @@ import type { GateType } from "./types.js";
 /**
  * `routeAfterG2` (gates.ts) received a `state.g2Decision` other than
  * `"approved"` — most notably `"rejected"`, which DESIGN §4's G2 gate has
- * no drawn edge for (its only two out-edges are "批准→Fix" and "主动升级→
- * Esc"). A4a made an explicit, documented decision that G2 only ever
- * handles `"approved"` (PRD §2 non-goal #2). A4b has since built the
- * Escalation subtree (`src/loop/escalation.ts`) and wired the "主动升级→
- * Esc" edge for `"escalate"` — but that addition deliberately left
- * `"rejected"` alone: it is not a gap waiting on some future increment,
- * it is a permanent, intentional fail-loud guard for a case DESIGN itself
- * draws no route for (gates.ts's `routeAfterG2` doc comment: "unchanged by
- * A4b"). Thrown instead of silently routing `"rejected"` to some invented
- * node, or falling through to a default that isn't actually correct per
- * DESIGN.
+ * no drawn edge for (its only two out-edges are "Approve→Fix" and
+ * "Proactively escalate→Esc"). A4a made an explicit, documented decision
+ * that G2 only ever handles `"approved"` (PRD §2 non-goal #2). A4b has
+ * since built the Escalation subtree (`src/loop/escalation.ts`) and wired
+ * the "Proactively escalate→Esc" edge for `"escalate"` — but that addition
+ * deliberately left `"rejected"` alone: it is not a gap waiting on some
+ * future increment, it is a permanent, intentional fail-loud guard for a
+ * case DESIGN itself draws no route for (gates.ts's `routeAfterG2` doc
+ * comment: "unchanged by A4b"). Thrown instead of silently routing
+ * `"rejected"` to some invented node, or falling through to a default that
+ * isn't actually correct per DESIGN.
  */
 export class UnhandledGateDecisionError extends Error {
   readonly gate: GateType;
@@ -45,7 +45,8 @@ function describeCause(cause: unknown): string {
 /**
  * `AuditStore`'s read methods (`getRunById`/`getRunByThreadId`) failed —
  * mirrors `context/errors.ts`'s `RecallError` convention (A4b PRD §5
- * "errors.ts": "读失败必须可见,不能悄悄退化成空结果/undefined"). Write
+ * "errors.ts": "a read failure must be visible, not silently degrade into
+ * an empty result/undefined"). Write
  * methods (`insertRun`/`insertClaim`/`insertApproval`/`updateRunProgress`)
  * deliberately let `better-sqlite3`'s own `SqliteError` propagate
  * unwrapped instead — same split `MemoryStore` already established
@@ -61,7 +62,7 @@ export class AuditReadError extends Error {
 /**
  * `runner.ts`'s `resumeRun(deps, runId, threadId, ...)` received a
  * `runId`/`threadId` pair that don't belong to the same `workflow_runs`
- * row — Zorro Round-1 B2 (`docs/feature/a4b-loop/test-report.md`):
+ * row — Review Round-1 B2 (`docs/feature/a4b-loop/test-report.md`):
  * `resumeRun` used to advance the graph at `threadId` while attributing
  * *every* claim/approval/`workflow_runs` write to the independently-passed
  * `runId`, with zero check that the two actually referred to the same run.
@@ -93,7 +94,7 @@ export class RunThreadMismatchError extends Error {
 /**
  * `runner.ts`'s `resumeRun(deps, runId, threadId, resume, ...)` received a
  * `resume` value whose *decision domain* doesn't match the gate the run is
- * actually paused at — Zorro Round-4 R5-B1
+ * actually paused at — Review Round-4 R5-B1
  * (`docs/feature/a4b-loop/test-report.md`): `resume`'s parameter type,
  * `GateResumeValue | EscalationResumeValue`, is an **undiscriminated**
  * union — nothing in TypeScript stops a caller from handing a
@@ -113,7 +114,7 @@ export class RunThreadMismatchError extends Error {
  * `resumeRun` touches the graph or writes a single row, so a domain
  * mismatch now fails loud with zero writes instead.
  *
- * **Zorro Round-5 R6-B1 rework** (`docs/feature/a4b-loop/test-report.md`):
+ * **Review Round-5 R6-B1 rework** (`docs/feature/a4b-loop/test-report.md`):
  * the guard's *first* version (above) closed the cross-domain case but its
  * thrown message claimed "G1/G2/G3 gates only accept GateResumeValue's
  * approved/rejected/escalate" — which was never actually true of any of the

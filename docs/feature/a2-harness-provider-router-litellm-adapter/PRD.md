@@ -1,187 +1,187 @@
-# PRD — aeloop A2:Harness 层(ProviderRouter + ModelAdapter 接口 + LiteLLMAdapter + SchemaValidator)
+# PRD — aeloop A2: Harness Layer (ProviderRouter + ModelAdapter interface + LiteLLMAdapter + SchemaValidator)
 
-> 骨架来源:`ai-agent/OPS/_templates/feature/PRD.md`(结构)+ `aeloop/docs/feature/a0-a1-engine-scaffold-context-prompt/PRD.md`(同仓已有 PRD 的写法惯例,沿用其分层/批次/验收表述风格)。
-> 防幻觉:`[?]` = 我未验证 / 需要 spike 或指挥官确认,不编造接口/版本/参数。
+> Skeleton source: `ai-agent/OPS/_templates/feature/PRD.md` (structure) + `aeloop/docs/feature/a0-a1-engine-scaffold-context-prompt/PRD.md` (writing convention of an existing PRD in the same repo — reused its layering/batching/acceptance-criteria phrasing style).
+> Anti-hallucination: `[?]` = unverified by me / needs a spike or Commander confirmation; no fabricated interfaces/versions/parameters.
 
-- **项目**:aeloop(`elishawong/aeloop`,私有仓)
-- **分支**:`feature/issue-6-a2-harness`(单分支,批次内顺序提交 —— 理由见 §7)
-- **优先级**:P1
-- **状态**:已批(2026-07-20 Elisha 批准。§9.2 ajv 定案 = **跳过**,用 zod 直校;§9.1 ProviderRouter/config.ts 拆分军师已认可)
-- **最后更新**:2026-07-20
-- **关联 issue**:[elishawong/aeloop#6](https://github.com/elishawong/aeloop/issues/6)(本增量)· 上游追踪 [elishawong/ai-agent#120](https://github.com/elishawong/ai-agent/issues/120)(统一引擎架构总 issue)
-- **设计权威**:`aeloop/docs/DESIGN.md`(§7 适配层设计 / §8 里程碑 A2 / §8.5 Verity M2/M3 必修清单 / §1.6 层→代码映射 / §1.7 无跨层反向依赖)
+- **Project**: aeloop (`elishawong/aeloop`, private repo)
+- **Branch**: `feature/issue-6-a2-harness` (single branch, sequential commits within the batch — reasoning in §7)
+- **Priority**: P1
+- **Status**: Approved (approved by Elisha on 2026-07-20. §9.2 ajv decision = **skip**, validate directly with zod; §9.1 ProviderRouter/config.ts split already acknowledged by the Strategist)
+- **Last updated**: 2026-07-20
+- **Related issue**: [elishawong/aeloop#6](https://github.com/elishawong/aeloop/issues/6) (this increment) — Upstream tracking [elishawong/ai-agent#120](https://github.com/elishawong/ai-agent/issues/120) (umbrella issue for the unified engine architecture)
+- **Design authority**: `aeloop/docs/DESIGN.md` (§7 adapter layer design / §8 milestone A2 / §8.5 Verity M2/M3 required checklist / §1.6 layer→code mapping / §1.7 no cross-layer reverse dependencies)
 
 ---
 
-## 1. 问题 / 用户 / 方案
+## 1. Problem / Users / Approach
 
-- **要解决的问题**:A0+A1(profile loader / Context 三表+FTS5+事务/injector / Prompt 动态 schema-registry/composer)已 merge,但 aeloop 还没有任何「真的去调一个模型」的能力。这正是 Verity 最大的洞:`ProviderRouter` 压根没做,`LiteLLMAdapter` 硬编码 provider,导致「配置声称模型无关,实际只能用 LiteLLM 一条路」。A2 建 Harness 层,把「选模型 + 调模型 + 校验模型输出」做成可插拔、可测试、模型无关的一层。
-- **给谁用**:A2 本身是下游的直接消费方 —— A3(ClaudeCliAdapter/CodexCliAdapter/ToolExecVerifier)要复用同一个 `ModelAdapter` 接口和 `AdapterRegistry`;A4(Loop/LangGraph 编排的 Coder/Tester 节点)要直接调 `ProviderRouter.route(role)` 拿到 adapter、调 `SchemaValidator.validate(...)` 拿到校验过的结构化结果。短期内直接使用者是 Cypher/Zorro 在本增量和后续增量里跑测试。
-- **一句话方案**:按 DESIGN §7 建 `ModelAdapter` 接口 + `ProviderRouter`(角色→provider id→adapter 纯查找,零 I/O)+ `AdapterRegistry`(id→adapter 实例的注册表)+ `harness/config.ts`(从 `ProfileConfig` 构造出真实 adapter 并注册进 registry,这是"新增一个 provider 需要碰的地方",不是 router)+ `LiteLLMAdapter`(第一个真实 direct-api 实现)+ `SchemaValidator`(校验 + 失败重试并把上次错误喂回模型),并用一条硬性垂直切片测试证明 `PromptComposer` 的输出真的能流过 `ProviderRouter → adapter.invoke → SchemaValidator` 拿到 typed 结果。
+- **Problem to solve**: A0+A1 (profile loader / Context's three tables + FTS5 + transactions / injector / Prompt's dynamic schema-registry/composer) are merged, but aeloop still has no capability to actually "call a model." This is exactly Verity's biggest gap: `ProviderRouter` was never built at all, `LiteLLMAdapter` hardcoded the provider, resulting in "config claims to be model-agnostic but in practice only one path (LiteLLM) actually works." A2 builds the Harness layer, turning "pick a model + call the model + validate the model's output" into a pluggable, testable, model-agnostic layer.
+- **Who it's for**: A2 itself is the direct downstream consumer — A3 (ClaudeCliAdapter/CodexCliAdapter/ToolExecVerifier) will reuse the same `ModelAdapter` interface and `AdapterRegistry`; A4 (Loop's Coder/Tester nodes orchestrated via LangGraph) will directly call `ProviderRouter.route(role)` to get an adapter and `SchemaValidator.validate(...)` to get a validated structured result. In the short term the direct users are Cypher/Zorro running tests within this increment and subsequent ones.
+- **One-line approach**: Per DESIGN §7, build a `ModelAdapter` interface + `ProviderRouter` (role → provider id → adapter, pure lookup, zero I/O) + `AdapterRegistry` (id → adapter instance registry) + `harness/config.ts` (constructs real adapters from `ProfileConfig` and registers them into the registry — this is "the place you touch when adding a new provider," not the router) + `LiteLLMAdapter` (the first real direct-api implementation) + `SchemaValidator` (validation + one retry that feeds the previous error back to the model), plus one hard vertical-slice test proving that `PromptComposer`'s output can actually flow through `ProviderRouter → adapter.invoke → SchemaValidator` to get a typed result.
 
-## 2. 目标 / 非目标
+## 2. Goals / Non-Goals
 
-**目标**:
-- `src/harness/types.ts`:`ModelAdapter` 接口(`id`/`kind`/`checkAvailability()`/`invoke()`/可选 `toolTrace()`)+ `InvokeRequest`/`InvokeResult`/`AvailabilityResult` 类型(DESIGN §7 + §8.5#4)。
-- `src/harness/provider-router.ts`:`ProviderRouter` —— 读 `RoleConfig.provider` → 从 `AdapterRegistry` 取对应 adapter;**本身零 I/O、零具体 adapter 类引用**,加一个新 provider 不改这个文件一行(DESIGN §8.5#1)。
-- `src/harness/adapter-registry.ts`:`AdapterRegistry` —— 按 `id` 注册/取 `ModelAdapter` 实例(纯 Map 封装,无业务逻辑)。
-- `src/harness/config.ts`:`buildAdapterRegistry(profileConfig)` —— 从 `ProfileConfig.providers` 构造真实 adapter 并注册进 `AdapterRegistry`(DESIGN §6 文件结构明确把 `config.ts` 列在 harness 目录下;这是"新增 provider 要碰的地方",不是 router —— 见 §9.1 对这条边界的讨论)。
-- `src/harness/adapters/litellm-adapter.ts`:`LiteLLMAdapter`(`kind: "direct-api"`)—— 调 LiteLLM 代理;`JSON.parse` 全包 try-catch → 统一 `AdapterInvokeError`(§8.5#5);`checkAvailability()` 做真实网络探活,不只看 config 里有没有列出这个 provider(§8.5 的 deepseek 教训:「列表可见≠可调用」)。
-- `src/harness/schema-validator.ts`:`SchemaValidator` —— 拿 `schema-registry.ts` 已有的 zod schema 校验模型输出;失败重试 1 次,**把上次校验错误文本追加进重试请求的 prompt**,不是原样重发(§8.5#3)。
-- `src/harness/errors.ts`:`AdapterInvokeError`/`RoleNotBoundError`/`AdapterNotRegisteredError`/`SchemaValidationError` 等类型化错误。
-- **硬性垂直切片**:一条端到端测试证明「`PromptComposer` 输出的 prompt 字符串 → `ProviderRouter` 选中正确 adapter → adapter.invoke(用 fake adapter,不打真实网络)→ `SchemaValidator` 校验通过 → 拿到 typed `CoderOutput`」这条链路真的接通,不是三个各自绿的孤立测试。
+**Goals**:
+- `src/harness/types.ts`: `ModelAdapter` interface (`id`/`kind`/`checkAvailability()`/`invoke()`/optional `toolTrace()`) + `InvokeRequest`/`InvokeResult`/`AvailabilityResult` types (DESIGN §7 + §8.5#4).
+- `src/harness/provider-router.ts`: `ProviderRouter` — reads `RoleConfig.provider` → fetches the corresponding adapter from `AdapterRegistry`; **zero I/O, zero references to any concrete adapter class**, adding a new provider must not change a single line of this file (DESIGN §8.5#1).
+- `src/harness/adapter-registry.ts`: `AdapterRegistry` — register/get `ModelAdapter` instances by `id` (a pure Map wrapper, no business logic).
+- `src/harness/config.ts`: `buildAdapterRegistry(profileConfig)` — constructs real adapters from `ProfileConfig.providers` and registers them into `AdapterRegistry` (DESIGN §6 file structure explicitly lists `config.ts` under the harness directory; this is "the place you touch when adding a provider," not the router — see §9.1 for discussion of this boundary).
+- `src/harness/adapters/litellm-adapter.ts`: `LiteLLMAdapter` (`kind: "direct-api"`) — calls the LiteLLM proxy; wraps every `JSON.parse` in try-catch → unified `AdapterInvokeError` (§8.5#5); `checkAvailability()` does a real network probe, not just "is this provider listed in the config" (§8.5's deepseek lesson: "listed ≠ callable").
+- `src/harness/schema-validator.ts`: `SchemaValidator` — validates model output against the zod schema already present in `schema-registry.ts`; retries once on failure, **appending the previous validation-error text into the retry request's prompt**, not just resending the same request verbatim (§8.5#3).
+- `src/harness/errors.ts`: typed errors `AdapterInvokeError`/`RoleNotBoundError`/`AdapterNotRegisteredError`/`SchemaValidationError`, etc.
+- **Hard vertical slice**: one end-to-end test proving the chain "`PromptComposer`'s output prompt string → `ProviderRouter` selects the correct adapter → `adapter.invoke` (using a fake adapter, no real network calls) → `SchemaValidator` validates successfully → typed `CoderOutput` obtained" is actually wired together — not three isolated green tests.
 
-**非目标(明确不做,留给后续增量)**:
-- ❌ CLI 桥接 adapter(`ClaudeCliAdapter`/`CodexCliAdapter`)+ `ToolExecVerifier` —— A3(含 codex exec spike)。`InvokeResult` 会预留 `toolExecChecked` 字段位置,但本增量任何 adapter 都不会真的填它。
-- ❌ Loop 层(LangGraph 编排 / G1-G3 gate / 阈值升级 / checkpoint)—— A4;`workflow_runs`/`structured_claims`/`approvals` 三张表**不在本增量建表范围**(A2 是无状态的调用层,不碰数据库)。
-- ❌ 打真实 LiteLLM 公司代理(本地无该环境)—— 测试用本地 `node:http` 假服务器 + fake adapter,不连真实网络;`checkAvailability()` 的真实探活策略(具体打哪个端点)标 `[?]`,留给实现批次内的小 spike(见 §9.3)。
-- ❌ `SchemaValidator` 之后「校验彻底失败该怎么办」(标 lowConfidence / 打回 / 升级)—— 那是 A4 Loop 状态机的事;A2 的边界到「重试一次仍失败 → 抛类型化错误」为止。
+**Non-Goals (explicitly not doing, deferred to later increments)**:
+- ❌ CLI-bridge adapters (`ClaudeCliAdapter`/`CodexCliAdapter`) + `ToolExecVerifier` — A3 (including the codex exec spike). `InvokeResult` will reserve a place for the `toolExecChecked` field, but no adapter in this increment will actually populate it.
+- ❌ Loop layer (LangGraph orchestration / G1-G3 gates / threshold escalation / checkpoint) — A4; the `workflow_runs`/`structured_claims`/`approvals` tables are **not in scope for this increment's table creation** (A2 is a stateless invocation layer, it doesn't touch the database).
+- ❌ Hitting a real LiteLLM company proxy (no such environment locally) — tests use a local `node:http` fake server + fake adapter, no real network connections; the real probing strategy for `checkAvailability()` (which endpoint exactly) is marked `[?]`, left to a small spike within the implementation batch (see §9.3).
+- ❌ What to do after `SchemaValidator` fails validation entirely (mark lowConfidence / bounce back / escalate) — that's the A4 Loop state machine's job; A2's boundary ends at "retry once, still fails → throw a typed error."
 
-## 3. 用户故事
+## 3. User Stories
 
-- 作为 **A4 的 Loop 开发者**,我想要 `ProviderRouter.route("coder")` 直接给我一个能调的 `ModelAdapter`,不用关心它背后是 LiteLLM 还是别的什么,以便 Coder/Tester 节点的代码完全不知道具体 provider 是谁。
-- 作为 **A3 的 CLI 桥接开发者**,我想要 `ModelAdapter` 接口已经稳定,我只需要新写一个 `ClaudeCliAdapter implements ModelAdapter` 并在 `harness/config.ts` 里加一段构造逻辑,不需要改 `provider-router.ts`。
-- 作为 **指挥官**,我想要看到一条测试证明「加第二个 provider,路由到它,不改 router 代码」——不是文档自称,是真跑测试证明(Verity 的教训)。
-- 作为 **A4 的 Loop 开发者**,我想要模型吐出格式不对的 JSON 时,`SchemaValidator` 能自动重试一次并把「你上次错在哪」喂回模型,而不是原样再问一遍、指望运气。
+- As **A4's Loop developer**, I want `ProviderRouter.route("coder")` to directly hand me a callable `ModelAdapter`, without caring whether it's LiteLLM or something else behind it, so that the Coder/Tester nodes' code has zero knowledge of which specific provider it is.
+- As **A3's CLI-bridge developer**, I want the `ModelAdapter` interface to already be stable, so I only need to write a new `ClaudeCliAdapter implements ModelAdapter` and add a construction branch in `harness/config.ts`, without touching `provider-router.ts`.
+- As **the Commander**, I want to see a test proving "add a second provider, route to it, without changing router code" — not a claim in documentation, but an actually-run test proving it (Verity's lesson).
+- As **A4's Loop developer**, I want `SchemaValidator` to automatically retry once and feed back "where you went wrong last time" when the model spits out malformed JSON, instead of asking the exact same question again and hoping for luck.
 
-## 4. 数据模型
+## 4. Data Model
 
-本增量**无状态、不建表**——Harness 层本身不持久化任何东西(`structured_claims`/`workflow_runs`/`approvals` 三张表是 A4 Loop 的事,DESIGN §5 已明确)。唯一"数据形状"是内存态的请求/响应类型,列在 §5 的 `harness/types.ts` 里,不是数据库 schema。
+This increment is **stateless, creates no tables** — the Harness layer itself persists nothing (the `structured_claims`/`workflow_runs`/`approvals` tables are A4 Loop's business, already made clear in DESIGN §5). The only "data shape" is the in-memory request/response types listed in §5's `harness/types.ts` — not a database schema.
 
-## 5. 逐文件任务清单
+## 5. File-by-File Task List
 
-### Harness 核心
-- `src/harness/types.ts` —— 核心类型:
-  - `ModelAdapter` 接口(DESIGN §7 原样):
+### Harness Core
+- `src/harness/types.ts` — core types:
+  - `ModelAdapter` interface (DESIGN §7 verbatim):
     ```typescript
     interface ModelAdapter {
-      readonly id: string;                 // "litellm" | 未来 "claude-cli" | "codex-cli"
+      readonly id: string;                 // "litellm" | future "claude-cli" | "codex-cli"
       readonly kind: "direct-api" | "cli-bridge";
       checkAvailability(): Promise<AvailabilityResult>;
       invoke(req: InvokeRequest): Promise<InvokeResult>;
-      toolTrace?(): ToolCallRecord[];       // cli-bridge 专属,A3 才用,A2 不实现任何返回它的 adapter
+      toolTrace?(): ToolCallRecord[];       // cli-bridge-exclusive, only used by A3; A2 implements no adapter that returns it
     }
     ```
-  - `InvokeRequest`:`{ role: Role; prompt: string }`(`prompt` = `PromptComposer.compose()` 的输出字符串;`Role` 复用 `../shared/types.js` 的开放字符串类型,不新增角色约束)。
-  - `InvokeResult`:`{ content: string; provider: string; model: string; toolExecChecked?: "pass" | "fail" | "na" }`(§8.5#4 硬性要求 `provider`/`model` 必带;`toolExecChecked` 是 A3 的字段,A2 的 adapter 一律不设置这个字段,不是设置成 `"na"` 占位——`undefined` 比编一个假值更诚实)。
-  - `AvailabilityResult`:`{ available: boolean; reason?: string; checkedAt: ISODateString }`。
-  - `ToolCallRecord`:`[?]` 形状留空/占位(A3 定义),A2 只需要 `toolTrace?(): ToolCallRecord[]` 这个方法签名存在于接口上,不需要这个类型有实际内容——**建议**本增量把 `ToolCallRecord` 定义成一个最小占位 `interface ToolCallRecord { [key: string]: unknown }` 并在注释里注明"A3 会替换成真实形状",避免 A3 开工时还要回头改这个文件的接口签名。
+  - `InvokeRequest`: `{ role: Role; prompt: string }` (`prompt` = the output string of `PromptComposer.compose()`; `Role` reuses the open string type from `../shared/types.js`, no new role constraints added).
+  - `InvokeResult`: `{ content: string; provider: string; model: string; toolExecChecked?: "pass" | "fail" | "na" }` (§8.5#4 hard-requires `provider`/`model` to always be present; `toolExecChecked` is A3's field — A2's adapters must never set this field, rather than setting it to `"na"` as a placeholder — `undefined` is more honest than fabricating a fake value).
+  - `AvailabilityResult`: `{ available: boolean; reason?: string; checkedAt: ISODateString }`.
+  - `ToolCallRecord`: `[?]` shape left blank/placeholder (defined by A3), A2 only needs the method signature `toolTrace?(): ToolCallRecord[]` to exist on the interface, no need for this type to have real content — **suggestion**: this increment defines `ToolCallRecord` as a minimal placeholder `interface ToolCallRecord { [key: string]: unknown }` with a comment noting "A3 will replace this with the real shape," to avoid A3 having to come back and change this file's interface signature when it starts.
 - `src/harness/errors.ts`:
-  - `AdapterInvokeError`(HTTP/网络/`JSON.parse` 失败统一包装,`cause` 保留原始错误,风格对齐 `context/errors.ts`/`profile/errors.ts` 已有的 `describeCause` 惯例)。
-  - `RoleNotBoundError`(`ProviderRouter.route(role)` 时 `role` 在 `ProfileConfig.roles` 里没有绑定)。
-  - `AdapterNotRegisteredError`(`role` 绑定的 `provider` id 在 `AdapterRegistry` 里没有注册的 adapter —— 覆盖"config 写了但没人构造对应 adapter"和"provider id 打错字"两种情况,`ProviderRouter` 不需要关心是哪一种,都是"这个 id 我这没有")。
-  - `SchemaValidationError`(重试后仍未通过校验,携带两次尝试的原始 `content` + zod 错误信息,供调用方/日志诊断,不是静默失败)。
-- `src/harness/adapter-registry.ts`:`AdapterRegistry` 类 —— `register(adapter: ModelAdapter): void`(按 `adapter.id` 存)、`get(id: string): ModelAdapter | undefined`、`has(id: string): boolean`。纯数据结构封装,不含任何 provider 具体知识。
-- `src/harness/provider-router.ts`:`ProviderRouter` 类 —— 构造函数接收 `roles: ProfileConfig["roles"]` + `registry: AdapterRegistry`(**不接收整个 `ProfileConfig`,只拿它需要的 `roles` 切片**,减少隐式耦合,对齐 A1 `PromptComposer`/`MemoryStore` 一贯的"显式传所需依赖,不传整个大对象"风格)。`route(role: Role): ModelAdapter` —— 查 `roles[role]` 不存在 → 抛 `RoleNotBoundError`;取到 `provider` id 后查 `registry.get(id)` 不存在 → 抛 `AdapterNotRegisteredError`;否则返回 adapter。**这个文件本增量之后新增 provider 永远不需要再改**——这是 §8.5#1 验收项的字面要求,也是本 PRD 唯一一处要求"有测试证明改动量为零"的地方(测试策略见 §9.1)。
-- `src/harness/config.ts`:`buildAdapterRegistry(config: ProfileConfig): AdapterRegistry` —— 遍历 `config.providers`,按 `kind` 分派构造:`kind === "direct-api"` → 目前只认得 `LiteLLMAdapter`(`new LiteLLMAdapter(id, providerConfig)`);`kind === "cli-bridge"` → **本增量不构造任何东西,显式跳过**(注释写明"A3 补 ClaudeCliAdapter/CodexCliAdapter 的构造分支于此"),不是报错也不是造一个假 adapter——`profiles/helix/config.yaml` 目前两个 provider 都是 `cli-bridge`,用这份真实配置跑 `buildAdapterRegistry` 应该返回一个空的 `AdapterRegistry`,这是预期行为而非 bug,需要一条测试固定住这个预期(否则未来有人"顺手"给 cli-bridge 分支塞一个占位实现,悄悄违反"A3 才做 CLI 桥接"的边界)。
-- `src/harness/adapters/litellm-adapter.ts`:`LiteLLMAdapter implements ModelAdapter`:
-  - 构造:`new LiteLLMAdapter(id: string, config: { base_url?: string; api_key?: string; model?: string })`(`config` 形状取自 `ProfileConfig.providers[id]`,即 A1 `ProviderConfig` 类型,字段已在 profile loader 里做过 `${ENV}` 替换)。
-  - `kind = "direct-api"`。
-  - `invoke(req)`:向 `${base_url}/chat/completions` 发 `POST`(**`[?]` 端点路径/请求体形状未经真实 LiteLLM 代理验证**——假定 LiteLLM 代理暴露 OpenAI 兼容的 `chat/completions` 端点这是 LiteLLM 项目对外的公开定位,但本机没有可连的公司代理实例做实测,不能当"已验证"写;实现时按这个假定写,同时把这条 `[?]` 原样留到 progress.md,等真的接上公司代理才能摘掉)。请求体大致含 `model`/`messages`(把 `req.prompt` 包成单条 `user` message)/可能的 `response_format`(结构化输出相关,`[?]` 是否需要以及具体形状未验证,MVP 可以先不传、只在 prompt 文本里已有的 schema 说明上依赖模型自觉,校验交给 `SchemaValidator` 兜底——即使传了 `response_format` 也不能替代 `SchemaValidator`,那道闸不能因为"上游可能已经保证格式"就跳过)。
-  - 拿到 HTTP 响应后:非 2xx → 按状态码分类包成 `AdapterInvokeError`(401/403/429/5xx 各自测试覆盖,见 §5 测试小节);2xx 但响应体 `JSON.parse` 失败或结构不是预期形状 → 同样包成 `AdapterInvokeError`,不裸抛 `SyntaxError`(§8.5#5)。
-  - `base_url` 做尾斜线归一化(`base_url.replace(/\/+$/, "")` 再拼路径),避免 `https://x.com/` + `/chat/completions` 拼出 `https://x.com//chat/completions` 这种 Verity 实测踩过的坑(§8.5#6)。
-  - `api_key` 缺失时**不裸拼字符串**(避免 ``Authorization: Bearer ${undefined}`` 这种把 `"undefined"` 当 token 发出去的经典 bug——Verity M3 那类"缺列/缺值静默传播"问题的同族);缺失时直接不设 `Authorization` header,让代理自己决定要不要因为没有认证头而 401(测试覆盖这条路径,见 §8.5#6)。
-  - `checkAvailability()`:发一次真实 HTTP 请求判定可用性(不是只检查 `base_url`/`api_key` 是否配置了值就算"可用")。**`[?]` 具体打哪个端点/用什么最小请求未定**(留 §9.3 讨论),但无论最终选哪个,验收底线是"这条路径必须发出一次真实网络请求并依据响应判定",不能退化成配置存在性检查——这是 §8.5 表格"列表可见≠可调用"教训的直接对应项。
-  - `toolTrace` 不实现(`kind: "direct-api"` 的 adapter 天然没有工具调用流可核,接口上这个方法是可选的,`LiteLLMAdapter` 干脆不定义它)。
-- `src/harness/schema-validator.ts`:`SchemaValidator` 类:
-  - `validate<T>(params: { schema: z.ZodType<T>; request: InvokeRequest; invoke: (req: InvokeRequest) => Promise<InvokeResult> }): Promise<{ data: T; result: InvokeResult; attempts: 1 | 2 }>`。
-  - 第一次:`invoke(request)` → 尝试 `JSON.parse(result.content)` → 失败或 `schema.safeParse()` 不通过 → 进重试分支。
-  - 重试分支:构造 `retryRequest = { ...request, prompt: request.prompt + "\n\n---\n\n# Previous Attempt Failed Validation\n\n" + <失败原因,含 JSON parse 错误或 zod 的 issues 摘要> + "\n\nPlease respond again with corrected JSON matching the schema." }`,再 `invoke(retryRequest)`。**测试要能断言第二次 `invoke` 收到的 `req.prompt` 字符串 ≠ 第一次、且包含上一次的错误信息**——这是 §8.5#3 的字面验收标准。
-  - 重试仍失败 → 抛 `SchemaValidationError`(携带两次 `content` + 两次错误详情),不静默返回 `null`/`undefined`。
-  - `SchemaValidator` **不知道 adapter 是谁**——它只接收一个 `invoke` 回调(通常是调用方传入 `(req) => adapter.invoke(req)`),这样测试不需要构造真实/假 adapter 对象,只需要传一个普通函数,也让 `SchemaValidator` 完全不依赖 `ProviderRouter`/`AdapterRegistry`(层内解耦,便于未来单独复用)。
+  - `AdapterInvokeError` (unified wrapper for HTTP/network/`JSON.parse` failures, preserves the original error via `cause`, style aligned with the existing `describeCause` convention in `context/errors.ts`/`profile/errors.ts`).
+  - `RoleNotBoundError` (thrown by `ProviderRouter.route(role)` when `role` has no binding in `ProfileConfig.roles`).
+  - `AdapterNotRegisteredError` (thrown when the `provider` id bound to a `role` has no adapter registered in `AdapterRegistry` — covers both "config specifies it but nobody constructed the corresponding adapter" and "typo'd the provider id"; `ProviderRouter` doesn't need to care which one it is, both are "I don't have this id here").
+  - `SchemaValidationError` (still fails validation after retry, carries the raw `content` from both attempts + the zod error info, for the caller/logs to diagnose — not a silent failure).
+- `src/harness/adapter-registry.ts`: `AdapterRegistry` class — `register(adapter: ModelAdapter): void` (stored by `adapter.id`), `get(id: string): ModelAdapter | undefined`, `has(id: string): boolean`. A pure data-structure wrapper, contains no knowledge of any specific provider.
+- `src/harness/provider-router.ts`: `ProviderRouter` class — constructor takes `roles: ProfileConfig["roles"]` + `registry: AdapterRegistry` (**does not take the whole `ProfileConfig`, only the `roles` slice it needs**, reducing implicit coupling, consistent with A1's `PromptComposer`/`MemoryStore` convention of "pass explicit dependencies, not the whole big object"). `route(role: Role): ModelAdapter` — looks up `roles[role]`; if not found → throws `RoleNotBoundError`; gets the `provider` id, looks up `registry.get(id)`; if not found → throws `AdapterNotRegisteredError`; otherwise returns the adapter. **This file must never need to change again when new providers are added going forward** — this is the literal requirement of the §8.5#1 acceptance item, and also the one place in this PRD that requires "a test proving the amount of change is zero" (test strategy in §9.1).
+- `src/harness/config.ts`: `buildAdapterRegistry(config: ProfileConfig): AdapterRegistry` — iterates `config.providers`, dispatches construction by `kind`: `kind === "direct-api"` → currently only recognizes `LiteLLMAdapter` (`new LiteLLMAdapter(id, providerConfig)`); `kind === "cli-bridge"` → **this increment constructs nothing at all, explicitly skips it** (comment noting "A3 fills in the ClaudeCliAdapter/CodexCliAdapter construction branch here"), neither an error nor a fake adapter — `profiles/helix/config.yaml` currently has both providers as `cli-bridge`, so running `buildAdapterRegistry` against this real config should return an empty `AdapterRegistry`; this is the expected behavior, not a bug, and needs a test to pin down this expectation (otherwise someone might "conveniently" stuff a placeholder implementation into the cli-bridge branch in the future, silently violating the boundary that "CLI-bridging is A3's job").
+- `src/harness/adapters/litellm-adapter.ts`: `LiteLLMAdapter implements ModelAdapter`:
+  - Constructor: `new LiteLLMAdapter(id: string, config: { base_url?: string; api_key?: string; model?: string })` (`config`'s shape comes from `ProfileConfig.providers[id]`, i.e. A1's `ProviderConfig` type, with fields already `${ENV}`-substituted by the profile loader).
+  - `kind = "direct-api"`.
+  - `invoke(req)`: sends a `POST` to `${base_url}/chat/completions` (**`[?]` the endpoint path/request body shape has not been verified against a real LiteLLM proxy** — assumes the LiteLLM proxy exposes an OpenAI-compatible `chat/completions` endpoint, which is LiteLLM's stated public positioning, but there's no reachable company proxy instance locally to actually verify against, so it can't be written as "already verified"; implement per this assumption, and carry this `[?]` verbatim into progress.md, to be removed only once actually connected to the company proxy). The request body roughly contains `model`/`messages` (wraps `req.prompt` into a single `user` message)/possibly `response_format` (structured-output related, `[?]` whether it's needed and its exact shape is unverified; for MVP it's fine to skip it and rely on the schema description already present in the prompt text for the model's self-discipline, with validation backstopped by `SchemaValidator` — even if `response_format` is sent, it still can't substitute for `SchemaValidator`; that gate cannot be skipped just because "upstream might already guarantee the format").
+  - After getting the HTTP response: non-2xx → categorized by status code and wrapped into `AdapterInvokeError` (401/403/429/5xx each covered by its own test, see the testing subsection of §5); 2xx but response body `JSON.parse` fails or isn't the expected shape → likewise wrapped into `AdapterInvokeError`, never let a bare `SyntaxError` escape (§8.5#5).
+  - `base_url` trailing-slash normalization (`base_url.replace(/\/+$/, "")` before concatenating the path), to avoid `https://x.com/` + `/chat/completions` producing `https://x.com//chat/completions` — a pitfall Verity actually hit in practice (§8.5#6).
+  - When `api_key` is missing, **don't bare-concatenate the string** (avoiding the classic bug of `` Authorization: Bearer ${undefined} ``, sending `"undefined"` as if it were a token — same family as Verity M3's "missing column/value silently propagating" class of problems); when missing, simply don't set the `Authorization` header, let the proxy decide whether to 401 for lack of an auth header (this path is covered by a test, see §8.5#6).
+  - `checkAvailability()`: fires a real HTTP request to determine availability (not just checking whether `base_url`/`api_key` have values configured and calling that "available"). **`[?]` exactly which endpoint / what minimal request is undecided** (left for discussion in §9.3), but whichever one is finally chosen, the acceptance floor is "this path must fire a real network request and decide based on the response" — it cannot degrade into a config-existence check — this is the direct counterpart to the "listed ≠ callable" lesson from the §8.5 table.
+  - `toolTrace` is not implemented (a `kind: "direct-api"` adapter naturally has no tool-call trace to audit; this method is optional on the interface, so `LiteLLMAdapter` simply doesn't define it).
+- `src/harness/schema-validator.ts`: `SchemaValidator` class:
+  - `validate<T>(params: { schema: z.ZodType<T>; request: InvokeRequest; invoke: (req: InvokeRequest) => Promise<InvokeResult> }): Promise<{ data: T; result: InvokeResult; attempts: 1 | 2 }>`.
+  - First attempt: `invoke(request)` → attempt `JSON.parse(result.content)` → failure or `schema.safeParse()` doesn't pass → go to the retry branch.
+  - Retry branch: constructs `retryRequest = { ...request, prompt: request.prompt + "\n\n---\n\n# Previous Attempt Failed Validation\n\n" + <failure reason, including the JSON parse error or a summary of the zod issues> + "\n\nPlease respond again with corrected JSON matching the schema." }`, then calls `invoke(retryRequest)` again. **The test must be able to assert that the `req.prompt` string received by the second `invoke` call ≠ the first, and contains the previous error information** — this is the literal acceptance criterion of §8.5#3.
+  - Still fails after retry → throws `SchemaValidationError` (carrying both attempts' `content` + both errors' details), not a silent return of `null`/`undefined`.
+  - `SchemaValidator` **doesn't know who the adapter is** — it only receives an `invoke` callback (typically the caller passes `(req) => adapter.invoke(req)`), so tests don't need to construct a real/fake adapter object, just pass an ordinary function, and this also keeps `SchemaValidator` fully independent of `ProviderRouter`/`AdapterRegistry` (decoupled within the layer, easing future standalone reuse).
 
-### 测试(与逐文件任务一一对应)
-- `src/harness/provider-router.test.ts` —— 覆盖:①正常路由(role→provider→adapter 返回正确 id);②**注册第二个 fake adapter(id 不同),改 role 绑定的 provider,断言路由到新 adapter,且断言过程中 `provider-router.ts` 源文件未被修改**(用一份"运行前后 diff = 0"或至少测试本身独立成立、不依赖修改 router 源码来证明,具体断言方式见 §9.1);③`role` 未绑定 → `RoleNotBoundError`;④`provider` id 未注册 → `AdapterNotRegisteredError`。
-- `src/harness/adapter-registry.test.ts` —— 覆盖:register/get/has 基本行为 + 重复 `register` 同 id 的行为(覆盖 vs 报错,`[?]` 见 §9.4)。
-- `src/harness/config.test.ts` —— 覆盖:①传入含 `litellm`(direct-api)的 `ProfileConfig` → registry 里能 `get("litellm")` 拿到 `LiteLLMAdapter` 实例;②传入真实 `profiles/helix/config.yaml` 解析出的 config(两个 provider 都是 cli-bridge)→ registry 为空,这是预期行为不是 bug(见上文 `config.ts` 任务描述)。
-- `src/harness/adapters/litellm-adapter.test.ts` —— 用 `node:http.createServer` 起本地假服务器(不打真实网络,不用第三方 mock 库,和 A1 全程"真实但受控"的测试哲学一致):
-  - 200 成功路径:返回合法响应体,`invoke()` 返回的 `InvokeResult` 含正确 `content`/`provider`/`model`。
-  - 401 / 403 / 429 / 500(5xx 代表)四种状态码各一条测试,断言抛出的是 `AdapterInvokeError` 且带得到状态码信息(不是裸 `Error`/裸 HTTP 库异常泄漏出去)。
-  - `base_url` 带尾斜线(如 `"http://127.0.0.1:PORT/"`)时,断言假服务器收到的 `req.url` 路径没有出现连续斜杠(证明归一化生效)。
-  - `api_key` 缺失(`config.api_key` 为 `undefined`)时,断言请求没有发出形如 `"Bearer undefined"` 的 `Authorization` header(可以是完全不发这个 header,断言假服务器收到的 headers 里没有这个畸形值)。
-  - 响应体不是合法 JSON 时,断言抛出的是 `AdapterInvokeError` 而不是裸 `SyntaxError` 冒出来。
-  - `checkAvailability()` 至少一条测试证明它真的发出了 HTTP 请求(用同一个假服务器断言收到了请求),不是只读 config 字段就返回 `available: true`。
-- `src/harness/schema-validator.test.ts` —— 覆盖:①第一次校验就通过(1 次 `invoke` 调用,`attempts: 1`);②第一次失败、第二次通过(2 次调用,断言第二次 `req.prompt` 含第一次的错误信息且整串不等于第一次);③两次都失败 → 抛 `SchemaValidationError`;④第一次响应体本身不是合法 JSON(不是 schema 不匹配,是纯 JSON 语法错误)也要走同一条重试路径,不是两套代码。
+### Tests (one-to-one with the file task list)
+- `src/harness/provider-router.test.ts` — covers: ① normal routing (role→provider→adapter returns the correct id); ② **register a second fake adapter (different id), change the `provider` binding on a role, assert routing to the new adapter, and assert that `provider-router.ts` source file was not modified during the process** (using a "diff before/after the run = 0" approach, or at minimum the test itself proves independently that it doesn't rely on modifying the router source — specific assertion approach in §9.1); ③ `role` unbound → `RoleNotBoundError`; ④ `provider` id unregistered → `AdapterNotRegisteredError`.
+- `src/harness/adapter-registry.test.ts` — covers: basic register/get/has behavior + the behavior of calling `register` twice with the same id (overwrite vs. error, `[?]` see §9.4).
+- `src/harness/config.test.ts` — covers: ① passing a `ProfileConfig` containing `litellm` (direct-api) → the registry can `get("litellm")` and retrieve a `LiteLLMAdapter` instance; ② passing a config parsed from the real `profiles/helix/config.yaml` (both providers are cli-bridge) → the registry is empty; this is expected behavior, not a bug (see the `config.ts` task description above).
+- `src/harness/adapters/litellm-adapter.test.ts` — spins up a local fake server with `node:http.createServer` (no real network calls, no third-party mocking library, consistent with A1's "real but controlled" testing philosophy throughout):
+  - 200 success path: returns a valid response body, `invoke()`'s returned `InvokeResult` contains the correct `content`/`provider`/`model`.
+  - 401 / 403 / 429 / 500 (representing 5xx) — one test each for the four status codes, asserting that what's thrown is an `AdapterInvokeError` carrying the status-code information (not a bare `Error`/a leaked raw HTTP-library exception).
+  - When `base_url` has a trailing slash (e.g. `"http://127.0.0.1:PORT/"`), assert that the `req.url` path received by the fake server doesn't have consecutive slashes (proving normalization takes effect).
+  - When `api_key` is missing (`config.api_key` is `undefined`), assert that the request doesn't send a malformed `Authorization` header like `"Bearer undefined"` (can be that the header isn't sent at all — assert the fake server's received headers don't contain this malformed value).
+  - When the response body isn't valid JSON, assert that what's thrown is an `AdapterInvokeError`, not a bare `SyntaxError` bubbling up.
+  - `checkAvailability()` — at least one test proving it actually fires an HTTP request (using the same fake server, assert the request was received), not just reading a config field and returning `available: true`.
+- `src/harness/schema-validator.test.ts` — covers: ① passes validation on the first try (1 `invoke` call, `attempts: 1`); ② fails the first time, passes the second (2 calls, assert the second `req.prompt` contains the first error's information and the whole string ≠ the first one); ③ fails both times → throws `SchemaValidationError`; ④ the first response body itself isn't valid JSON (not a schema mismatch, a pure JSON syntax error) — also goes through the same retry path, not a separate codepath.
 
-### 垂直切片(A2 收尾,硬性交付)
-- `src/harness.e2e.test.ts`(命名 `[?]`,对齐 `src/context-prompt.e2e.test.ts` 已有的顶层 e2e 文件放置惯例)——端到端测试,复用 A1 已有的真实 Context→Prompt 链路(真实 `MemoryStore` + `ContextInjector` + `PromptComposer`,做法照抄 `context-prompt.e2e.test.ts` 的搭建方式,不重新发明),再往下接:
-  1. `PromptComposer.compose("coder", injectedContext, task)` 产出真实 prompt 字符串。
-  2. 手写一个 `FakeAdapter implements ModelAdapter`(本条测试里**唯一被替换成 fake 的边界**,代表"不打真实网络"这条非目标约束;`id: "fake-litellm"`,`kind: "direct-api"`,`invoke()` 返回一个 `content` 字段是合法 `CoderOutput` JSON 字符串的 `InvokeResult`),注册进真实 `AdapterRegistry`。
-  3. 真实 `ProviderRouter`(`roles: { coder: { provider: "fake-litellm" } }`)路由到这个 fake adapter。
-  4. 真实 `SchemaValidator.validate({ schema: CoderOutput, request: { role: "coder", prompt }, invoke: (req) => adapter.invoke(req) })`。
-  5. 断言最终拿到的 `data` 是 typed、结构正确的 `CoderOutput` 对象,且 `result.provider === "fake-litellm"`。
-  - 这条测试就是 DESIGN §8.5"每个里程碑收尾必须有一条薄垂直切片真正接通"在 A2 的落地证据——证明 Prompt 层输出真的能流过 Harness 全部三个新组件,不是三份孤立绿测试。
+### Vertical Slice (A2 closeout, hard deliverable)
+- `src/harness.e2e.test.ts` (name `[?]`, aligned with the existing top-level e2e file placement convention set by `src/context-prompt.e2e.test.ts`) — an end-to-end test that reuses A1's existing real Context→Prompt chain (real `MemoryStore` + `ContextInjector` + `PromptComposer`, built the same way `context-prompt.e2e.test.ts` does it, not reinventing it), then continues on downstream:
+  1. `PromptComposer.compose("coder", injectedContext, task)` produces a real prompt string.
+  2. Hand-write a `FakeAdapter implements ModelAdapter` (**the only thing in this test that is replaced with a fake**, representing the non-goal constraint of "no real network calls"; `id: "fake-litellm"`, `kind: "direct-api"`, `invoke()` returns an `InvokeResult` whose `content` field is a valid `CoderOutput` JSON string), registered into a real `AdapterRegistry`.
+  3. A real `ProviderRouter` (`roles: { coder: { provider: "fake-litellm" } }`) routes to this fake adapter.
+  4. A real `SchemaValidator.validate({ schema: CoderOutput, request: { role: "coder", prompt }, invoke: (req) => adapter.invoke(req) })`.
+  5. Assert the final `data` obtained is a typed, correctly-structured `CoderOutput` object, and `result.provider === "fake-litellm"`.
+  - This test is the concrete evidence, at A2, of DESIGN §8.5's "every milestone closeout must have one thin vertical slice actually wired together" — proving the Prompt layer's real output can actually flow through all three new Harness components, not three isolated green tests.
 
-### 依赖 / 打包
-- `package.json` —— **本增量不新增任何依赖**(A2 用 Node 内建全局 `fetch`/`node:http`,`@types/node@24` 已含 `fetch`/`Headers`/`Request`/`Response` 类型,`tsconfig.json` 的 `"types": ["node"]` 不需要改动;`SchemaValidator` 直接用 `schema-registry.ts` 里已有的 zod `ZodType.safeParse()`,不引入 `ajv`——这条和根 `CLAUDE.md` 技术栈表"ajv(JSON Schema 校验)"字面不完全一致,是本 PRD 明确的一处待指挥官拍板的分歧点,见 §9.2,不是疏漏)。
+### Dependencies / Packaging
+- `package.json` — **this increment adds no new dependencies** (A2 uses Node's built-in global `fetch`/`node:http`; `@types/node@24` already includes `fetch`/`Headers`/`Request`/`Response` types, `tsconfig.json`'s `"types": ["node"]` needs no change; `SchemaValidator` directly uses the zod `ZodType.safeParse()` already present in `schema-registry.ts`, no `ajv` introduced — this is not fully literally consistent with the root `CLAUDE.md`'s tech-stack table listing "ajv (JSON Schema validation)," and is an explicit point of divergence in this PRD pending Commander sign-off, see §9.2 — not an oversight).
 
-## 6. 批次拆解
+## 6. Batch Breakdown
 
-> 单位延用 A0+A1 PRD 的自定义量级:`[S]` ≈ 2-4h、`[M]` ≈ 半天到一天、`[L]` ≈ 1-2 天。全部在同一分支 `feature/issue-6-a2-harness` 上顺序提交(理由见 §7)。
+> Sizing units follow the custom scale from the A0+A1 PRD: `[S]` ≈ 2-4h, `[M]` ≈ half a day to a day, `[L]` ≈ 1-2 days. All committed sequentially on the same branch `feature/issue-6-a2-harness` (reasoning in §7).
 
-| 批次 | 内容 | 依赖 | 规模 |
+| Batch | Contents | Depends on | Size |
 |---|---|---|---|
-| **B0** | `src/harness/types.ts` + `errors.ts`(接口/类型先行,不含实现) | 无(起点) | [S] |
+| **B0** | `src/harness/types.ts` + `errors.ts` (interfaces/types first, no implementation) | none (starting point) | [S] |
 | **B1** | `src/harness/adapter-registry.ts` + `adapter-registry.test.ts` | B0 | [S] |
-| **B2** | `src/harness/provider-router.ts` + `provider-router.test.ts`(含"加第二个 fake adapter、router 不改代码"的硬性测试) | B1 | [M] |
-| **B3** | `src/harness/adapters/litellm-adapter.ts` + `litellm-adapter.test.ts`(`node:http` 假服务器,含 401/403/429/5xx/尾斜线/缺 key/非法 JSON/checkAvailability 全部路径) | B0 | [L](本批体量最大,含 spike §9.3) |
-| **B4** | `src/harness/config.ts` + `config.test.ts`(含"真实 helix config → 空 registry 是预期行为"这条固定测试) | B2 + B3 | [S] |
-| **B5** | `src/harness/schema-validator.ts` + `schema-validator.test.ts`(含重试喂回错误的字面断言) | B0 | [M] |
-| **B6** | 垂直切片 `src/harness.e2e.test.ts` | B2 + B3(仅需 `FakeAdapter`,不强依赖 B3 内部实现细节,但需要 B3 已定的 `ModelAdapter` 接口稳定)+ B5 | [S] |
-| **B7** | 文档回写(`docs/ROADMAP.md`/`docs/PROGRESS.md`/`CHANGELOG.md`/根 `CLAUDE.md` 技术栈行 + 目录结构行打钩更新)+ 知识库条目(已核实 `ai-agent/CHARTS/knowledge/` 目前只有 `README.md`/`ai-agent.md`/`whoseorder.md`,尚无 `aeloop.md`——本增量若要开始建 aeloop 的模块级知识库索引,是新建 `CHARTS/knowledge/aeloop.md` 而非补一个已有文件;是否本增量就建、还是等 A2 全部 merge 后再统一建,留给指挥官/军师定,不阻塞本 PRD 开工) | B6 | [S] |
+| **B2** | `src/harness/provider-router.ts` + `provider-router.test.ts` (includes the hard test of "add a second fake adapter, router code unchanged") | B1 | [M] |
+| **B3** | `src/harness/adapters/litellm-adapter.ts` + `litellm-adapter.test.ts` (`node:http` fake server, covering 401/403/429/5xx/trailing-slash/missing-key/invalid-JSON/checkAvailability, every path) | B0 | [L] (the largest batch, includes the §9.3 spike) |
+| **B4** | `src/harness/config.ts` + `config.test.ts` (includes the fixed test of "real helix config → empty registry is expected behavior") | B2 + B3 | [S] |
+| **B5** | `src/harness/schema-validator.ts` + `schema-validator.test.ts` (includes the literal assertion of retry feeding back the error) | B0 | [M] |
+| **B6** | Vertical slice `src/harness.e2e.test.ts` | B2 + B3 (only needs `FakeAdapter`, doesn't strongly depend on B3's internal implementation details, but needs B3's `ModelAdapter` interface to already be stable) + B5 | [S] |
+| **B7** | Documentation write-back (`docs/ROADMAP.md`/`docs/PROGRESS.md`/`CHANGELOG.md`/root `CLAUDE.md`'s tech-stack line + directory-structure line checked off/updated) + knowledge-base entry (confirmed `ai-agent/CHARTS/knowledge/` currently only has `README.md`/`ai-agent.md`/`whoseorder.md`, no `aeloop.md` yet — if this increment is to start aeloop's module-level knowledge-base index, it means creating a new `CHARTS/knowledge/aeloop.md`, not supplementing an existing file; whether to build it in this increment or wait until all of A2 is merged and build it uniformly is left to the Commander/Strategist to decide, doesn't block starting this PRD's work) | B6 | [S] |
 
-**依赖图要点**:B3(LiteLLMAdapter)和 B5(SchemaValidator)彼此独立,理论上可并行开发(B3 不依赖 B5,B5 不依赖具体 adapter 只依赖回调签名);同一 Cypher 顺序实现故不额外拆分支,排序只是顺序选择。B6 垂直切片必须等 B2+B3+B5 全部完成才能做,不可提前用假通过糊弄。
+**Dependency graph notes**: B3 (LiteLLMAdapter) and B5 (SchemaValidator) are mutually independent, theoretically parallelizable (B3 doesn't depend on B5, B5 doesn't depend on any concrete adapter, only on the callback signature); since the same Cypher implements them sequentially, no extra branch split is made — the ordering is simply a sequencing choice. B6's vertical slice must wait until B2+B3+B5 are all complete before it can be done, and cannot be faked-passed ahead of time.
 
-## 7. 分支策略
+## 7. Branch Strategy
 
-单分支 `feature/issue-6-a2-harness`,批次按 §6 顺序提交,理由同 A0+A1 PRD §7:一个人顺序实现,批次间大部分是真依赖(B0→B1→B2→B4、B0→B3→B4、B0→B5,B2+B3+B5→B6 汇合),没有需要独立合并的并行协作场景。若指挥官希望 Zorro 分阶段审(而非一次性大 diff),可在同一分支内按"B0-B2(路由骨架)/ B3(LiteLLMAdapter)/ B4-B6(config+SchemaValidator+切片)"三个自然断点分别提交并请求阶段性审查。
+Single branch `feature/issue-6-a2-harness`, batches committed in §6 order, same reasoning as the A0+A1 PRD §7: one person implementing sequentially, most inter-batch dependencies are real (B0→B1→B2→B4, B0→B3→B4, B0→B5, B2+B3+B5→B6 converge), no parallel collaboration scenario requiring independent merges. If the Commander wants Zorro to review in stages (rather than one giant diff), it can be committed and reviewed at three natural breakpoints within the same branch: "B0-B2 (routing skeleton) / B3 (LiteLLMAdapter) / B4-B6 (config+SchemaValidator+slice)."
 
-## 8. 可测验收标准(可勾选)
+## 8. Testable Acceptance Criteria (checkable)
 
-- [ ] `pnpm build` 成功(tsc strict + `noUncheckedIndexedAccess` 无报错),`pnpm lint`(`tsc --noEmit`)同样无报错。
-- [ ] `pnpm test` 全绿(vitest run),新增 harness 测试文件全部计入。
-- [ ] **ProviderRouter 真路由**(§8.5#1):`provider-router.test.ts` 有一条测试——注册第二个 fake adapter(与第一个 id 不同)、改变某 role 的 `provider` 绑定 → 断言路由到新 adapter——且这条测试通过全程不需要修改 `provider-router.ts` 源码(该文件在本 PRD 范围内只被 B2 写一次,B3-B6 均不再触碰它,`git log -p -- src/harness/provider-router.ts` 在验收时应只有 B2 一次提交)。
-- [ ] **SchemaValidator 重试喂回错误**(§8.5#3):`schema-validator.test.ts` 有一条测试断言第二次 `invoke` 收到的 `req.prompt` ≠ 第一次、且包含第一次的校验错误信息(不是重发一模一样的请求)。
-- [ ] **InvokeResult 带 provider/model**(§8.5#4):`litellm-adapter.test.ts` 的成功路径测试断言返回的 `InvokeResult.provider`/`InvokeResult.model` 均为非空字符串。
-- [ ] **JSON.parse 全包 try-catch**(§8.5#5):`grep -rn "JSON.parse" src/harness` 命中的每一处都在 try-catch 内且失败路径抛类型化 `AdapterInvokeError`/`SchemaValidationError`,不裸抛 `SyntaxError`(litellm-adapter 的"响应体非法 JSON"测试 + schema-validator 的"第一次响应体非法 JSON"测试各自覆盖一处)。
-- [ ] **HTTP 错误码 + 尾斜线 + 缺 key 全覆盖**(§8.5#6):`litellm-adapter.test.ts` 401/403/429/5xx 四种状态码测试 + 尾斜线归一化测试 + `api_key` 缺失不产生畸形 header 测试,六条全部存在且通过。
-- [ ] **垂直切片必接通**:`harness.e2e.test.ts` 存在且通过——真实 `MemoryStore`+`ContextInjector`+`PromptComposer` 产出的真实 prompt 字符串,经真实 `ProviderRouter`+一个 fake adapter(唯一替身)+真实 `SchemaValidator`,拿到 typed `CoderOutput` 结果,`result.provider` 字段核对为 fake adapter 的 id。
-- [ ] `config.ts` 有一条测试固定住"传入真实 `profiles/helix/config.yaml`(两个 cli-bridge provider)→ 返回空 `AdapterRegistry`"这个预期行为,防止未来有人误给 cli-bridge 塞占位实现。
-- [ ] `docs/ROADMAP.md` A2 对应行打钩、`docs/PROGRESS.md` 清空或更新、`CHANGELOG.md` 加行、根 `CLAUDE.md` §2 技术栈表 + §3 目录结构行同步更新为"harness 已建"。
+- [ ] `pnpm build` succeeds (tsc strict + `noUncheckedIndexedAccess`, no errors), `pnpm lint` (`tsc --noEmit`) likewise has no errors.
+- [ ] `pnpm test` fully green (vitest run), all newly added harness test files included.
+- [ ] **ProviderRouter real routing** (§8.5#1): `provider-router.test.ts` has a test — register a second fake adapter (different id from the first), change a role's `provider` binding → assert routing to the new adapter — and this test passes throughout without needing to modify `provider-router.ts` source (this file, within this PRD's scope, is only written once by B2; B3-B6 never touch it again — `git log -p -- src/harness/provider-router.ts` should show only the one B2 commit at acceptance time).
+- [ ] **SchemaValidator retries with error feedback** (§8.5#3): `schema-validator.test.ts` has a test asserting the `req.prompt` received by the second `invoke` ≠ the first, and contains the first validation error's information (not resending the identical request).
+- [ ] **InvokeResult carries provider/model** (§8.5#4): `litellm-adapter.test.ts`'s success-path test asserts the returned `InvokeResult.provider`/`InvokeResult.model` are both non-empty strings.
+- [ ] **`JSON.parse` fully wrapped in try-catch** (§8.5#5): every hit of `grep -rn "JSON.parse" src/harness` is inside a try-catch, with the failure path throwing a typed `AdapterInvokeError`/`SchemaValidationError`, never a bare `SyntaxError` (litellm-adapter's "invalid response body JSON" test + schema-validator's "first response body invalid JSON" test each cover one instance).
+- [ ] **HTTP error codes + trailing slash + missing key all covered** (§8.5#6): `litellm-adapter.test.ts`'s 401/403/429/5xx four status-code tests + trailing-slash normalization test + `api_key`-missing-produces-no-malformed-header test — all six present and passing.
+- [ ] **Vertical slice must be wired through**: `harness.e2e.test.ts` exists and passes — the real prompt string produced by real `MemoryStore`+`ContextInjector`+`PromptComposer`, going through a real `ProviderRouter`+one fake adapter (the only stand-in)+real `SchemaValidator`, yields a typed `CoderOutput` result, with `result.provider` checked against the fake adapter's id.
+- [ ] `config.ts` has a test pinning down the expected behavior "passing the real `profiles/helix/config.yaml` (two cli-bridge providers) → returns an empty `AdapterRegistry`," to prevent someone from mistakenly stuffing a placeholder implementation into the cli-bridge branch in the future.
+- [ ] `docs/ROADMAP.md`'s A2 line checked off, `docs/PROGRESS.md` cleared or updated, `CHANGELOG.md` gets a new line, root `CLAUDE.md` §2 tech-stack table + §3 directory-structure line updated in sync to reflect "harness now built."
 
-## 9. 依赖 / 风险
+## 9. Dependencies / Risks
 
-### 9.1 ProviderRouter / config.ts 接口设计边界(建议指挥官/军师过一眼再开工,不是必须但性价比高)
+### 9.1 ProviderRouter / config.ts interface design boundary (worth a look from the Commander/Strategist before starting, not mandatory but high value)
 
-这是本增量最核心的新接口,设计取舍如下,**已经做出选择并写进 §5**,但因为是"加 provider 零改编排代码"这个硬验收项唯一的落地方式,值得指挥官确认一遍再开工,避免返工:
+This is the most core new interface in this increment; the design tradeoff below **has already been decided and written into §5**, but because it's the sole concrete implementation of the hard acceptance item "adding a provider requires zero changes to orchestration code," it's worth having the Commander confirm before starting, to avoid rework:
 
-- **选择**:`ProviderRouter` 只做「`roles[role].provider` → `registry.get(id)`」这一次纯查找,不知道任何具体 adapter 类,不做任何实例化。真正"给一个 provider id 构造出具体 adapter 实例"的逻辑放在 `harness/config.ts` 的 `buildAdapterRegistry()`(DESIGN §6 文件结构本就把 `config.ts` 单独列在 `harness/` 下,和 `provider-router.ts` 分开)。
-- **为什么这样分**:"加 provider 零改编排代码"里的"编排代码"指的是 A4 Loop 层调用 `router.route(role)` 的那部分代码——加一个新 provider 不需要动 Loop,也不需要动 `provider-router.ts` 本身。但 `harness/config.ts`(Harness 层内部的"接线"文件)本来就是"换模型只动 H 层"这句话字面指向的地方,加一个新 provider 确实要在这个文件里加一段构造分支——这是预期的、允许的改动,不违反验收标准。验收测试(§8 第 3 条)特意用"注册一个 *fake* adapter 直接进 registry,绕过 `config.ts` 的真实构造逻辑"来证明 `provider-router.ts` 本身不用改,这个测试策略本身就是设计选择的一部分,值得指挥官知道"零改动"具体指哪个文件、不指哪个文件。
-- **替代方案(未采用)**:让 `ProviderRouter` 自己持有一个 `Record<providerId, () => ModelAdapter>` 工厂映射并在构造时接收。评估后放弃——这样"加 provider" 仍然不用改 `route()` 方法本身的逻辑,但调用方每次构造 `ProviderRouter` 都要传一份工厂映射,和"config.ts 统一在一个地方接线"比,分散了新增 provider 时要碰的文件数量,不如现选方案干净。
+- **Choice**: `ProviderRouter` does only one pure lookup — "`roles[role].provider` → `registry.get(id)`" — it doesn't know about any concrete adapter class and does no instantiation whatsoever. The actual logic of "given a provider id, construct a concrete adapter instance" lives in `harness/config.ts`'s `buildAdapterRegistry()` (DESIGN §6's file structure already lists `config.ts` separately under `harness/`, distinct from `provider-router.ts`).
+- **Why split this way**: "adding a provider requires zero changes to orchestration code" — "orchestration code" here refers to the part of A4's Loop layer that calls `router.route(role)` — adding a new provider requires no changes to Loop, nor to `provider-router.ts` itself. But `harness/config.ts` (the Harness layer's internal "wiring" file) is literally what "swapping models only touches the H layer" is pointing at — adding a new provider does mean adding a construction branch to this file, which is expected and allowed, and doesn't violate the acceptance criteria. The acceptance test (§8 item 3) deliberately uses "register a *fake* adapter directly into the registry, bypassing `config.ts`'s real construction logic" to prove `provider-router.ts` itself needs no changes — this test strategy is itself part of the design choice, and it's worth the Commander knowing exactly which file "zero change" refers to, and which it doesn't.
+- **Alternative (not adopted)**: have `ProviderRouter` itself hold a `Record<providerId, () => ModelAdapter>` factory mapping received at construction time. Evaluated and rejected — this would still leave the `route()` method's own logic unchanged when "adding a provider," but every caller constructing a `ProviderRouter` would then need to pass a factory mapping, which, compared to "wiring it all up in one place in config.ts," scatters the files that need to be touched when adding a new provider — less clean than the chosen approach.
 
-### 9.2 SchemaValidator 校验库:zod 直接校验 vs ajv 【已定案:跳过 ajv,用 zod 直校】
+### 9.2 SchemaValidator's validation library: zod direct validation vs. ajv [DECIDED: skip ajv, direct-validate with zod]
 
-> **决定(2026-07-20 指挥官拍板)**:A2 **不引入 ajv**,SchemaValidator 直接对 `schema-registry.ts` 的 zod 对象 `.safeParse()`。根 `CLAUDE.md` §2 已同步改(ajv 从 A2 依赖移出,留 A4 再评估)。下方为原始论证,保留作决策依据。
+> **Decision (Commander sign-off, 2026-07-20)**: A2 will **not introduce ajv**; SchemaValidator validates directly against `schema-registry.ts`'s zod objects via `.safeParse()`. Root `CLAUDE.md` §2 has been synced accordingly (ajv removed from A2's dependencies, deferred to be re-evaluated at A4). The original reasoning below is retained as the decision record.
 
-根 `CLAUDE.md` §2 技术栈表把 `ajv`(`Ajv2020`,JSON Schema 校验)列为既定技术栈的一部分,且明确写"`ajv` 是 A2(Harness)/A4(Loop)才需要的依赖"——字面上暗示 ajv 该在 A2 落地。但:
-- `DESIGN.md` §7(A2 的设计权威段落本身)只字未提 ajv,`schema-registry.ts` 里角色→schema 的注册表存的就是**zod** `ZodType`(不是 JSON Schema),`composer.ts` 现在用 `z.toJSONSchema(schema)` 只是为了把 schema *说明文字* 塞进 prompt 给模型看,不是校验路径。
-- 本 PRD §5 的设计是 `SchemaValidator` 直接对 `schema-registry.ts` 已有的 zod 对象调 `.safeParse()`——单一校验源头(zod schema 既是 prompt 里描述给模型看的来源,又是校验模型实际输出的依据),不需要引入 ajv 就能满足 A2 的全部验收项。
-- **本 PRD 的立场**:A2 不引入 `ajv`,理由是 YAGNI——目前没有任何一个验收项要求"对着 JSON Schema(而非 zod 对象)校验",引入一个新校验库只会制造"zod schema 和它转出的 JSON Schema 万一不一致该信哪个"这种双源头问题。`ajv` 是否在 A4(Loop 层,例如校验 `workflow-def.ts` 的 workflow 定义文件本身,DESIGN §10 那条 `[?]`)才真正需要,留到 A4 立项时再评估。
-- **这条不是我能替指挥官定的**:根 `CLAUDE.md` 是宪法级文档,字面写了 ajv 属于 A2,本 PRD 选择偏离这个字面表述,如果指挥官不同意,请在 PRD 确认阶段直接改 §5/§9.2,我不会自己悄悄改宪法文档去迁就代码。
+Root `CLAUDE.md` §2's tech-stack table lists `ajv` (`Ajv2020`, JSON Schema validation) as part of the established tech stack, and explicitly states "`ajv` is only needed by A2 (Harness)/A4 (Loop)" — on its face implying ajv should land in A2. However:
+- `DESIGN.md` §7 (A2's own design-authority section) doesn't mention ajv at all; `schema-registry.ts`'s role→schema registry stores **zod** `ZodType` objects (not JSON Schema); `composer.ts`'s current use of `z.toJSONSchema(schema)` is only to stuff the schema's *description text* into the prompt for the model to read, not part of the validation path.
+- This PRD's §5 design has `SchemaValidator` call `.safeParse()` directly on the zod objects already present in `schema-registry.ts` — a single source of validation (the zod schema is both the source of the description shown to the model in the prompt, and the basis for validating the model's actual output), satisfying every A2 acceptance item without needing to introduce ajv.
+- **This PRD's position**: A2 will not introduce `ajv`, for reasons of YAGNI — no acceptance item currently requires "validating against a JSON Schema (rather than a zod object)," and introducing a new validation library would only create the dual-source problem of "the zod schema and the JSON Schema converted from it might disagree — which do you trust." Whether `ajv` is truly needed at A4 (the Loop layer, e.g. validating the workflow definition file itself in `workflow-def.ts`, the `[?]` in DESIGN §10) is left to be evaluated when A4 is scoped.
+- **This isn't something I can decide on the Commander's behalf**: root `CLAUDE.md` is a constitution-level document that literally states ajv belongs to A2; this PRD chooses to deviate from that literal statement — if the Commander disagrees, please change §5/§9.2 directly during PRD confirmation; I will not quietly go change the constitution-level document myself to accommodate the code.
 
-### 9.3 LiteLLMAdapter 的真实探活策略——需 spike(标 `[?]`)
+### 9.3 LiteLLMAdapter's real probing strategy — needs a spike (marked `[?]`)
 
-`checkAvailability()` 打哪个端点、发什么最小请求判定"真的可用"(而不是只查配置存在)——DESIGN §9 已经把"deepseek 探活"列为 verity profile 半边的必跑 spike,但那是"某个具体模型能不能被调"的问题;A2 这里是"LiteLLMAdapter 这个 direct-api 通道本身该怎么探活"的更基础问题,同样没有已验证答案。本机没有可连的公司 LiteLLM 代理实例,B3 批次内需要一个不超过 0.5 天的小 spike(读 LiteLLM 项目公开文档,不越界读公司内网代码),定下具体端点;如果 spike 当场定不下来,**退化底线**:`checkAvailability()` 必须真的发出一次网络请求并依据响应结果判定,不能只是"读一下 config 里有没有 `base_url` 字段"这种假探活——这条底线写进 §5/§8,不因为 spike 没查清楚具体端点就放弃。
+Which endpoint `checkAvailability()` hits, what minimal request it sends to determine "actually available" (rather than just checking config existence) — DESIGN §9 has already listed "deepseek probing" as a mandatory spike for the verity-profile half, but that's the question of "can this specific model be called"; here in A2 the question is the more basic one of "how should this LiteLLMAdapter direct-api channel itself be probed" — likewise no verified answer yet. There's no reachable company LiteLLM proxy instance locally; within the B3 batch a small spike of no more than 0.5 day is needed (reading LiteLLM's public project documentation, not crossing into reading company-internal-network code) to settle on a concrete endpoint; if the spike can't settle it on the spot, **fallback floor**: `checkAvailability()` must actually fire a network request and decide based on the response — it cannot be just "reading whether config has a `base_url` field" as a fake probe — this floor is written into §5/§8 and isn't abandoned just because the spike couldn't pin down the exact endpoint.
 
-### 9.4 AdapterRegistry 重复 `register` 同 id 的行为——待定,非阻塞(标 `[?]`)
+### 9.4 AdapterRegistry's behavior on duplicate `register` of the same id — TBD, non-blocking (marked `[?]`)
 
-同一个 `id` 被 `register()` 两次(例如测试之间没清理、或未来 `config.ts` 逻辑有 bug 重复构造),应该覆盖后一个、报错、还是忽略?本 PRD 未定案,建议实现时选"覆盖 + 不报错"(最简单、和 JS `Map.set` 的原生语义一致),因为目前没有场景需要区分"故意覆盖"和"意外重复",若未来出现真实需求(比如需要防止测试之间串扰导致的静默覆盖掩盖 bug)再收紧。这条不阻塞开工,实现时按建议做即可,不必等指挥官确认。
+If the same `id` is `register()`-ed twice (e.g. tests not cleaning up between each other, or a future bug in `config.ts` logic double-constructing), should it overwrite the previous one, throw, or ignore? This PRD does not decide this; the recommendation for implementation is "overwrite + no error" (the simplest, and consistent with JS `Map.set`'s native semantics), because there's currently no scenario requiring a distinction between "intentional overwrite" and "accidental duplication" — if a real need arises in the future (e.g. needing to prevent test cross-contamination silently masking a bug via silent overwrite), it can be tightened then. This doesn't block starting work — implement per the recommendation, no need to wait for Commander confirmation.
 
-## 10. 项目约束检查
+## 10. Project Constraint Check
 
-- **模型无关?** 是——`ProviderRouter`/`AdapterRegistry`/`SchemaValidator`/`ModelAdapter` 接口本身不出现任何具体 provider/model 名字;唯一具体的 provider 实现是 `LiteLLMAdapter`,它是"其中一个可插拔实现"而不是被硬编码进路由逻辑。
-- **ProviderRouter 加 provider 零改编排代码?** 是——见 §9.1 设计说明 + §8 第 3 条验收测试(注册 fake adapter 不改 `provider-router.ts`)。
-- **无跨层反向依赖?** 是——`src/harness/` 只 import `src/prompt/`(`schema-registry.ts` 的 `SchemaRegistry` 类型 / 具体 schema)、`src/profile/`(`ProfileConfig`/`ProviderConfig`/`RoleBinding` 类型)、`src/shared/`(`Role`/`ISODateString`)的**类型**,不 import `src/context/` 的任何东西(Harness 不需要知道记忆怎么来的,只消费 `PromptComposer` 已经拼好的字符串);`src/loop/`(A4)本增量不存在,自然无引用。
-- **`profiles/verity/` 不入仓?** 是——本增量不创建 `profiles/verity/` 任何文件,测试全部用内存态 fixture `ProfileConfig` 对象或已有的 `profiles/helix/`,不新建任何 profile 目录。
-- **角色不硬编码?** 是——`ProviderRouter`/`SchemaValidator` 都以 `Role`(开放字符串)为参数,不写 `if role === "coder"` 之类分支;`harness/config.ts` 按 `provider.kind`(`"direct-api"` | `"cli-bridge"`)分派,不按角色名分派。
-- **引擎代码不含 Helix 人格?** 是——`src/harness/` 下所有代码零 Helix/companion/私人记忆内容。
+- **Model-agnostic?** Yes — `ProviderRouter`/`AdapterRegistry`/`SchemaValidator`/`ModelAdapter` interfaces themselves contain no specific provider/model names; the only concrete provider implementation is `LiteLLMAdapter`, which is "one of the pluggable implementations," not something hardcoded into the routing logic.
+- **ProviderRouter adds providers with zero orchestration-code changes?** Yes — see the §9.1 design explanation + §8 item 3's acceptance test (registering a fake adapter without changing `provider-router.ts`).
+- **No cross-layer reverse dependencies?** Yes — `src/harness/` only imports **types** from `src/prompt/` (`schema-registry.ts`'s `SchemaRegistry` type / concrete schemas), `src/profile/` (`ProfileConfig`/`ProviderConfig`/`RoleBinding` types), `src/shared/` (`Role`/`ISODateString`), and does not import anything from `src/context/` (Harness doesn't need to know how memory is fetched, it only consumes the string already assembled by `PromptComposer`); `src/loop/` (A4) doesn't exist yet within this increment, so naturally there's no reference to it.
+- **`profiles/verity/` stays out of the repo?** Yes — this increment creates no files under `profiles/verity/` whatsoever; tests all use in-memory fixture `ProfileConfig` objects or the existing `profiles/helix/`, no new profile directory created.
+- **No hardcoded roles?** Yes — both `ProviderRouter`/`SchemaValidator` take `Role` (an open string) as a parameter, with no `if role === "coder"`-style branches; `harness/config.ts` dispatches by `provider.kind` (`"direct-api"` | `"cli-bridge"`), not by role name.
+- **No Helix persona content in engine code?** Yes — everything under `src/harness/` is zero Helix/companion/personal-memory content.

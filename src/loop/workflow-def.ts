@@ -12,8 +12,8 @@
  *
  * `CODER_TESTER_LOOP_DEFINITION` is a **documentation** artifact, not a
  * runtime-interpreted config `graph.ts` reads (PRD §5's explicit, detailed
- * downgrade from DESIGN §6's "graph.ts 编译自 WorkflowDefinition" — see the
- * PRD section for the full reasoning: LangGraph's TS API is built around
+ * downgrade from DESIGN §6's "graph.ts compiles from WorkflowDefinition" —
+ * see the PRD section for the full reasoning: LangGraph's TS API is built around
  * compile-time literal node names / `Annotation` state shapes, and none of
  * spike Q2-Q5 exercised "build a StateGraph at runtime from a data
  * structure"). `graph.ts`'s actual `addNode`/`addEdge`/`addConditionalEdges`

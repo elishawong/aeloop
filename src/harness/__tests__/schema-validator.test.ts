@@ -57,7 +57,7 @@ describe("SchemaValidator — first attempt fails schema, second succeeds (PRD �
     // first prompt, and contains the first attempt's error information.
     expect(secondReq?.prompt).not.toBe(firstReq?.prompt);
     expect(secondReq?.prompt.startsWith(baseRequest.prompt)).toBe(true);
-    // Zorro round-1 blocker 3: a bare `toContain("ok")` here is a weak
+    // Review Round-1 blocker 3: a bare `toContain("ok")` here is a weak
     // assertion — "ok" is itself a schema field name, so almost any
     // hardcoded retry-prompt suffix (even one that never actually echoes
     // `firstOutcome.error` back) would coincidentally satisfy it. Assert

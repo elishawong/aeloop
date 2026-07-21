@@ -34,7 +34,7 @@ export interface ModelAdapter {
   readonly kind: "direct-api" | "cli-bridge";
   /**
    * Must perform a real check (network request for direct-api, subprocess
-   * probe for cli-bridge) — DESIGN §7's "deepseek 列表可见≠可调用" lesson:
+   * probe for cli-bridge) — DESIGN §7's "deepseek listed ≠ callable" lesson:
    * an adapter existing in config is not the same as it being callable
    * right now. Never allowed to degrade into "config has the fields I
    * need, so I'll just say available: true".
@@ -66,7 +66,7 @@ export interface InvokeRequest {
  * tool-exec-verifier.ts`, A3 PRD §5): `"pass"` — a claim asserted
  * `verifiedBy: "tool_execution"` and the adapter's trace really shows at
  * least one tool call; `"fail"` — a claim asserted it but the trace is
- * empty (the "声称≠行为" case this whole verifier exists to catch);
+ * empty (the "claimed ≠ done" case this whole verifier exists to catch);
  * `"na"` — nothing to verify (no claim asserted tool_execution, or
  * `content` couldn't even be parsed as a claims-bearing shape).
  */
@@ -75,7 +75,7 @@ export type ToolExecChecked = "pass" | "fail" | "na";
 /**
  * PRD §5 / DESIGN §8.5#4: `provider`/`model` must always be populated (not
  * optional, not empty-string) — this is what lets audit/logging answer
- * "who actually responded" instead of Verity's M3 gap where `InvokeResult`
+ * "who actually responded" instead of a prior internal implementation's M3 gap where `InvokeResult`
  * only carried `content`/`httpStatus`.
  *
  * `toolExecChecked` is an A3 field. A2's `LiteLLMAdapter` (`kind:

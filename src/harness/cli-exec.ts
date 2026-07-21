@@ -18,7 +18,7 @@
  * Deliberately does **not** port `codex-client.mjs`'s git-HEAD / tracked-
  * file content-hash integrity checks, or its "reject an untrusted binary
  * path" check (that file's safety invariant ⑤). Those defend one specific,
- * high-stakes trust boundary — Zorro's independent-review evidence chain,
+ * high-stakes trust boundary — the independent-review evidence chain,
  * where a forged `codex` binary could fool a human into approving bad code
  * — that A3's ordinary coder/tester adapters don't have a direct analog
  * for. Flagged as an open question for confirmation in A3 PRD §2 (non-
@@ -42,7 +42,7 @@ import { spawn } from "node:child_process";
  * 32MB across both) — mirrors `codex-client.mjs`'s `MAX_OUTPUT_BYTES`,
  * guards against an unbounded memory blow-up on a runaway child. Exported
  * so `cli-exec.test.ts` can assert against the real cap value directly
- * (Zorro round-1 minor Y3's regression test) instead of duplicating the
+ * (Review Round-1 minor Y3's regression test) instead of duplicating the
  * magic number and risking drift.
  */
 export const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
@@ -50,8 +50,8 @@ export const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 /**
  * Appends `chunk` via `append`, but truncates it to whatever budget
  * remains under `MAX_OUTPUT_BYTES` rather than ever letting the running
- * total cross the cap — returns the new running byte total. **Zorro
- * round-1 minor Y3**: the previous logic only checked "is the running
+ * total cross the cap — returns the new running byte total. **Review
+ * Round-1 minor Y3**: the previous logic only checked "is the running
  * total already under the cap?" *before* deciding whether to append a
  * chunk whole; once under the cap by even one byte, an entire chunk
  * (however large) was appended unconditionally, so a stream could end up

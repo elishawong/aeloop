@@ -2,13 +2,13 @@
  * `createDraftNode` — the `draft` node factory (PRD §5 "nodes/coder.ts",
  * DESIGN §4's `Draft` state). Reuses A2's `ProviderRouter` + A1's
  * `PromptComposer` + A2's `SchemaValidator` wholesale — this file adds zero
- * new model-invocation logic of its own (PRD §2 non-goal "真实
- * coder/tester 模型逻辑").
+ * new model-invocation logic of its own (PRD §2 non-goal "real
+ * coder/tester model logic").
  *
  * Only ever imports *types* from `../../context/injector.js` (never the
  * `ContextInjector` class) — `injectedContext` arrives pre-built in
  * `state`, this layer doesn't know how it was produced (PRD §5/§10
- * "跨层无反向依赖").
+ * "no reverse cross-layer dependency").
  */
 
 import { SchemaValidator } from "../../harness/schema-validator.js";

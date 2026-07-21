@@ -76,7 +76,7 @@ describe("CodexCliAdapter", () => {
     expect(adapter.toolTrace()).toEqual([]);
   });
 
-  it('③ toolExecChecked is "fail" when the response claims tool_execution but the trace is empty — the core 声称≠行为 path, exercised at the real adapter layer', async () => {
+  it('③ toolExecChecked is "fail" when the response claims tool_execution but the trace is empty — the core claimed≠done path, exercised at the real adapter layer', async () => {
     const adapter = new CodexCliAdapter("codex-cli", { cmd: FIXTURE });
 
     const result = await withScenario("claims-no-trace", () =>
@@ -127,7 +127,7 @@ describe("CodexCliAdapter", () => {
     expect(result.reason).toBeTruthy();
   });
 
-  // Zorro A3 round-1 regression tests (blocker B1, blocker B2, minor Y2).
+  // A3's Review Round-1 regression tests (blocker B1, blocker B2, minor Y2).
 
   it('B1 regression: when the TRUE last agent_message has a non-string "text", the adapter throws instead of silently falling back to an earlier, valid-looking agent_message', async () => {
     const adapter = new CodexCliAdapter("codex-cli", { cmd: FIXTURE });
@@ -140,7 +140,7 @@ describe("CodexCliAdapter", () => {
     }
 
     // Must throw — must NOT resolve with the early message's text (that
-    // would be the exact regression Zorro's real spawn caught: returning
+    // would be the exact regression the real spawn caught: returning
     // "This is an early, valid-looking answer that must NOT be returned.").
     expect(thrown).toBeInstanceOf(AdapterInvokeError);
     expect((thrown as Error).message).not.toContain("This is an early");

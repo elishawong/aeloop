@@ -2,10 +2,10 @@
  * Typed errors for the Context layer (src/context/*).
  *
  * PRD §8 acceptance criteria this file exists to satisfy:
- * - "RecallError 不静默" — recall/read failures must be thrown as a typed
+ * - "RecallError is never silent" — recall/read failures must be thrown as a typed
  *   `RecallError`, never swallowed into an empty array.
- * - "所有 JSON.parse 调用点都包在 try-catch 里,失败进类型化 error,不裸抛
- *   SyntaxError" — `tags` deserialization failures become
+ * - "every JSON.parse call site is wrapped in try-catch, failures become a typed
+ *   error, never a raw thrown SyntaxError" — `tags` deserialization failures become
  *   `MemoryTagsParseError`, never a raw `SyntaxError`.
  */
 

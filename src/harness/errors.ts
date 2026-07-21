@@ -2,14 +2,14 @@
  * Typed errors for the Harness layer (src/harness/*).
  *
  * PRD §8 acceptance criteria these exist to satisfy:
- * - "JSON.parse 全包 try-catch" (§8.5#5) — every `JSON.parse` call site in
+ * - "JSON.parse fully wrapped in try-catch" (§8.5#5) — every `JSON.parse` call site in
  *   this layer (LiteLLMAdapter's HTTP response parsing, SchemaValidator's
  *   model-output parsing) must catch failures into one of these typed
  *   errors, never let a raw `SyntaxError` escape.
  * - `RoleNotBoundError`/`AdapterNotRegisteredError` are the two distinct
  *   failure modes of `ProviderRouter.route()` (PRD §5) — kept as separate
  *   classes rather than one generic "routing failed" error because callers
- *   (and Zorro, reviewing) need to tell "nobody bound this role" apart
+ *   (and reviewers) need to tell "nobody bound this role" apart
  *   from "something's bound but nothing registered that id" at a glance.
  */
 

@@ -121,7 +121,7 @@ export class ClaudeCliAdapter implements ModelAdapter {
     if (resultEvent === undefined) {
       throw new AdapterInvokeError(`ClaudeCliAdapter "${this.id}" produced no "result" event in its stream-json output`);
     }
-    // Zorro round-1 minor Y1: require is_error === false explicitly, not
+    // Review Round-1 minor Y1: require is_error === false explicitly, not
     // merely "!== true" — the previous check let a missing/null/non-boolean
     // is_error field sail through as "success" (only a literal `true`
     // tripped it), which is the wrong default for a field whose entire
@@ -152,7 +152,7 @@ export class ClaudeCliAdapter implements ModelAdapter {
 
   /**
    * Real `<cmd> --version` probe, exit code 0 → available (DESIGN §8.5
-   * "deepseek 列表可见≠可调用" lesson, same posture as `CodexCliAdapter`/
+   * "deepseek listed ≠ callable" lesson, same posture as `CodexCliAdapter`/
    * `LiteLLMAdapter`).
    */
   async checkAvailability(): Promise<AvailabilityResult> {
@@ -186,8 +186,8 @@ export class ClaudeCliAdapter implements ModelAdapter {
    * `id`) — but `InvokeResult.provider` carries the same non-empty
    * invariant as `.model` (`types.ts:72`), so it gets the same runtime
    * guard rather than trusting the type alone (mirrors
-   * `LiteLLMAdapter.requireProviderId()`, A2's Zorro round-1 blocker 2 —
-   * this adapter didn't inherit that fix, Zorro A3 round-1 blocker B2).
+   * `LiteLLMAdapter.requireProviderId()`, A2's Review Round-1 blocker 2 —
+   * this adapter didn't inherit that fix, A3's Review Round-1 blocker B2).
    */
   private requireProviderId(): string {
     if (typeof this.id !== "string" || this.id.trim().length === 0) {
@@ -200,7 +200,7 @@ export class ClaudeCliAdapter implements ModelAdapter {
 /**
  * Tolerant line-by-line JSONL parse — a line that doesn't parse, or that
  * parses to something other than a plain object (e.g. `"null"`, a bare
- * number/string, or an array), is skipped, not fatal. **Zorro round-1
+ * number/string, or an array), is skipped, not fatal. **Review Round-1
  * minor Y2**: `JSON.parse` alone accepts any valid JSON value, not just
  * objects — a stray `null`/scalar/array line used to sail through as a
  * "ClaudeJsonlEvent" with no `.type` property, and every downstream read
