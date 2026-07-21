@@ -11,6 +11,31 @@ export const CODER_TESTER_MANIFEST: WorkflowManifest = {
   inputVersion: "1",
   outputVersion: "1",
   roles: ["coder", "tester"],
+  capabilities: ["code-generation", "test-execution", "human-gate"],
+  riskClass: "high",
+  inputSchema: {
+    type: "object",
+    properties: {
+      task: { type: "string" },
+      profile: { type: "string" },
+      workflowDefId: { type: "string" },
+      injectedContext: { type: "object" },
+      rejectThreshold: { type: "number" },
+      contract: { type: "object" },
+    },
+    required: ["task", "profile", "workflowDefId", "injectedContext", "rejectThreshold"],
+  },
+  outputSchema: {
+    type: "object",
+    properties: {
+      runId: { type: "number" },
+      threadId: { type: "string" },
+      done: { type: "boolean" },
+      stepCounters: { type: "object" },
+      interrupt: { type: "object" },
+    },
+    required: ["runId", "threadId", "done", "stepCounters"],
+  },
 };
 
 function assertCoderTesterInput(input: unknown): CoderTesterWorkflowInput {
