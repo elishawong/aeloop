@@ -18,6 +18,8 @@ the Aeloop engine.
   requirements, scope, evidence policy, and forbidden changes into the
   execution context seen by Coder and Tester. Legacy task-only callers remain
   supported.
+- `evaluateExecutionPolicy()` provides a pure fail-closed check for observed
+  paths, commands, dependencies, network use, Git writes, and reviewer writes.
 - `brains/personal/` and `brains/company/`: replaceable prompt/manifest
   templates. They are product-layer assets, not runtime dependencies.
 - `assembleProfileDeps()`: profile-neutral dependency assembly. The existing
