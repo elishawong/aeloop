@@ -48,9 +48,56 @@ into `ContextInjectionResult` directly.
 - `AuditStore` schema — no new column/table; `omittedContext` lives only in
   the in-memory `EvidenceBundle`/`LoopEvent` layer, not persisted anywhere
   durable yet. Wiring it into `AuditStore` (if ever needed) is a separate,
-  not-yet-started piece of work.
+  not-yet-started piece of work. **(Done in slice 3, below — this bullet is
+  kept as-is for the historical record of what slice 2 itself covered.)**
 - No new `LoopEvent` type was added, and no existing event's relative
   ordering was changed anywhere in `runner.ts`.
+
+## issue #36 slice 3 — persist context-omission telemetry into `AuditStore`
+
+Follow-up to slice 2, closing the boundary that section explicitly left open
+("Wiring `omitted` context into a persistent evidence/audit store" — listed
+as "not touched in this slice" / "a separate, not-yet-started piece of
+work"). Slice 2 got the omission list as far as the in-memory
+`LoopEvent`/`EvidenceBundle` layer; this slice carries it the rest of the
+way, into `AuditStore`'s durable SQLite tables, so the omission trail
+survives process restarts the same way `structured_claims`/`approvals`/
+`step_markers` already do.
+
+**What was added:**
+
+- **`src/loop/audit-store.ts`** — a new, backward-compatible
+  `CREATE TABLE IF NOT EXISTS context_omissions` table (`run_id` referencing
+  `workflow_runs(id)`, `memory_id`, `memory_type`, `title`, `reason`,
+  `created_at`), plus a `UNIQUE (run_id, memory_id)` constraint — same cheap
+  defense-in-depth as `approvals`'/`step_markers`' `UNIQUE (run_id,
+  step_ref)` constraints, scoped per-run so two different runs may each
+  independently omit the same memory. New typed domain types
+  (`ContextOmission`/`NewContextOmissionInput`), a row-shape interface
+  (`ContextOmissionRow`), and two new methods —
+  `insertContextOmission(input, now?)` (insert + read-back, same
+  error-wrapping convention as `insertClaim`/`insertApproval`/
+  `insertStepMarker`: write errors propagate unwrapped, a failed read-back
+  throws `AuditReadError`) and `listContextOmissionsByRun(runId)` (wraps a
+  thrown SQLite error into `AuditReadError`, same convention as
+  `listStepRefsByRun`/`listRunsByStatus`).
+- **`src/loop/runner.ts`** — `startRun()` now wraps its `workflow_runs`
+  insert and, when `input.injectedContext.omitted` is present and
+  non-empty, one `insertContextOmission()` call per omitted entry, inside a
+  single `AuditStore.runInTransaction()` call. A telemetry-write failure
+  therefore rolls back the `workflow_runs` row too, instead of leaving a run
+  row with no matching omission trail. When `input.injectedContext.omitted`
+  is absent or an empty array, no `context_omissions` rows are written and
+  the no-omission path is byte-for-byte unchanged from before this slice.
+
+**Explicitly NOT touched in this slice:**
+
+- `PromptDelta` / `buildPromptDelta()` and provider-level caching — still
+  untouched, same as slices 1 and 2.
+- No new `LoopEvent` type was introduced; `RunStartedEvent.contextOmitted`
+  (slice 2) is unchanged and still the only event-layer carrier of this
+  data — `context_omissions` is a separate, durable sink fed from the same
+  `input.injectedContext.omitted` value, not a replacement for it.
 
 ## Scope of this slice
 

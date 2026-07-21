@@ -442,6 +442,233 @@ describe("AuditStore — R5-B2 UNIQUE(run_id, step_ref) defense-in-depth", () =>
   });
 });
 
+/**
+ * Issue #36 slice 3: `context_omissions` durable persistence — same
+ * insert/read-back, cross-process, and UNIQUE-defense-in-depth coverage
+ * this file already gives `structured_claims`/`approvals`/`step_markers`.
+ */
+describe("AuditStore — context_omissions", () => {
+  it("insertContextOmission/listContextOmissionsByRun round trip: every column comes back exactly as written", () => {
+    const audit = openStore();
+    const run = audit.insertRun(
+      {
+        task: "context omission persistence",
+        workflowDefId: "coder-tester-loop",
+        profile: "subscription",
+        status: "running",
+        rejectCount: 0,
+        rejectThreshold: 2,
+        currentState: "draft",
+        langgraphThreadId: "thread-context-omission",
+      },
+      "2026-07-21T00:00:00.000Z",
+    );
+
+    const created = audit.insertContextOmission(
+      {
+        runId: run.id,
+        memoryId: 7,
+        memoryType: "idea",
+        title: "old idea",
+        reason: "token_budget_exceeded",
+      },
+      "2026-07-21T00:01:00.000Z",
+    );
+
+    expect(created.id).toBeGreaterThan(0);
+    expect(created).toMatchObject({
+      runId: run.id,
+      memoryId: 7,
+      memoryType: "idea",
+      title: "old idea",
+      reason: "token_budget_exceeded",
+      createdAt: "2026-07-21T00:01:00.000Z",
+    });
+
+    const listed = audit.listContextOmissionsByRun(run.id);
+    expect(listed).toEqual([created]);
+  });
+
+  it("listContextOmissionsByRun returns an empty array (not throw) for a run with no omissions", () => {
+    const audit = openStore();
+    const run = audit.insertRun(
+      {
+        task: "no omissions",
+        workflowDefId: "coder-tester-loop",
+        profile: "subscription",
+        status: "running",
+        rejectCount: 0,
+        rejectThreshold: 2,
+        currentState: "draft",
+        langgraphThreadId: "thread-no-omissions",
+      },
+      "2026-07-21T00:00:00.000Z",
+    );
+
+    expect(audit.listContextOmissionsByRun(run.id)).toEqual([]);
+  });
+
+  it("insertContextOmission against a run_id that doesn't exist in workflow_runs throws a real foreign-key error, not a silently-accepted orphan row", () => {
+    const audit = openStore();
+    expect(() =>
+      audit.insertContextOmission({
+        runId: 999999,
+        memoryId: 1,
+        memoryType: "idea",
+        title: "orphan omission",
+        reason: "token_budget_exceeded",
+      }),
+    ).toThrow(/FOREIGN KEY constraint failed/i);
+  });
+
+  it("insertContextOmission rejects a second row for a (run_id, memory_id) pair already used by an earlier omission (UNIQUE constraint)", () => {
+    const audit = openStore();
+    const run = audit.insertRun(
+      {
+        task: "duplicate context omission",
+        workflowDefId: "coder-tester-loop",
+        profile: "subscription",
+        status: "running",
+        rejectCount: 0,
+        rejectThreshold: 2,
+        currentState: "draft",
+        langgraphThreadId: "thread-dup-omission",
+      },
+      "2026-07-21T00:00:00.000Z",
+    );
+
+    audit.insertContextOmission({ runId: run.id, memoryId: 7, memoryType: "idea", title: "old idea", reason: "token_budget_exceeded" });
+
+    expect(() =>
+      audit.insertContextOmission({ runId: run.id, memoryId: 7, memoryType: "idea", title: "old idea (dup)", reason: "token_budget_exceeded" }),
+    ).toThrow(/UNIQUE constraint failed/i);
+
+    const inspect = new Database(dbPath, { readonly: true });
+    try {
+      const row = inspect.prepare("SELECT COUNT(*) as n FROM context_omissions WHERE run_id = ? AND memory_id = ?").get(run.id, 7) as {
+        n: number;
+      };
+      expect(row.n).toBe(1);
+    } finally {
+      inspect.close();
+    }
+  });
+
+  it("a different run_id may reuse the same memory_id — the constraint is scoped per-run, not global", () => {
+    const audit = openStore();
+    const runA = audit.insertRun(
+      {
+        task: "run A",
+        workflowDefId: "coder-tester-loop",
+        profile: "subscription",
+        status: "running",
+        rejectCount: 0,
+        rejectThreshold: 2,
+        currentState: "draft",
+        langgraphThreadId: "thread-omission-scope-a",
+      },
+      "2026-07-21T00:00:00.000Z",
+    );
+    const runB = audit.insertRun(
+      {
+        task: "run B",
+        workflowDefId: "coder-tester-loop",
+        profile: "subscription",
+        status: "running",
+        rejectCount: 0,
+        rejectThreshold: 2,
+        currentState: "draft",
+        langgraphThreadId: "thread-omission-scope-b",
+      },
+      "2026-07-21T00:00:00.000Z",
+    );
+
+    audit.insertContextOmission({ runId: runA.id, memoryId: 7, memoryType: "idea", title: "old idea", reason: "token_budget_exceeded" });
+    expect(() =>
+      audit.insertContextOmission({ runId: runB.id, memoryId: 7, memoryType: "idea", title: "old idea", reason: "token_budget_exceeded" }),
+    ).not.toThrow();
+  });
+
+  it("a failure partway through a runInTransaction call rolls back both the workflow_runs row and any context_omissions rows already inserted in that transaction", () => {
+    const audit = openStore();
+
+    expect(() =>
+      audit.runInTransaction(() => {
+        const run = audit.insertRun(
+          {
+            task: "context omission rollback",
+            workflowDefId: "coder-tester-loop",
+            profile: "subscription",
+            status: "running",
+            rejectCount: 0,
+            rejectThreshold: 2,
+            currentState: "draft",
+            langgraphThreadId: "thread-omission-rollback",
+          },
+          "2026-07-21T00:00:00.000Z",
+        );
+        audit.insertContextOmission({ runId: run.id, memoryId: 7, memoryType: "idea", title: "old idea", reason: "token_budget_exceeded" });
+        throw new Error("simulated mid-transaction failure");
+      }),
+    ).toThrow("simulated mid-transaction failure");
+
+    // Nothing from the aborted transaction survived — neither the run row nor its omission row.
+    const inspect = new Database(dbPath, { readonly: true });
+    try {
+      const runRow = inspect.prepare("SELECT COUNT(*) as n FROM workflow_runs WHERE langgraph_thread_id = ?").get("thread-omission-rollback") as {
+        n: number;
+      };
+      expect(runRow.n).toBe(0);
+      const omissionRow = inspect.prepare("SELECT COUNT(*) as n FROM context_omissions").get() as { n: number };
+      expect(omissionRow.n).toBe(0);
+    } finally {
+      inspect.close();
+    }
+  });
+
+  it("cross-process read: a second AuditStore reopening the same on-disk file sees context_omissions rows written by a prior connection", () => {
+    const firstStore = openStore();
+    const run = firstStore.insertRun(
+      {
+        task: "cross-process omission read",
+        workflowDefId: "coder-tester-loop",
+        profile: "subscription",
+        status: "running",
+        rejectCount: 0,
+        rejectThreshold: 2,
+        currentState: "draft",
+        langgraphThreadId: "thread-cross-process-omission",
+      },
+      "2026-07-21T00:00:00.000Z",
+    );
+    firstStore.insertContextOmission(
+      { runId: run.id, memoryId: 7, memoryType: "idea", title: "old idea", reason: "token_budget_exceeded" },
+      "2026-07-21T00:01:00.000Z",
+    );
+    // Close this connection entirely — the next store must read purely from disk, not any in-process cache.
+    firstStore.close();
+
+    const reopened = new AuditStore(dbPath);
+    try {
+      const rows = reopened.listContextOmissionsByRun(run.id);
+      expect(rows).toEqual([
+        {
+          id: expect.any(Number),
+          runId: run.id,
+          memoryId: 7,
+          memoryType: "idea",
+          title: "old idea",
+          reason: "token_budget_exceeded",
+          createdAt: "2026-07-21T00:01:00.000Z",
+        },
+      ]);
+    } finally {
+      reopened.close();
+      store = undefined; // already closed above; prevent afterEach() from double-closing.
+    }
+  });
+});
+
 describe("AuditStore — runInTransaction rollback", () => {
   it("a failure partway through a transaction leaves no partial data behind", () => {
     const audit = openStore();

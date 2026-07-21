@@ -1323,6 +1323,65 @@ describe("issue #29 — LoopEvent instrumentation (streamMode: [\"updates\",\"ta
     expect(Object.prototype.hasOwnProperty.call(runStarted, "contextOmitted")).toBe(false);
   });
 
+  it("issue #36 slice 3: startRun() persists input.injectedContext.omitted into AuditStore's context_omissions table, inside the same transaction as the workflow_runs insert", async () => {
+    const dbPath = tmpDbPath("context-omissions-persisted.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+
+    const started = await startRun(deps, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: {
+        memories: [],
+        omitted: [
+          { id: 7, type: "idea", title: "old idea", reason: "token_budget_exceeded" },
+          { id: 9, type: "snapshot", title: "old snapshot", reason: "token_budget_exceeded" },
+        ],
+      },
+      rejectThreshold: 2,
+    });
+
+    const rows = audit.listContextOmissionsByRun(started.runId);
+    expect(rows).toHaveLength(2);
+    expect(rows).toEqual([
+      expect.objectContaining({ runId: started.runId, memoryId: 7, memoryType: "idea", title: "old idea", reason: "token_budget_exceeded" }),
+      expect.objectContaining({ runId: started.runId, memoryId: 9, memoryType: "snapshot", title: "old snapshot", reason: "token_budget_exceeded" }),
+    ]);
+  });
+
+  it("issue #36 slice 3: startRun() writes zero context_omissions rows when input.injectedContext.omitted is absent — no-omission path is unchanged", async () => {
+    const dbPath = tmpDbPath("context-omissions-absent.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+
+    const started = await startRun(deps, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 2,
+    });
+
+    expect(audit.listContextOmissionsByRun(started.runId)).toEqual([]);
+  });
+
+  it("issue #36 slice 3: startRun() writes zero context_omissions rows when input.injectedContext.omitted is an empty array", async () => {
+    const dbPath = tmpDbPath("context-omissions-empty.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+
+    const started = await startRun(deps, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [], omitted: [] },
+      rejectThreshold: 2,
+    });
+
+    expect(audit.listContextOmissionsByRun(started.runId)).toEqual([]);
+  });
+
   it("a full G1-approve -> review(pass) -> G3-approve -> apply run: for every node visited, node_started(X) appears before node_completed(X)/agent_completed(X)/gate_decided(X)/gate_requested(X), ending in node_started(apply)+node_completed(apply)+run_completed", async () => {
     const dbPath = tmpDbPath("events-full-pass.sqlite");
     const { deps, audit } = buildDeps(dbPath, ["pass"]);
