@@ -1,5 +1,57 @@
 # issue #36 slice 1 — wire `ContextBudgetManager` into the real `ContextInjector` -> `PromptComposer` path
 
+## issue #36 slice 2 — carry context-omission metadata into `EvidenceBundle`
+
+Follow-up to slice 1: slice 1 stopped at "the omission list visible in the
+injector's return value and in the composed prompt text" — this slice
+carries that same information one hop further, into the engine's
+`LoopEvent`/`EvidenceBundle` observability surface (issue #29), so a
+subscriber of the evidence layer can see what got omitted without reaching
+into `ContextInjectionResult` directly.
+
+**What was added:**
+
+- **`src/loop/events.ts`** — `RunStartedEvent` gained an optional
+  `contextOmitted?: readonly {id:number; type:string; title:string;
+  reason:string}[]` field. No new `LoopEvent` variant was introduced and no
+  existing event ordering changed — this rides entirely on the existing
+  `run_started` event.
+- **`src/loop/runner.ts`** — `startRun()` now populates `contextOmitted`
+  from `input.injectedContext.omitted` when that field is present and
+  non-empty. When absent (budgeting off) or empty (nothing omitted),
+  `contextOmitted` itself is left **absent** (the key is not set at all,
+  not set to `[]`) — matching `ContextInjectionResult.omitted`'s own
+  "absent means nothing to report" convention, and keeping every
+  pre-existing `run_started` fixture/assertion in `runner.test.ts`
+  (`toMatchObject`, which doesn't otherwise care about extra fields) valid
+  unchanged.
+- **`src/evidence/bundle.ts`**:
+  - New `OmittedContextEntry` type (mirrors `RunStartedEvent`'s
+    `contextOmitted` element shape).
+  - `EvidenceBundle` gained a new required `omittedContext: readonly
+    OmittedContextEntry[]` collection, following the same
+    always-present/default-to-`[]` convention its sibling collections
+    (`requirements`/`claims`/`evidence`/`eventTypes`) already use — never
+    `undefined`.
+  - `EvidenceBundleBuilder.recordEvent()` picks up `contextOmitted` off a
+    `run_started` event when present; any other event, or a `run_started`
+    event without that field (an old event, or budgeting-off), leaves
+    `omittedContext` at its `[]` default — no throw, no special-casing.
+  - `EvidenceEventProjector` needed no code change — it already forwards
+    every event to `builder.recordEvent()` unconditionally, so this new
+    field rides through the same path as `eventTypes`/`status`.
+
+**Explicitly NOT touched in this slice** (next slice's boundary):
+
+- `PromptDelta` / `buildPromptDelta()` — still untouched, same as slice 1.
+- Provider-level caching — still untouched, same as slice 1.
+- `AuditStore` schema — no new column/table; `omittedContext` lives only in
+  the in-memory `EvidenceBundle`/`LoopEvent` layer, not persisted anywhere
+  durable yet. Wiring it into `AuditStore` (if ever needed) is a separate,
+  not-yet-started piece of work.
+- No new `LoopEvent` type was added, and no existing event's relative
+  ordering was changed anywhere in `runner.ts`.
+
 ## Scope of this slice
 
 This slice implements exactly one bounded piece of aeloop#36: making the
