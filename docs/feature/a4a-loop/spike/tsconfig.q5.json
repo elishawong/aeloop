@@ -1,0 +1,9 @@
+{
+  "extends": "../../../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "../../../../.spike-dist-q5",
+    "noEmit": true
+  },
+  "include": ["./q5-types.ts"]
+}
