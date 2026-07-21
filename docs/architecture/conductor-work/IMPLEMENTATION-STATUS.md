@@ -14,6 +14,10 @@ the Aeloop engine.
 - `src/conductor/orchestrator.ts`: deterministic brain-to-workflow selection;
   this is the orchestrator boundary, not another model persona and not a
   LangGraph node.
+- The built-in workflow validates an optional `TaskContract` and renders its
+  requirements, scope, evidence policy, and forbidden changes into the
+  execution context seen by Coder and Tester. Legacy task-only callers remain
+  supported.
 - `brains/personal/` and `brains/company/`: replaceable prompt/manifest
   templates. They are product-layer assets, not runtime dependencies.
 - `assembleProfileDeps()`: profile-neutral dependency assembly. The existing
