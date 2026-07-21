@@ -4,8 +4,8 @@
  * DESIGN §4's full state machine (PRD §0/§4.1/§5 "graph.ts"). A4a shipped
  * the first six and deliberately left the Escalation subtree out; A4b
  * completes it — see `buildLoopGraph()`'s own doc comment below for the
- * full topology (Zorro Round-2 R2-7, `docs/feature/a4b-loop/test-report.md`:
- * this header used to still say "六节点...minus the Escalation subtree",
+ * full topology (Review Round-2 R2-7, `docs/feature/a4b-loop/test-report.md`:
+ * this header used to still say "six nodes...minus the Escalation subtree",
  * stale since A4b actually added `escalation`/`cancel` below).
  *
  * **This file is the PRD's declared technical risk core**: `addConditionalEdges`
@@ -52,7 +52,7 @@ function applyNode(_state: LoopStateType): Partial<LoopStateType> {
 
 /**
  * `Cancel` — DESIGN §4's other terminal state (the Escalation subtree's
- * "放弃" outcome), symmetric to `applyNode`: marks the run cancelled, no
+ * "abandon" outcome), symmetric to `applyNode`: marks the run cancelled, no
  * other side effect (A4b PRD §5 "graph.ts" / §2 non-goal). Not broken out
  * into its own `nodes/cancel.ts` file, same reasoning as `applyNode`.
  */
@@ -70,13 +70,14 @@ function cancelNode(_state: LoopStateType): Partial<LoopStateType> {
  * with reject/rejected edges looping back to `draft`, `review`'s `"reject"`
  * verdict routing through `g2` (below threshold) or straight to
  * `escalation` (at/above threshold) before returning to `draft`, `g2`'s
- * "主动升级" decision also reaching `escalation`, and `escalation`'s
- * human three-way decision routing to `draft`/`g3`/`cancel`.
+ * "proactively escalate" decision also reaching `escalation`, and
+ * `escalation`'s human three-way decision routing to `draft`/`g3`/`cancel`.
  *
  * **Deliberately not adding a plain `addEdge(LOOP_NODES.g1, LOOP_NODES.review)`
  * alongside the `addConditionalEdges(LOOP_NODES.g1, ...)` call below** — the
  * conditional edges' target set already covers `{review, draft}` (PRD §5's
- * explicit warning: "初次写码时容易犯的错").
+ * explicit warning: "an easy mistake to make when writing this the first
+ * time").
  */
 export function buildLoopGraph(deps: LoopGraphDeps) {
   return new StateGraph(LoopState)

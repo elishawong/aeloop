@@ -3,9 +3,10 @@
  * docs/DESIGN.md §5's `structured_claims` table and the sequence diagram's
  * `{diff, claims[], confidence}` (Coder) / `{verdict, issues[], confidence}`
  * (Tester) payloads — but this is the *validation shape a model's output is
- * checked against*, not the persisted row. PRD §5 A1 Prompt 层 is explicit:
- * "对齐 structured_claims 概念,但本段只是 zod 校验形状,不含持久化列如
- * run_id". Concretely, `ClaimSchema` deliberately excludes every column
+ * checked against*, not the persisted row. PRD §5 A1 Prompt layer is
+ * explicit: "aligned to the structured_claims concept, but this section is
+ * only the zod validation shape — it doesn't include persistence columns
+ * like run_id". Concretely, `ClaimSchema` deliberately excludes every column
  * `structured_claims` carries that only exists once the *engine* (Harness/
  * Loop) has processed the model's response — `id`/`run_id`/`created_at`
  * (persistence bookkeeping), `model_used`/`provider_used` (Harness knows
@@ -64,7 +65,7 @@ export type CoderOutput = z.infer<typeof CoderOutput>;
 /**
  * Tester's structured output (DESIGN §3 sequence: `Tester-->>Orc: {verdict, issues[], confidence}`).
  * `verdict` mirrors the state machine's (DESIGN §4) two outcomes at the
- * review step: "通过" → `pass`, "打回" → `reject`.
+ * review step: "approved" → `pass`, "bounced back" → `reject`.
  */
 export const TesterOutput = z.object({
   verdict: z.enum(["pass", "reject"]),

@@ -1,6 +1,6 @@
 /**
  * Context-layer domain types. Aligned to docs/DESIGN.md §5 (DB schema —
- * `[verity-proven]` M2, with the three columns aeloop adds back:
+ * `[prior-proven]` M2, with the three columns aeloop adds back:
  * `memories.confirmed_at`/`confirmed_by`, `memory_confirmations.actor`,
  * `system_config.updated_at`).
  *

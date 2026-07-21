@@ -1,10 +1,11 @@
 /**
- * `runner.ts` unit tests (A4b PRD §5 "runner.test.ts" / §6 B4 — "本增量整
- * 合复杂度最高的一批"). Real `graph.ts` (not a toy graph, same posture
+ * `runner.ts` unit tests (A4b PRD §5 "runner.test.ts" / §6 B4 — "the
+ * highest-integration-complexity batch of this increment"). Real
+ * `graph.ts` (not a toy graph, same posture
  * `checkpoint.test.ts`/`graph.test.ts` already take) + `FakeAdapter` per
  * role (no real subprocess/network) + a real `AuditStore` + real
  * `SqliteSaver`, both pointed at the **same** temp file — this file is
- * where PRD §9.2 决策3's "does sharing one SQLite file between the
+ * where PRD §9.2 Decision 3's "does sharing one SQLite file between the
  * checkpointer's tables and the audit tables actually work" question gets
  * a real answer, not just an assertion of intent.
  *
@@ -96,13 +97,13 @@ function buildDeps(
   const router = new ProviderRouter({ coder: { provider: coder.id }, tester: { provider: tester.id } }, registry);
   const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
   const audit = new AuditStore(dbPath);
-  const checkpointer = createSqliteCheckpointer(dbPath); // same file as `audit` — PRD §9.2 决策3.
+  const checkpointer = createSqliteCheckpointer(dbPath); // same file as `audit` — PRD §9.2 Decision 3.
   return { deps: { router, composer, audit, checkpointer }, coder, tester, audit };
 }
 
 /**
  * Coder fake whose claims-per-round is scriptable (unlike `FakeCoderAdapter`
- * above, always 2) — Zorro Round-2 R2-2 (`docs/feature/a4b-loop/test-report.md`)
+ * above, always 2) — Review Round-2 R2-2 (`docs/feature/a4b-loop/test-report.md`)
  * needs a round that legally returns zero claims (`prompt/schema.ts`'s
  * `CoderOutput.claims` has no `.min(1)`) to prove `step_ref` numbering
  * survives it.
@@ -381,7 +382,7 @@ describe("resumeRun — structured_claims count matches claims actually produced
 });
 
 /**
- * Zorro Round-1 B2 (`docs/feature/a4b-loop/test-report.md`): `resumeRun`
+ * Review Round-1 B2 (`docs/feature/a4b-loop/test-report.md`): `resumeRun`
  * used to trust its `runId`/`threadId` pair as already matching — nothing
  * checked that `threadId` (which drives the graph) and `runId` (which
  * drives every audit write) actually named the same `workflow_runs` row.
@@ -447,13 +448,13 @@ describe("resumeRun — B2 threadId/runId binding", () => {
 });
 
 /**
- * Zorro Round-4 R5-B1 (`docs/feature/a4b-loop/test-report.md`): `resume:
+ * Review Round-4 R5-B1 (`docs/feature/a4b-loop/test-report.md`): `resume:
  * GateResumeValue | EscalationResumeValue` is an undiscriminated union —
  * nothing used to check that the *shape* of the resume value actually
  * matched the gate the run was paused at. A caller could hand a
  * `{decision: "force_pass"}` (a legal `EscalationResumeValue`, no cast
  * needed) to a run paused at **G1**, which only understands
- * `GateResumeValue`. Zorro's hand reproduction: that used to insert an
+ * `GateResumeValue`. Manual reproduction: that used to insert an
  * illegitimate `approvals` row (an Escalation-domain decision recorded
  * under `gate_type: "G1_SEND_TO_TESTER"`), *then* fail loud only once
  * `routeAfterG1`'s own `default: throw` ran — by which point the
@@ -485,7 +486,7 @@ describe("resumeRun — R5-B1 resume decision domain must match the pending gate
     ).rejects.toBeInstanceOf(ResumeDecisionDomainMismatchError);
 
     // Zero audit rows from the rejected call — in particular, no illegitimate approvals row recording
-    // an Escalation decision under G1's gate_type (Zorro's reproduced failure mode).
+    // an Escalation decision under G1's gate_type (the reproduced failure mode).
     expect(readApprovals(dbPath, started.runId)).toHaveLength(0);
 
     // workflow_runs is untouched — still exactly what startRun() left it as, not a split state where
@@ -518,7 +519,7 @@ describe("resumeRun — R5-B1 resume decision domain must match the pending gate
     expect(atG2.interrupt?.gate).toBe("G2_SEND_TO_FIX");
 
     // "escalate" is in G2's own accepted set (resumeDecisionsFor(LOOP_NODES.g2), mirroring
-    // routeAfterG2's own edge) — this must still be accepted here. (Zorro Round-5 R6-B1: this
+    // routeAfterG2's own edge) — this must still be accepted here. (Review Round-5 R6-B1: this
     // used to be framed as "the guard only checks gate-vs-escalation, not per-gate routing, so
     // this passes as a side effect" — that framing was itself describing the bug R6-B1 fixes.
     // resumeDecisionsFor() is now precise per-gate, and G2+escalate is legitimately in G2's own
@@ -529,7 +530,7 @@ describe("resumeRun — R5-B1 resume decision domain must match the pending gate
 });
 
 /**
- * Zorro Round-5 R6-B1 (`docs/feature/a4b-loop/test-report.md`): the R5-B1
+ * Review Round-5 R6-B1 (`docs/feature/a4b-loop/test-report.md`): the R5-B1
  * guard above closed the *cross-domain* case (an Escalation-shaped value
  * reaching a g1/g2/g3 gate) but `resumeDecisionsFor()` still mapped all
  * three gates to one shared `["approved","rejected","escalate"]` domain —
@@ -649,7 +650,7 @@ describe("resumeRun — R6-B1 resume decision domain must match the pending gate
 });
 
 /**
- * Zorro Round-1 B3 (`docs/feature/a4b-loop/test-report.md`): `runner.ts`
+ * Review Round-1 B3 (`docs/feature/a4b-loop/test-report.md`): `runner.ts`
  * never called `AuditStore.runInTransaction`, even though PRD §4.2/§5
  * explicitly designed it for "wrap a round's multi-row claim/approval
  * writes into one transaction". A mid-group insert failure used to leave
@@ -700,7 +701,7 @@ describe("resumeRun — B3 multi-row audit writes are transactional", () => {
 });
 
 /**
- * Zorro Round-5 R6-B2 (`docs/feature/a4b-loop/test-report.md`): `workflow_runs`'
+ * Review Round-5 R6-B2 (`docs/feature/a4b-loop/test-report.md`): `workflow_runs`'
  * `status`/`current_state` used to be synced exactly once, after the whole
  * `compiled.stream()` call drained — but `structured_claims`/`approvals`
  * rows (and LangGraph's own checkpoint) are written incrementally, per
@@ -713,7 +714,7 @@ describe("resumeRun — B3 multi-row audit writes are transactional", () => {
  * but `workflow_runs.current_state` stayed exactly where it was before
  * this call started — a permanent split between the checkpoint (the
  * graph's real position) and the business ledger. This test reproduces
- * Zorro's exact hand repro: G1 approve succeeds normally, the tester
+ * the exact manual repro: G1 approve succeeds normally, the tester
  * adapter then throws inside `review` before it can yield a chunk.
  */
 describe("resumeRun — R6-B2 workflow_runs stays in sync with the checkpoint even when a later node throws mid-call", () => {
@@ -760,7 +761,7 @@ describe("resumeRun — R6-B2 workflow_runs stays in sync with the checkpoint ev
 });
 
 /**
- * Zorro Round-1 D1 (`docs/feature/a4b-loop/test-report.md`): `resumeRun`'s
+ * Review Round-1 D1 (`docs/feature/a4b-loop/test-report.md`): `resumeRun`'s
  * `step_ref` counters used to trust the caller-supplied `stepCounters`
  * param alone (default `{}`). A caller that didn't thread the previous
  * call's returned `stepCounters` forward — the exact shape of a resume
@@ -812,7 +813,7 @@ describe("resumeRun — D1 step_ref counters rebuild from disk across independen
 });
 
 /**
- * Zorro Round-2 R2-2 (`docs/feature/a4b-loop/test-report.md`): D1's disk
+ * Review Round-2 R2-2 (`docs/feature/a4b-loop/test-report.md`): D1's disk
  * rebuild (above) reads `AuditStore.listStepRefsByRun()`, which used to only
  * see rows in `structured_claims`/`approvals`. `CoderOutput.claims`/
  * `TesterOutput.claims` (`prompt/schema.ts`) have no `.min(1)`, so a real
@@ -898,7 +899,7 @@ describe("resumeRun — R2-2 a zero-claim round still leaves a durable step_ref,
 });
 
 /**
- * Zorro Round-2 R2-3 (`docs/feature/a4b-loop/test-report.md`): B3's
+ * Review Round-2 R2-3 (`docs/feature/a4b-loop/test-report.md`): B3's
  * transaction wrapping is real code (`runInTransaction` really does wrap
  * `review`'s claim-insert loop and `resumeRun`'s gate-approval-insert loop),
  * but the only regression test that ever forced a mid-group failure was
@@ -957,7 +958,7 @@ describe("resumeRun — R2-3 review/gate multi-row audit writes are transactiona
     expect(approvals).toHaveLength(1);
     expect(approvals[0]).toMatchObject({ gate_type: "G1_SEND_TO_TESTER", decision: "approved" });
 
-    // Zorro Round-5 R6-B2 (docs/feature/a4b-loop/test-report.md): workflow_runs is now synced after
+    // Review Round-5 R6-B2 (docs/feature/a4b-loop/test-report.md): workflow_runs is now synced after
     // *every* chunk this call finishes processing, not only once at the very end — G1's chunk (whose
     // own runInTransaction call already committed, before review's group ever started) was
     // successfully synced, advancing current_state to "review" (matching the checkpoint's real
@@ -1032,7 +1033,7 @@ describe("resumeRun — R2-3 review/gate multi-row audit writes are transactiona
 });
 
 /**
- * Zorro Round-2 R2-5 (`docs/feature/a4b-loop/test-report.md`): a
+ * Review Round-2 R2-5 (`docs/feature/a4b-loop/test-report.md`): a
  * `decidedBy` guard used to live only inside `runStreamAndPersist`'s
  * per-chunk loop — reachable only *after* `compiled.stream()` had already
  * advanced the checkpoint past the gate that produced the decision.
@@ -1042,7 +1043,7 @@ describe("resumeRun — R2-3 review/gate multi-row audit writes are transactiona
  * like these tests do) — this proves the *ordering* fix: the checkpoint
  * must not move at all when that happens.
  *
- * Zorro Round-3 R3-2 (`docs/feature/a4b-loop/test-report.md`): the guard
+ * Review Round-3 R3-2 (`docs/feature/a4b-loop/test-report.md`): the guard
  * originally checked only `decidedBy === undefined`, which let `null`
  * (`null !== undefined`) sail through both this guard and its
  * `runStreamAndPersist` backstop, advance the graph, and only fail later —
@@ -1123,7 +1124,7 @@ describe("resumeRun — R2-5/R3-2 decidedBy is validated before the graph advanc
 });
 
 /**
- * Zorro Round-2 R2-6 (M2 follow-up, `docs/feature/a4b-loop/test-report.md`):
+ * Review Round-2 R2-6 (M2 follow-up, `docs/feature/a4b-loop/test-report.md`):
  * `runner.ts` threads `entry.decidedAt` (the gate's own recorded decision
  * moment, from `gates.ts`'s `new Date().toISOString()` right after
  * `interrupt()` returns) into `insertApproval`, but nothing verified that —

@@ -1,6 +1,6 @@
 /**
- * `checkToolExecution` — `ToolExecVerifier`'s core (A3 PRD §5), the "唯一真
- * 防幻觉的那道闸" DESIGN §8 names. Pure function: given the raw `content`
+ * `checkToolExecution` — `ToolExecVerifier`'s core (A3 PRD §5), the "one true
+ * anti-hallucination gate" DESIGN §8 names. Pure function: given the raw `content`
  * string a cli-bridge adapter's `invoke()` collected and the
  * `ToolCallRecord[]` trace it parsed alongside it, decide whether a claim
  * that says "I verified this via tool_execution" is actually backed by a
@@ -20,7 +20,7 @@
  *   2. No entry in `claims` has `verifiedBy === "tool_execution"` → `"na"`
  *      (nobody claimed anything this function needs to check).
  *   3. At least one entry does → `"pass"` if `trace` is non-empty, `"fail"`
- *      if it's empty — the "声称≠行为" case this verifier exists to catch.
+ *      if it's empty — the "claimed ≠ done" case this verifier exists to catch.
  *
  * No timestamp/ordering comparison is needed here: within one `invoke()`
  * call, both CLIs' non-interactive event streams are strictly chronological

@@ -177,7 +177,7 @@ describe("loadProfile — ${ENV} placeholder substitution", () => {
   });
 });
 
-describe("loadProfile — minimal required-field validation before returning ok:true (Zorro review suggestion)", () => {
+describe("loadProfile — minimal required-field validation before returning ok:true (review suggestion)", () => {
   it("throws ProfileConfigParseError when 'profile' is missing", () => {
     const profilesRoot = makeTmpProfilesRoot();
     const dir = path.join(profilesRoot, "no-profile-field");
@@ -224,7 +224,7 @@ describe("loadProfile — minimal required-field validation before returning ok:
   });
 });
 
-describe("loadProfile — path traversal is blocked (Zorro review, feature/issue-1-a0-a1-scaffold)", () => {
+describe("loadProfile — path traversal is blocked (review, feature/issue-1-a0-a1-scaffold)", () => {
   it("real repro: a '../../../CLAUDE'-style profile name no longer leaks the repo's own CLAUDE.md directory", () => {
     // Before the fix, `path.join(profilesRoot, profile)` collapsed the ".."
     // segments with no containment check, so a traversal profile name

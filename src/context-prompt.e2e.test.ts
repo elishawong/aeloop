@@ -1,8 +1,9 @@
 /**
- * B9 — the hardest requirement of A0+A1 (PRD §5 "垂直切片(A1 收尾,硬性交付)"
- * / DESIGN §8.5's "aeloop 每个里程碑收尾必须有一条薄垂直切片真正接通").
+ * B9 — the hardest requirement of A0+A1 (PRD §5 "vertical slice (A1 wrap-up,
+ * hard deliverable)" / DESIGN §8.5's "every aeloop milestone wrap-up must
+ * have one thin vertical slice actually wired end-to-end").
  *
- * Verity's M2/M3 shipped layers that each tested green in isolation but
+ * a prior internal implementation's M2/M3 shipped layers that each tested green in isolation but
  * were never actually wired together — this test exists specifically to
  * make that failure mode impossible to fake here. It is deliberately NOT a
  * unit test: no mocking, no stubbing, no hand-built fixture objects
@@ -47,8 +48,8 @@ describe("Context -> Prompt vertical slice (real MemoryStore -> real ContextInje
   it("confirmed content reaches the final prompt, rejected content never does, unconfirmed content reaches it with a visible warning", () => {
     // The task text below is real natural-language text containing a
     // hyphenated compound word ("retry-backoff") — deliberately the exact
-    // shape that used to make raw FTS5 MATCH throw a syntax error (Zorro
-    // review, feature/issue-1-a0-a1-scaffold, blocker #2). It's fed into
+    // shape that used to make raw FTS5 MATCH throw a syntax error (review,
+    // feature/issue-1-a0-a1-scaffold, blocker #2). It's fed into
     // `injector.inject()` as the real recall query below, not skipped via
     // `inject(undefined)` — this slice exercises the safe-FTS-query fix
     // (`MemoryStore.searchMemories` / `toSafeFtsQuery`) end to end, not
@@ -163,7 +164,7 @@ describe("Context -> Prompt vertical slice (real MemoryStore -> real ContextInje
       { type: "decision", title: "Later rejected", content: "this will be rejected via the service", confidenceState: "unconfirmed" },
       NOW,
     );
-    confirmation.reject(memory.id, "zorro", NOW);
+    confirmation.reject(memory.id, "reviewer", NOW);
 
     const config = new SystemConfig(store);
     config.set("default_stale_days", "30", NOW);

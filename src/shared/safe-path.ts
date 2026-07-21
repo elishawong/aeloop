@@ -4,7 +4,7 @@
  * in `src/profile/loader.ts`) into a filesystem path under a fixed root
  * directory (`<personasDir>/<role>.md`, `<profilesRoot>/<profile>/`).
  *
- * Both call sites had the same hole (Zorro review, feature/issue-1-a0-a1-scaffold):
+ * Both call sites had the same hole (review, feature/issue-1-a0-a1-scaffold):
  * the name was `path.join`-ed straight into a path and read, with no check
  * that the result stayed inside the intended root. `path.join` happily
  * collapses `..` segments — `role = "../../../CLAUDE"` resolves to the repo

@@ -127,7 +127,7 @@ describe("ConfirmationService.reject()", () => {
     expect(store.getConfirmationsForMemory(999)).toEqual([]);
   });
 
-  it("correct() -> reject(): preserves the confirmed_at/confirmed_by set by the prior correct(), not wiped by reject() (locks the documented, disputable behavior — Zorro review suggestion, protects against silent drift)", () => {
+  it("correct() -> reject(): preserves the confirmed_at/confirmed_by set by the prior correct(), not wiped by reject() (locks the documented, disputable behavior — review suggestion, protects against silent drift)", () => {
     const { store, service } = setup();
     const memory = store.insertMemory({ type: "idea", title: "T", content: "original" }, NOW);
 
@@ -136,7 +136,7 @@ describe("ConfirmationService.reject()", () => {
     expect(corrected.confirmedAt).toBe(NOW);
     expect(corrected.confirmedBy).toBe("elisha");
 
-    const rejected = service.reject(memory.id, "zorro", LATER);
+    const rejected = service.reject(memory.id, "reviewer", LATER);
 
     expect(rejected.confidenceState).toBe("rejected");
     expect(rejected.content).toBe("corrected content"); // reject() never touches content
@@ -152,7 +152,7 @@ describe("ConfirmationService.reject()", () => {
     const history = store.getConfirmationsForMemory(memory.id);
     expect(history).toHaveLength(2);
     expect(history[0]).toMatchObject({ action: "correct", actor: "elisha" });
-    expect(history[1]).toMatchObject({ action: "reject", actor: "zorro", oldContent: "corrected content" });
+    expect(history[1]).toMatchObject({ action: "reject", actor: "reviewer", oldContent: "corrected content" });
   });
 });
 

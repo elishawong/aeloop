@@ -1,35 +1,35 @@
-# A4a Loop 前置 Spike — LangGraph.js 门控循环实证(issue #13)
+# A4a Loop Pre-work Spike — LangGraph.js Gated Loop Empirical Verification (issue #13)
 
-> **投石问路,不写生产实现,不 commit。** 目标:在 aeloop 本机本栈(Node v24 + pnpm + ESM +
-> TypeScript strict)上,真跑命令验证 LangGraph.js 能不能承载 DESIGN §4 的门控状态机
-> (Draft→G1→Review→G3,含 interrupt 人在环 + 跨进程 checkpoint resume)。DESIGN §9 第 3 条
-> 把这套模式标 `[verity-proven]`——那是 Verity 代码库证过的,**本仓不能抄 Verity 实现**(空气墙),
-> 只能重新独立证一遍。本 spike 就是那次重新证明。
+> **Reconnaissance only, not a production implementation, no commit.** Goal: on aeloop's own machine and stack (Node v24 + pnpm + ESM +
+> TypeScript strict), actually run commands to verify whether LangGraph.js can support the gated state machine from DESIGN §4
+> (Draft→G1→Review→G3, including interrupt human-in-the-loop + cross-process checkpoint resume). DESIGN §9 item 3
+> tags this pattern `[verity-proven]` — that was proven in the Verity codebase, **this repo may not copy the Verity implementation** (air wall),
+> it can only be independently re-proven. This spike is that re-proof.
 >
-> 实测环境:macOS,Node `v24.1.0`,pnpm `9.12.3`,分支 `feature/issue-13-a4a-loop`(基于 main
-> `539f650`)。所有命令都是本次会话里真跑的,输出样本原文粘贴(未编造/未回忆)。脚本在
-> `docs/feature/a4a-loop/spike/`,可直接 `node`/`npx tsc` 复现。
+> Test environment: macOS, Node `v24.1.0`, pnpm `9.12.3`, branch `feature/issue-13-a4a-loop` (based on main
+> `539f650`). All commands were actually run in this session, and the output samples are pasted verbatim (not fabricated/not recalled).
+> The scripts are in `docs/feature/a4a-loop/spike/`, reproducible directly via `node`/`npx tsc`.
 
-## 一句话结论(先行)
+## One-line Conclusion (up front)
 
-**5 个 Q 全部成立,DESIGN §9 第 3 条"verity-proven"的判断在本仓本栈上被独立证实,没有出现
-"某个环节根本做不到"的最坏分支。** 唯一需要 PRD 特别处理的是 Q5 的一处类型坑(`Command` 的
-`Nodes` 泛型参数默认 `string`,不显式标注会报 TS2345)——不是设计层面的问题,是写 `nodes/`
-代码时的一条硬性注意事项。
+**All 5 Qs held. DESIGN §9 item 3's "verity-proven" claim has been independently confirmed on this repo's own stack, with no
+"some part simply doesn't work" worst-case branch appearing.** The only thing that needs special handling in the PRD is a Q5 typing pitfall (`Command`'s
+`Nodes` generic parameter defaults to `string`, and TS2345 will be reported if it isn't explicitly annotated) — this is not a design-level issue, it's a hard
+caveat when writing `nodes/` code.
 
-| Q | 问题 | 结论 |
+| Q | Question | Conclusion |
 |---|---|---|
-| Q1 | 装得上吗 | ✅ 成。`@langchain/langgraph@1.4.8` + `@langchain/langgraph-checkpoint-sqlite@1.0.3`,Node v24 + pnpm + ESM 下 `pnpm add` 干净安装、import 无报错 |
-| Q2 | StateGraph 两节点 | ✅ 成。coder→tester 玩具图编译 + 跑通一圈,state 正确流转 |
-| Q3 | interrupt 人在环 | ✅ 成。`interrupt()` 真的暂停在 G1、把待审内容抛给外部;外部 `Command({resume})` 真的续跑到底 |
-| Q4 | 跨进程 checkpoint(最关键) | ✅ 成。两个独立 `node` 进程(不同 pid),仅凭 `thread_id` + 落盘 sqlite 文件完成暂停→续跑,零内存共享 |
-| Q5 | 类型/ESM 契合 | ✅ 成,但有一处必须显式处理的坑(见下)。`tsc --noEmit`(strict + noUncheckedIndexedAccess)最终全绿 |
+| Q1 | Does it install? | ✅ Success. `@langchain/langgraph@1.4.8` + `@langchain/langgraph-checkpoint-sqlite@1.0.3`, clean `pnpm add` install and import with no errors under Node v24 + pnpm + ESM |
+| Q2 | StateGraph two-node | ✅ Success. coder→tester toy graph compiled + ran a full cycle, state flows correctly |
+| Q3 | interrupt human-in-the-loop | ✅ Success. `interrupt()` really pauses at G1, throwing the pending-review content out to the caller; the external `Command({resume})` really resumes to completion |
+| Q4 | Cross-process checkpoint (most critical) | ✅ Success. Two independent `node` processes (different pids), pause→resume achieved purely via `thread_id` + a persisted sqlite file, zero in-memory sharing |
+| Q5 | Type/ESM compatibility | ✅ Success, but with one pitfall that must be explicitly handled (see below). `tsc --noEmit` (strict + noUncheckedIndexedAccess) ultimately fully green |
 
 ---
 
-## Q1:装得上吗
+## Q1: Does it install?
 
-### 真实包名与版本(npm 查证,非记忆)
+### Real package names and versions (verified via npm, not recalled)
 
 ```
 $ npm view @langchain/langgraph-checkpoint-sqlite@1.0.3 dependencies peerDependencies
@@ -52,24 +52,24 @@ $ npm view @langchain/langgraph@1.4.8 engines
 { node: '>=18' }
 ```
 
-**选定版本**:`@langchain/langgraph@1.4.8`(当时 npm 上最新)、
-`@langchain/langgraph-checkpoint-sqlite@1.0.3`(当时最新,官方 LangChain 维护)。
+**Selected versions**: `@langchain/langgraph@1.4.8` (the latest on npm at the time),
+`@langchain/langgraph-checkpoint-sqlite@1.0.3` (the latest at the time, officially maintained by LangChain).
 
-**与 aeloop 现有依赖的兼容性核对**(非猜测,逐条对过):
-- `@langchain/langgraph-checkpoint-sqlite` 的 `better-sqlite3` 依赖要求 `^12.10.0`,aeloop
-  `package.json` 已有 `better-sqlite3@^12.11.1` —— **兼容,不产生第二份 better-sqlite3**。
-- `@langchain/langgraph` 的 `zod` peer dep 要求 `^3.25.32 || ^4.2.0`,aeloop 已有 `zod@^4.4.3`
-  —— **兼容**。
-- `engines.node: >=18`,aeloop 要求 `>=24` —— **兼容(更严格的子集)**。
-- 没有安装 `node:sqlite` 变体(DESIGN §10 开放点提过这个可选杠杆)——`@langchain/langgraph-checkpoint-sqlite`
-  官方包底层用的就是 `better-sqlite3`,不是 `node:sqlite`,所以"换 node:sqlite 减依赖"这件事
-  **不适用于这个官方 checkpoint 包本身**(它的实现选择已经锁死 better-sqlite3);npm 上另有一个
-  第三方包 `langgraph-checkpoint-sqlite-native`(用 node:sqlite,非 LangChain 官方维护,单一
-  maintainer,版本 `0.0.2`)——本 spike **未评估这个第三方包**,只验证了官方
-  `@langchain/langgraph-checkpoint-sqlite`,如实标注,DESIGN §10 那条开放点应改写为"官方包锁定
-  better-sqlite3,若真要 node:sqlite 得换第三方包,风险自担"。
+**Compatibility check against aeloop's existing dependencies** (not a guess, checked item by item):
+- `@langchain/langgraph-checkpoint-sqlite`'s `better-sqlite3` dependency requires `^12.10.0`, aeloop's
+  `package.json` already has `better-sqlite3@^12.11.1` — **compatible, does not produce a second copy of better-sqlite3**.
+- `@langchain/langgraph`'s `zod` peer dep requires `^3.25.32 || ^4.2.0`, aeloop already has `zod@^4.4.3`
+  — **compatible**.
+- `engines.node: >=18`, aeloop requires `>=24` — **compatible (a stricter subset)**.
+- `node:sqlite` variant not installed (DESIGN §10's open item mentioned this as a possible lever) — the official
+  `@langchain/langgraph-checkpoint-sqlite` package uses `better-sqlite3` underneath, not `node:sqlite`, so "switch to node:sqlite to reduce
+  dependencies" **does not apply to this official checkpoint package** (its implementation choice already locks in better-sqlite3); npm has a
+  third-party package `langgraph-checkpoint-sqlite-native` (uses node:sqlite, not officially maintained by LangChain, single
+  maintainer, version `0.0.2`) — this spike **did not evaluate this third-party package**, only verified the official
+  `@langchain/langgraph-checkpoint-sqlite`; noting this honestly, DESIGN §10's open item should be rewritten as "the official package is locked to
+  better-sqlite3; if node:sqlite is truly needed, one would have to switch to the third-party package, at one's own risk."
 
-### 安装
+### Installation
 
 ```
 $ pnpm add @langchain/langgraph@1.4.8 @langchain/langgraph-checkpoint-sqlite@1.0.3
@@ -82,10 +82,10 @@ dependencies:
 
 Done in 1m 34.5s
 ```
-干净安装,无 peer dep 冲突警告(唯一一条 WARN 是 `prebuild-install@7.1.3` 被标 deprecated,
-和 langgraph 无关,是 better-sqlite3 生态链里的既有子依赖,不是本次新增)。
+Clean install, no peer dep conflict warnings (the only WARN is `prebuild-install@7.1.3` flagged as deprecated,
+unrelated to langgraph — it's an existing sub-dependency in the better-sqlite3 ecosystem, not newly introduced this time).
 
-### import smoke test
+### Import smoke test
 
 `docs/feature/a4a-loop/spike/q1-import.mjs`:
 ```js
@@ -104,19 +104,19 @@ SqliteSaver: function
 Q1 OK: imports resolved under Node v24.1.0
 ```
 
-**对 A4a PRD 的影响**:`package.json` 应钉死 `@langchain/langgraph@1.4.8` +
-`@langchain/langgraph-checkpoint-sqlite@1.0.3`(或后续 PRD 阶段重新 `npm view` 取当时最新,
-但至少这两个是本 spike 实测过的基线,不是猜的版本号)。不需要额外装 `@langchain/langgraph-checkpoint`
-(base 包)—— 它是两者的共同 peer dep,pnpm 已自动解析装好(体现在 `+20` 里,包含
+**Impact on the A4a PRD**: `package.json` should pin `@langchain/langgraph@1.4.8` +
+`@langchain/langgraph-checkpoint-sqlite@1.0.3` (or a later PRD stage could re-run `npm view` to get the then-latest,
+but at minimum these two are the baseline actually tested in this spike, not a guessed version number). No need to additionally install `@langchain/langgraph-checkpoint`
+(the base package) — it's a shared peer dep of both, and pnpm already resolved and installed it automatically (reflected in the `+20`, including
 `@langchain/core`/`@langchain/langgraph-checkpoint`/`@langchain/protocol`/`@langchain/langgraph-sdk`
-等传递依赖)。
+and other transitive dependencies).
 
 ---
 
-## Q2:StateGraph 两节点(coder→tester)
+## Q2: StateGraph two nodes (coder→tester)
 
-`docs/feature/a4a-loop/spike/q2-two-node-graph.mjs` —— `Annotation.Root` 定义 state,两个纯函数
-节点(`coderNode`/`testerNode`)只返回假数据,`addEdge` 串联 `START→coder→tester→END`。
+`docs/feature/a4a-loop/spike/q2-two-node-graph.mjs` — `Annotation.Root` defines the state, two pure-function
+nodes (`coderNode`/`testerNode`) just return fake data, `addEdge` chains `START→coder→tester→END`.
 
 ```
 $ node docs/feature/a4a-loop/spike/q2-two-node-graph.mjs
@@ -134,17 +134,17 @@ Q2 final state: {
 Q2 OK: coder->tester StateGraph compiled and ran a full cycle.
 ```
 
-**结论**:`StateGraph` API 和 DESIGN §6 设想的 `graph.ts` 编译模式对得上——节点是普通函数,
-接收累积 state、返回 partial update,`addEdge` 串联即可,没有意外的心智负担。`log` 字段用了
-`reducer: (a,b)=>a.concat(b)` 验证了 state 里可以放"累加型"字段(审计链 `structured_claims`
-以后大概率要用这种模式攒历史)。
+**Conclusion**: The `StateGraph` API matches the `graph.ts` compilation pattern envisioned in DESIGN §6 — nodes are plain functions,
+receiving accumulated state and returning a partial update, with `addEdge` chaining them together; no unexpected cognitive overhead. The `log` field used
+`reducer: (a,b)=>a.concat(b)`, verifying that state can hold "accumulating" fields (the audit trail `structured_claims`
+will very likely need to use this pattern to accumulate history going forward).
 
 ---
 
-## Q3:interrupt 人在环(G1 暂停 + Command resume)
+## Q3: interrupt human-in-the-loop (G1 pauses + Command resume)
 
-`docs/feature/a4a-loop/spike/q3-interrupt-resume.mjs` —— 在 coder 和 tester 之间插一个
-`g1GateNode`,内部调 `interrupt({gate, diff, question})`。
+`docs/feature/a4a-loop/spike/q3-interrupt-resume.mjs` — inserts a `g1GateNode` between coder and tester,
+internally calling `interrupt({gate, diff, question})`.
 
 ```
 $ node docs/feature/a4a-loop/spike/q3-interrupt-resume.mjs
@@ -179,39 +179,39 @@ second (final) result: {
 Q3 OK: interrupt paused the graph, external Command({resume}) continued it to completion.
 ```
 
-**真实 API 形状(供 PRD 精确写)**:
-- 暂停:节点函数里调 `interrupt(payload)`——`payload` 是任意可序列化值(本 spike 用
-  `{gate, diff, question}`,直接映射 DESIGN §5 `approvals.gate_type`/`diff_ref`/`reasoning_text`
-  的雏形)。`compile({checkpointer})` **必须**配 checkpointer(哪怕内存版 `MemorySaver`),
-  没有 checkpointer 时 `interrupt()` 无法真正"暂停并保留断点"——这条虽然 spike 没有反向测试
-  "不给 checkpointer 会怎样",但 API 设计上 `interrupt` 依赖 checkpoint 机制是官方文档明确前提,
-  Q4 进一步证实了这个依赖关系。
-- 顶层 `invoke()` 的返回值里出现 `__interrupt__` 数组字段,里面每项 `{id, value}}` —— `id` 是
-  这次中断的唯一标识,`value` 就是节点传给 `interrupt()` 的 payload。
-- 恢复:`compiled.invoke(new Command({resume: <决策值>}), threadConfig)`——**同一个** `thread_id`
-  的 `threadConfig`,`resume` 的值原样成为 `interrupt()` 调用的返回值(`decision === "approve"`)。
-- `compiled.getState(threadConfig)` 可以在暂停期间查询 `state.next`(下一个待跑节点,这里是
-  `['g1']`)和 `state.tasks[0].interrupts`(和 `__interrupt__` 同样的 payload)——这是 G1/G2/G3
-  的"待审内容"读取入口,`escalation.ts`/TUI 层大概率要用这个查询暂停详情。
+**Real API shape (for the PRD to write precisely)**:
+- Pausing: inside a node function, call `interrupt(payload)` — `payload` is any serializable value (this spike used
+  `{gate, diff, question}`, directly mapping to a prototype of DESIGN §5's `approvals.gate_type`/`diff_ref`/`reasoning_text`).
+  `compile({checkpointer})` **must** be configured with a checkpointer (even the in-memory `MemorySaver`);
+  without a checkpointer, `interrupt()` cannot truly "pause and retain the breakpoint" — although this spike didn't do a reverse test of
+  "what happens without a checkpointer," this dependency of `interrupt` on the checkpoint mechanism is an explicit premise in the official docs,
+  and Q4 further confirms this dependency relationship.
+- The top-level `invoke()`'s return value contains a `__interrupt__` array field, with each item shaped `{id, value}` — `id` is
+  the unique identifier of this interrupt, and `value` is exactly the payload the node passed to `interrupt()`.
+- Resuming: `compiled.invoke(new Command({resume: <decision value>}), threadConfig)` — using the **same** `thread_id`'s
+  `threadConfig`, and the value of `resume` becomes, verbatim, the return value of the `interrupt()` call (`decision === "approve"`).
+- `compiled.getState(threadConfig)` can be used during the pause to query `state.next` (the next node to run, here it's
+  `['g1']`) and `state.tasks[0].interrupts` (the same payload as `__interrupt__`) — this is the entry point for reading the "pending review content" for
+  G1/G2/G3; `escalation.ts`/the TUI layer will very likely need to use this query to view pause details.
 
-**⚠️ 一个不算 bug 但影响写 `nodes/` 代码的行为**:resume 时,`g1GateNode` **整个函数体重新执行
-了一遍**(日志里 `[G1] about to interrupt()...` 打印了两次——第一次真中断,第二次 resume 时
-又打了一遍,只是这次 `interrupt()` 直接返回 `decision` 而不再暂停)。**推论**:`interrupt()`
-调用点**之前**的任何代码(包括节点里可能有的日志/副作用)在 resume 时会**重跑一次**。
-`nodes/gates.ts` 写 G1/G2/G3 节点时,`interrupt()` 调用前不能有不可重复执行的副作用(比如
-"发一次通知""写一次 approvals 表 INSERT"这类不幂等操作必须挪到 `interrupt()` **之后**,
-或者用 `checkpoint_id` 去重),这是 PRD/build 阶段的一条硬约束,不是这里发现了 bug。
+**⚠️ Not a bug, but a behavior that affects how `nodes/` code is written**: on resume, `g1GateNode`'s **entire function body re-executes
+once more** (in the log, `[G1] about to interrupt()...` is printed twice — the first time is a real interrupt, and the second time, on resume, it's printed
+again, except this time `interrupt()` directly returns `decision` instead of pausing again). **Corollary**: any code **before** the `interrupt()`
+call (including any logging/side effects a node might have) will **re-run** on resume.
+When writing G1/G2/G3 nodes in `nodes/gates.ts`, there must be no non-idempotent side effects before the `interrupt()` call (things like
+"send a notification once" or "write one INSERT to the approvals table" — non-idempotent operations must be moved to **after** `interrupt()`,
+or deduplicated via `checkpoint_id`); this is a hard constraint for the PRD/build phase, not a bug found here.
 
 ---
 
-## Q4:跨进程 checkpoint(最关键)
+## Q4: Cross-process checkpoint (most critical)
 
-三个文件:`q4-graph-def.mjs`(两个进程共享的图定义——checkpoint 存的是 **state**,不存图定义
-本身,所以两个进程必须各自独立构造出结构相同的图)、`q4-process-a.mjs`(跑到 G1 interrupt 就
-`process.exit(0)`,不 resume)、`q4-process-b.mjs`(全新 `node` 调用,只认 `thread_id` + 磁盘上
-的 sqlite 文件)。
+Three files: `q4-graph-def.mjs` (the graph definition shared by both processes — the checkpoint stores **state**, not the graph definition
+itself, so both processes must each independently construct a structurally identical graph), `q4-process-a.mjs` (runs to the G1 interrupt and then
+calls `process.exit(0)`, without resuming), `q4-process-b.mjs` (a brand-new `node` invocation, which only knows the `thread_id` +
+the sqlite file on disk).
 
-### Process A(跑一半就退出)
+### Process A (runs halfway then exits)
 
 ```
 $ node docs/feature/a4a-loop/spike/q4-process-a.mjs /tmp/q4-cross-process.sqlite thread-abc-123
@@ -236,7 +236,7 @@ $ node docs/feature/a4a-loop/spike/q4-process-a.mjs /tmp/q4-cross-process.sqlite
 [pid 27363] Process A state.next (should be ['g1']): [ 'g1' ]
 [pid 27363] Process A exiting now WITHOUT resuming. Checkpoint should be on disk at /tmp/q4-cross-process.sqlite.
 ```
-进程退出后确认磁盘文件真实存在(WAL 模式,三个文件):
+After the process exits, confirm the disk files actually exist (WAL mode, three files):
 ```
 $ ls -la /tmp/q4-cross-process.sqlite*
 -rw-r--r--  1 elishawong  wheel   4096 ... q4-cross-process.sqlite
@@ -244,7 +244,7 @@ $ ls -la /tmp/q4-cross-process.sqlite*
 -rw-r--r--  1 elishawong  wheel  32768 ... q4-cross-process.sqlite-shm
 ```
 
-### Process B(全新进程,不同 pid,仅凭 thread_id 续跑)
+### Process B (brand-new process, different pid, resumes purely from thread_id)
 
 ```
 $ node docs/feature/a4a-loop/spike/q4-process-b.mjs /tmp/q4-cross-process.sqlite thread-abc-123
@@ -274,37 +274,38 @@ $ node docs/feature/a4a-loop/spike/q4-process-b.mjs /tmp/q4-cross-process.sqlite
 [pid 27564] Q4 OK: process B, a fresh node invocation, resumed purely from thread_id + on-disk sqlite checkpoint and ran to completion.
 ```
 
-**结论(这是本 spike 的命门证据)**:
-- **pid 27363 → pid 27564,两个完全独立的 `node` 进程**(不是同进程 fork,不是 worker
-  thread——各自 `node <script>.mjs` 单独调用,零内存共享)。
-- Process B 在**没有任何来自 Process A 的运行时状态**的前提下,`getState(threadConfig)` 就能
-  读出和 Process A 中断时**一字不差**的 interrupt payload(`gate`/`diff`/`question`,id 也一致
-  `3a31896b...`)——证明 `interrupt()` 抛出的值**真的落盘**了,不是只存在内存里。
-- 仅凭 `{configurable: {thread_id: "thread-abc-123"}}` + 指向同一个 sqlite 文件路径的
-  `SqliteSaver.fromConnString(dbPath)`,Process B 就能把整条链续到底。
-- **直接印证 DESIGN §5 `workflow_runs.langgraph_thread_id` 这个设计**:那一列存的就是这里的
-  `thread_id`,`checkpoint.ts` 只要把这个字符串存进 `workflow_runs` 表、下次启动时用同一个
-  `thread_id` 构造 `threadConfig` 传给 `compiled.invoke`/`getState`,就能做到"关机重启后继续上次
-  卡在 G1/G2/G3 哪个门"——这条设计**在本仓本栈上被真实验证成立**,不是纸面推断。
+**Conclusion (this is the smoking-gun evidence of this spike)**:
+- **pid 27363 → pid 27564, two completely independent `node` processes** (not the same process forked, not a worker
+  thread — each was invoked separately via `node <script>.mjs`, zero in-memory sharing).
+- Without **any** runtime state coming from Process A, Process B's `getState(threadConfig)` can
+  read out an interrupt payload that matches Process A's interrupt-time state **exactly** (`gate`/`diff`/`question`, and the id also matches,
+  `3a31896b...`) — proving the value thrown by `interrupt()` was **truly persisted to disk**, not just held in memory.
+- Relying purely on `{configurable: {thread_id: "thread-abc-123"}}` + a `SqliteSaver.fromConnString(dbPath)` pointing at the
+  same sqlite file path, Process B was able to run the entire chain to completion.
+- **Directly confirms the DESIGN §5 `workflow_runs.langgraph_thread_id` design**: that column stores exactly this
+  `thread_id`; `checkpoint.ts` only needs to store this string into the `workflow_runs` table, and next time it starts, use the same
+  `thread_id` to construct `threadConfig` and pass it to `compiled.invoke`/`getState`, and it can achieve "after a restart, continue where it
+  left off at whichever of G1/G2/G3 it was stuck on" — this design **has been verified true on this repo's own stack**, it's not just a claim on
+  paper.
 
-**API 细节(供 checkpoint.ts 写码时用)**:`SqliteSaver.fromConnString(path)` 内部就是
-`new SqliteSaver(new Database(path))`(`Database` 来自 `better-sqlite3`),`.setup()` 首次调用时
-自动建 `checkpoints`/`writes` 两张表并开 `journal_mode=WAL`——**这两张表和 DESIGN §5 手画的
-`workflow_runs`/`structured_claims`/`approvals` 是完全独立的两套表**,LangGraph 自己的
-checkpoint 表管"图执行到哪一步、state 是什么",aeloop 的审计表管"业务语义的审批记录"——两者
-不是同一回事,`checkpoint.ts` 接线时要把 `langgraph_thread_id` 当外键桥接两边,不能指望
-LangGraph 的 checkpoint 表替代 DESIGN §5 的审计表。
+**API details (for use when writing checkpoint.ts)**: `SqliteSaver.fromConnString(path)` internally is
+`new SqliteSaver(new Database(path))` (`Database` comes from `better-sqlite3`), and `.setup()` on its first call automatically creates the
+`checkpoints`/`writes` tables and enables `journal_mode=WAL` — **these two tables are completely independent from DESIGN §5's hand-drawn
+`workflow_runs`/`structured_claims`/`approvals`**; LangGraph's own checkpoint tables manage "which step the graph execution is at, what the state is,"
+while aeloop's own audit tables manage "business-semantic approval records" — these are not the same thing;
+when wiring up `checkpoint.ts`, `langgraph_thread_id` should be treated as a foreign key bridging the two sides, one should not expect
+LangGraph's checkpoint tables to substitute for DESIGN §5's audit tables.
 
 ---
 
-## Q5:类型/ESM 契合(strict + noUncheckedIndexedAccess + NodeNext)
+## Q5: Type/ESM compatibility (strict + noUncheckedIndexedAccess + NodeNext)
 
-`docs/feature/a4a-loop/spike/q5-types.ts` 重写了 Q3 的 interrupt/resume 场景,过一遍
-`docs/feature/a4a-loop/spike/tsconfig.q5.json`(`extends` 项目根 `tsconfig.json`,只是
-override 了 `rootDir`/`outDir`/`noEmit`/`include`,其余 `strict`/`noUncheckedIndexedAccess`/
-`skipLibCheck`/`module: NodeNext` 等全部继承真实项目配置,不是另起一套宽松配置)。
+`docs/feature/a4a-loop/spike/q5-types.ts` rewrote Q3's interrupt/resume scenario, run through
+`docs/feature/a4a-loop/spike/tsconfig.q5.json` (`extends` the project root `tsconfig.json`, only
+overriding `rootDir`/`outDir`/`noEmit`/`include`, with everything else — `strict`/`noUncheckedIndexedAccess`/
+`skipLibCheck`/`module: NodeNext`, etc. — all inherited from the real project config, not a separately set-up looser config).
 
-### 第一次跑:TS2345(真实类型坑)
+### First run: TS2345 (a real typing pitfall)
 
 ```ts
 const resumeCommand = new Command({ resume: "approve" });
@@ -321,17 +322,17 @@ docs/feature/a4a-loop/spike/q5-types.ts(68,40): error TS2345: Argument of type
 exit=1
 ```
 
-**根因**(读 `node_modules/@langchain/langgraph/dist/constants.d.ts` 确认,非猜测):
+**Root cause** (confirmed by reading `node_modules/@langchain/langgraph/dist/constants.d.ts`, not guessed):
 ```ts
 declare class Command<Resume = unknown, Update extends Record<string, unknown> = Record<string, unknown>, Nodes extends string = string> extends CommandInstance<...>
 ```
-`Command` 的第三个泛型参数 `Nodes`(该 Command 允许跳转到哪些节点)**默认值是裸 `string`**,
-而 `compiled.invoke()` 期望的是编译后那个具体图的节点名字面量联合类型(如
-`"__start__"|"coder"|"g1"|"tester"`)。`new Command({resume: "approve"})` 这种写法没有上下文
-能让 TS 反推出 `Nodes` 该是哪几个字面量,于是落回默认的宽泛 `string`,和 `invoke()` 要的窄类型
-对不上,structurally 不兼容 → TS2345。
+`Command`'s third generic parameter `Nodes` (which nodes this Command is allowed to jump to) **defaults to the bare
+`string`**, while `compiled.invoke()` expects the literal union type of node names for that specific compiled graph (like
+`"__start__"|"coder"|"g1"|"tester"`). `new Command({resume: "approve"})` written this way gives TS no context
+from which to infer what `Nodes` should be, so it falls back to the default, broad `string`, which doesn't match the narrower type
+`invoke()` expects, and is structurally incompatible → TS2345.
 
-### 修复(显式标注泛型)
+### Fix (explicitly annotate the generic)
 
 ```ts
 const resumeCommand = new Command<
@@ -344,8 +345,8 @@ const resumeCommand = new Command<
 $ npx tsc -p docs/feature/a4a-loop/spike/tsconfig.q5.json
 exit=0
 ```
-运行时也验证过这份改完的 `.ts` 文件本身逻辑没坏(Node v24 原生 type-stripping,仅用于验证,
-不代表生产 build 路径——aeloop 生产走 `tsc -p tsconfig.build.json` 产出 `.js` 再跑):
+Also verified at runtime that the fixed `.ts` file's own logic wasn't broken (Node v24 native type-stripping, used only for verification,
+not representative of the production build path — aeloop's production goes through `tsc -p tsconfig.build.json` to produce `.js` before running):
 ```
 $ node docs/feature/a4a-loop/spike/q5-types.ts
 (node:28692) ExperimentalWarning: Type Stripping is an experimental feature ...
@@ -354,85 +355,88 @@ second: { task: 'toy task', ..., gateDecision: 'approve', testerVerdict: 'approv
 exit=0
 ```
 
-**对 A4a PRD 的影响**:`src/loop/graph.ts`/`gates.ts` 里任何构造 `new Command({resume: ...})`
-的地方,**必须显式标注第三个泛型参数为该图的节点名字面量联合**(或者定义一个共享的
-`type LoopNodeName = "coder" | "g1" | "g2" | "g3" | "tester" | ...` 给整个 `loop/` 模块复用),
-否则在 aeloop 的 strict tsconfig 下会挂在 TS2345 上,这是写码阶段的已知坑,不是设计缺陷。
+**Impact on the A4a PRD**: anywhere in `src/loop/graph.ts`/`gates.ts` that constructs `new Command({resume: ...})`
+**must explicitly annotate the third generic parameter as that graph's literal union of node names** (or define a shared
+`type LoopNodeName = "coder" | "g1" | "g2" | "g3" | "tester" | ...` for the whole `loop/` module to reuse),
+otherwise it will hit TS2345 under aeloop's strict tsconfig — this is a known pitfall at the coding stage, not a design flaw.
 
-### 附带核对:skipLibCheck 是否真的需要
+### Side check: is skipLibCheck actually needed
 
-DESIGN §9 第 5 条(spike Q5)问"有没有坑,如需 `skipLibCheck`"。aeloop 项目 `tsconfig.json`
-本来就已经 `skipLibCheck: true`(A0 就定的,和 langgraph 无关的既有配置)。本 spike 额外把
-它临时关掉单独测(`tsconfig.q5-noskiplib.json`,同目录),确认 **LangGraph 自己的 `.d.ts`
-声明文件在 `skipLibCheck: false` 下也是干净的**(`exit=0`,零报错)——也就是说 langgraph 的
-类型声明本身没有强制要求 `skipLibCheck`,aeloop 现有的 `skipLibCheck: true` 是历史决定
-(A0 定的),不是因为 langgraph 才需要,保持现状即可。
+DESIGN §9 item 5 (spike Q5) asks "are there any pitfalls, is `skipLibCheck` required." The aeloop project's `tsconfig.json`
+already has `skipLibCheck: true` (set back in A0, unrelated to langgraph, a pre-existing config). This spike additionally temporarily turned
+it off to test separately (`tsconfig.q5-noskiplib.json`, same directory), confirming that **LangGraph's own `.d.ts`
+declaration files are also clean under `skipLibCheck: false`** (`exit=0`, zero errors) — in other words, langgraph's
+type declarations themselves don't force a requirement of `skipLibCheck`; aeloop's existing `skipLibCheck: true` is a historical decision
+(set in A0), not something langgraph requires, so keeping the status quo is fine.
 
-### `noUncheckedIndexedAccess` 有没有踩
+### Did `noUncheckedIndexedAccess` get triggered
 
-本 spike 没有直接索引 `state.tasks[0]` 之类数组下标去读 interrupts 字段(用的是可选链
-`state.tasks?.[0]?.interrupts`),这条本身就是 `noUncheckedIndexedAccess` 强制的写法,**spike
-过程里被迫这么写、也确实编译通过**,说明这条约束在 loop 层代码里可以自然遵守,不需要例外。
-
----
-
-## 对 A4a PRD 的建议
-
-1. **DESIGN 章节号小更正**:任务交给我时说"§9.3 标 LangGraph...verity-proven",实际读到的是
-   `docs/DESIGN.md` **§9「开工前必跑的 spike」的第 3 条列表项**(不是 9.3 小节编号,DESIGN
-   §9 本身没有再拆 9.1/9.2/9.3 子编号)。原文:"3. `[verity-proven]` LangGraph 跨进程
-   interrupt/resume、LiteLLM json_schema 透传、e2e 最小闭环 —— Verity 已跑通,aeloop 重写后
-   回归验证即可。"——本 spike 覆盖了这条里"LangGraph 跨进程 interrupt/resume"这一半(Q3/Q4),
-   **"LiteLLM json_schema 透传"和"e2e 最小闭环"这两块不在本 spike 范围内,仍待后续验证**
-   (json_schema 透传更贴近 A2 Harness 范畴,e2e 闭环得等 coder/tester 节点接上真实 adapter 才
-   有意义,建议留到 A4a 后段或 A4b)。
-2. **`workflow-def.ts` 的编译方式有一个隐含要求**:DESIGN §6 说 `graph.ts` 要"从
-   WorkflowDefinition 编译"——本 spike 的图是纯代码手写的(`buildGraph()` 函数),没有验证
-   "从一份 JSON/YAML 格式的 workflow 定义动态生成 StateGraph"这件事本身的可行性。这属于
-   "aeloop 自己的编排层设计"而不是"LangGraph 能力边界",不在本 spike 的 5 个 Q 范围内,但
-   **是 A4a PRD 写 `graph.ts` 时必须单独设计的一块**,建议 PRD 把"WorkflowDefinition → 编译
-   StateGraph"列成独立验收项,不要假设它和本 spike 证的"手写图" 一样简单。
-3. **G2/G3 门 + escalation 硬分支未在本 spike 验证**:本 spike 只搭了单一个 G1 门(串联到底),
-   DESIGN §4 完整状态机还有 G2(修复批准分支)、G3(终审)、`reject_count >= threshold` 的硬
-   升级分支(条件边)。LangGraph 的条件边(`addConditionalEdges`)本 spike **完全没碰**——这是
-   G1/G2/G3 + 阈值升级要用到的核心机制,建议 A4a 第一个 build 批次里第一件事就是把
-   `addConditionalEdges` 走一遍最小验证(哪怕仍是玩具节点),因为这是本 spike 唯一没有实证、
-   但 DESIGN §4 图上明确需要的 LangGraph 能力,风险未清零。
-4. **批次拆分建议**(基于本 spike 证实的能力边界):
-   - **批次1**:`graph.ts` 骨架 + `nodes/coder.ts`/`nodes/tester.ts`(先用 fixture/假数据,
-     镜像本 spike Q2)+ 补验 `addConditionalEdges`(建议3的缺口)。
-   - **批次2**:`gates.ts`(G1/G2/G3 interrupt,镜像 Q3)+ `escalation.ts`(阈值硬分支,
-     用条件边接线)。
-   - **批次3**:`checkpoint.ts`(`SqliteSaver` 接线到 `workflow_runs.langgraph_thread_id`,
-     镜像 Q4 的跨进程验证方式,但这次要接 DESIGN §5 的三张审计表,不只是 LangGraph 自己的
-     `checkpoints`/`writes` 表)。
-   - **批次4**:coder/tester 节点换成真实 A2/A3 adapter(ProviderRouter + CliAdapter),做一次
-     真正的 e2e 薄垂直切片(DESIGN §8.5 方法论警示要求的"收尾必须真接通")。
-   这个拆法把"LangGraph 本身的机制"(批次1-3)和"接上 aeloop 自己的 harness 层"(批次4)分开,
-   前三批次风险已经被本 spike 大幅降低,批次4 的风险主要在 A2/A3 adapter 侧,不在 LangGraph 侧。
-5. **没有需要指挥官现在就拍板的新岔路**——本 spike 5 个 Q 全部按预期跑通,DESIGN §4/§5/§6 的
-   既有设计没有被证伪,唯一算"决策"的是建议1里 npm 上那个非官方 `langgraph-checkpoint-sqlite-native`
-   包**不采用**(继续用官方包 + better-sqlite3),这个判断本 spike 已经替 PRD 做了,不需要
-   额外升级讨论,PRD 阶段照此写即可。
+This spike didn't directly index array subscripts like `state.tasks[0]` to read the interrupts field (it used
+optional chaining `state.tasks?.[0]?.interrupts`), which is itself exactly the style `noUncheckedIndexedAccess` forces — this
+spike was, in the process, forced to write it this way, and it did compile successfully, which shows this constraint can be naturally followed
+in the loop layer's code, no exception needed.
 
 ---
 
-## 附:本 spike 改了什么 / 装了什么(如实列清单)
+## Recommendations for the A4a PRD
 
-**改动的文件**(均在 `feature/issue-13-a4a-loop` 分支,未 commit):
-- `package.json` / `pnpm-lock.yaml` —— 新增 2 个直接依赖(见 Q1 diff)
-- 新增 `docs/feature/a4a-loop/spike/`:`q1-import.mjs` / `q2-two-node-graph.mjs` /
+1. **A small DESIGN section-number correction**: when the task was assigned to me, it said "§9.3 tags LangGraph...verity-proven," but what I actually
+   read was `docs/DESIGN.md` **item 3 of the list in §9 "Spikes that must be run before starting work"** (not sub-section 9.3 — DESIGN
+   §9 itself doesn't have further 9.1/9.2/9.3 sub-numbering). Original text: "3. `[verity-proven]` LangGraph cross-process
+   interrupt/resume, LiteLLM json_schema pass-through, e2e minimal closed loop — Verity has already proven these; for aeloop, after the rewrite,
+   just regression-verify." — This spike covers the "LangGraph cross-process interrupt/resume" half of that item (Q3/Q4);
+   **"LiteLLM json_schema pass-through" and "e2e minimal closed loop" are not within the scope of this spike, and still need future verification**
+   (json_schema pass-through fits more within A2 Harness's scope; the e2e closed loop only makes sense once the coder/tester nodes are wired to real
+   adapters — recommend leaving these for the later part of A4a or for A4b).
+2. **`workflow-def.ts`'s compilation approach has an implicit requirement**: DESIGN §6 says `graph.ts` should be "compiled from a
+   WorkflowDefinition" — this spike's graph is purely hand-written in code (a `buildGraph()` function); it did not verify
+   the feasibility of "dynamically generating a StateGraph from a JSON/YAML-format workflow definition" itself. This falls under
+   "aeloop's own orchestration-layer design" rather than "LangGraph's capability boundary," and is not within the scope of this spike's 5 Qs, but
+   **it's something the A4a PRD must design separately when writing `graph.ts`**; recommend the PRD list "WorkflowDefinition → compile to
+   StateGraph" as an independent acceptance item, and not assume it's as simple as the "hand-written graph" this spike proved.
+3. **G2/G3 gates + the escalation hard branch were not verified in this spike**: this spike only built a single G1 gate (chained straight through);
+   DESIGN §4's full state machine still has G2 (fix-approval branch), G3 (final review), and the `reject_count >= threshold` hard
+   escalation branch (a conditional edge). This spike **did not touch** LangGraph's conditional edges (`addConditionalEdges`) at all — this is
+   the core mechanism needed for G1/G2/G3 + the threshold escalation; recommend that A4a's first build batch do a minimal verification of
+   `addConditionalEdges` as the very first thing (even if still with toy nodes), because this is the one LangGraph capability that this spike hasn't
+   empirically verified, yet that DESIGN §4's diagram explicitly needs — the risk remains uncleared.
+4. **Batch-splitting suggestion** (based on the capability boundaries this spike proved):
+   - **Batch 1**: `graph.ts` skeleton + `nodes/coder.ts`/`nodes/tester.ts` (start with fixtures/fake data,
+     mirroring this spike's Q2) + supplementary verification of `addConditionalEdges` (the gap noted in recommendation 3).
+   - **Batch 2**: `gates.ts` (G1/G2/G3 interrupt, mirroring Q3) + `escalation.ts` (the threshold hard branch,
+     wired up using conditional edges).
+   - **Batch 3**: `checkpoint.ts` (wire `SqliteSaver` to `workflow_runs.langgraph_thread_id`,
+     mirroring Q4's cross-process verification approach, but this time wiring to DESIGN §5's three audit tables, not just LangGraph's own
+     `checkpoints`/`writes` tables).
+   - **Batch 4**: swap the coder/tester nodes for real A2/A3 adapters (ProviderRouter + CliAdapter), do a
+     real e2e thin vertical slice (the kind of "the finish line must be a real connection" required by DESIGN §8.5's anti-fragmentation methodology warning).
+   This split separates "the LangGraph mechanism itself" (batches 1-3) from "wiring up aeloop's own harness layer" (batch 4) —
+   the risk on the first three batches has already been substantially reduced by this spike; batch 4's risk is mainly on the A2/A3 adapter side, not the
+   LangGraph side.
+5. **No new fork in the road that needs the commander's decision right now** — all 5 Qs in this spike ran as expected, and DESIGN §4/§5/§6's
+   existing design was not falsified; the only thing that counts as a "decision" is that in recommendation 1, the non-official npm package
+   `langgraph-checkpoint-sqlite-native` **should not be adopted** (continue with the official package + better-sqlite3) — this spike has already
+   made this call on the PRD's behalf, no need for
+   additional escalated discussion; the PRD stage can just write it this way.
+
+---
+
+## Appendix: What this spike changed / installed (an honest inventory)
+
+**Files changed** (all on the `feature/issue-13-a4a-loop` branch, not committed):
+- `package.json` / `pnpm-lock.yaml` — 2 new direct dependencies added (see the Q1 diff)
+- New `docs/feature/a4a-loop/spike/`: `q1-import.mjs` / `q2-two-node-graph.mjs` /
   `q3-interrupt-resume.mjs` / `q4-graph-def.mjs` / `q4-process-a.mjs` / `q4-process-b.mjs` /
   `q5-types.ts` / `tsconfig.q5.json` / `tsconfig.q5-noskiplib.json`
-- 新增本文件 `docs/feature/a4a-loop/spike-findings.md`
+- New file `docs/feature/a4a-loop/spike-findings.md` (this file)
 
-**装的依赖**:`@langchain/langgraph@1.4.8`、`@langchain/langgraph-checkpoint-sqlite@1.0.3`
-(+ pnpm 自动解析的传递依赖:`@langchain/core`、`@langchain/langgraph-checkpoint`、
-`@langchain/protocol`、`@langchain/langgraph-sdk`、`@standard-schema/spec` 等,共 20 个包,
-详见 `pnpm-lock.yaml` diff)。
+**Dependencies installed**: `@langchain/langgraph@1.4.8`, `@langchain/langgraph-checkpoint-sqlite@1.0.3`
+(+ transitive dependencies pnpm resolved automatically: `@langchain/core`, `@langchain/langgraph-checkpoint`,
+`@langchain/protocol`, `@langchain/langgraph-sdk`, `@standard-schema/spec`, etc., 20 packages total,
+see `pnpm-lock.yaml` diff for details).
 
-**未改动**:`src/`(引擎既有代码零改动)、`main` 分支(全程未切回)、任何其它项目仓库。
+**Not changed**: `src/` (zero changes to the engine's existing code), the `main` branch (never switched back to it throughout), any other project repos.
 
-**回归确认**:`pnpm lint`(`tsc --noEmit`)、`pnpm test`(228/228 测试)在装完新依赖 + 新增
-spike 文件后**仍然全绿**——spike 文件不在 `tsconfig.json` 的 `include: ["src/**/*.ts"]` 范围内,
-不干扰既有构建/测试管线。
+**Regression confirmation**: `pnpm lint` (`tsc --noEmit`) and `pnpm test` (228/228 tests) remained **fully green** after installing the new dependencies +
+adding the spike files — the spike files are not within `tsconfig.json`'s `include: ["src/**/*.ts"]` scope,
+so they don't interfere with the existing build/test pipeline.

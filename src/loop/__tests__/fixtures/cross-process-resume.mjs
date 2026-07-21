@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // cross-process-resume.mjs — "Process B" of the A4b checkpoint
-// production-hardening test (docs/feature/a4b-loop/PRD.md §5/§9.2 决策4).
+// production-hardening test (docs/feature/a4b-loop/PRD.md §5/§9.2 Decision 4).
 //
 // A second, fully independent `node` invocation — different pid, no
 // process-tree relationship to `cross-process-start.mjs` beyond this test

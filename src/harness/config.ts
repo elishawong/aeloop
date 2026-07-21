@@ -65,7 +65,7 @@ function extractBin(id: string, providerConfig: ProviderConfig): string | undefi
 }
 
 /**
- * Runtime guard for one `config.providers[id]` entry (Zorro round-1 🟡:
+ * Runtime guard for one `config.providers[id]` entry (Review Round-1 🟡:
  * `profile/loader.ts:147` explicitly leaves nested-shape validation of
  * `providers` to this layer — `loadProfile()`'s `assertProfileConfigShape`
  * only checks that `providers` itself is *a* mapping, not that each entry
@@ -130,7 +130,7 @@ export function buildAdapterRegistry(config: ProfileConfig): AdapterRegistry {
   const registry = new AdapterRegistry();
 
   for (const [id, providerConfig] of Object.entries(config.providers)) {
-    // Zorro round-1 blocker B2: reject an empty provider-map key before it
+    // Review Round-1 blocker B2: reject an empty provider-map key before it
     // ever reaches an adapter constructor. `LiteLLMAdapter`/`ClaudeCliAdapter`/
     // `CodexCliAdapter` each also guard against an empty `id` at invoke()
     // time (`requireProviderId()`) as a last line of defense, but a bad
@@ -172,7 +172,7 @@ export function buildAdapterRegistry(config: ProfileConfig): AdapterRegistry {
         // Unrecognized `kind` used to fall through this switch silently —
         // no adapter registered, no error, no log: an invisible no-op a
         // misspelled `kind: "direct-apu"` in config.yaml would sail
-        // through. Now surfaced as a typed error instead (Zorro round-1 🟡).
+        // through. Now surfaced as a typed error instead (Review Round-1 🟡).
         throw new InvalidProviderConfigError(
           id,
           `unknown provider kind ${JSON.stringify((providerConfig as { kind: unknown }).kind)} ` +

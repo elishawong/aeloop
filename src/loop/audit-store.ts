@@ -1,8 +1,8 @@
 /**
  * `AuditStore` — Loop layer's own SQLite store for DESIGN §5's three
  * business-audit tables (`workflow_runs`/`structured_claims`/`approvals`),
- * A4b PRD §5 "audit-store.ts" / §9.2 决策1. Plus a fourth,
- * internal-bookkeeping-only `step_markers` table (Zorro Round-2 R2-2,
+ * A4b PRD §5 "audit-store.ts" / §9.2 Decision 1. Plus a fourth,
+ * internal-bookkeeping-only `step_markers` table (Review Round-2 R2-2,
  * `docs/feature/a4b-loop/test-report.md`) — not part of DESIGN §5's
  * governance-facing schema, purely `rebuildStepCounters()`'s durable
  * "this round ran" record (see `NewStepMarkerInput`'s doc comment below).
@@ -20,13 +20,13 @@
  * accepted cost is a small amount of duplicated "open connection, create
  * schema, prepare statements" boilerplate — judged smaller than coupling
  * Loop's persistence to a class whose `createSchema()` would otherwise pull
- * in three unrelated Context tables (PRD §9.2 决策1 covers the full
+ * in three unrelated Context tables (PRD §9.2 Decision 1 covers the full
  * reasoning, including the reversibility note).
  *
- * **Portability** (Helix 2026-07-21 dispatch note, ai-agent#127): this file
- * intentionally imports nothing from `@langchain/langgraph` — only
- * `better-sqlite3` and type-only imports from `./types.js`/`../harness/
- * types.js`/`../prompt/schema.js`. Read/write against these three tables
+ * **Portability**: this file intentionally imports nothing from
+ * `@langchain/langgraph` — only `better-sqlite3` and type-only imports from
+ * `./types.js`/`../harness/types.js`/`../prompt/schema.js`. Read/write
+ * against these three tables
  * doesn't need to know what orchestration engine produced the data; keeping
  * that boundary clean costs nothing here and preserves the option of aeloop
  * becoming a governance layer usable by an orchestrator other than
@@ -123,7 +123,7 @@ export interface Approval {
    * G1/G2/G3 rows: a `GateDecision` (`approved`/`rejected`/`escalate`).
    * `ESCALATION_ACK` rows: an `EscalationDecision` (`revise`/`force_pass`/
    * `abandon`) stored verbatim, not remapped into DESIGN §5's illustrative
-   * `approved`/`rejected`/`override` comment (A4b PRD §9.2 决策5 — that
+   * `approved`/`rejected`/`override` comment (A4b PRD §9.2 Decision 5 — that
    * comment predates the Escalation subtree's real three-way decision and
    * has no `CHECK` constraint backing it; this column is a plain `TEXT`).
    */
@@ -150,7 +150,7 @@ export interface NewApprovalInput {
    * not at DB-persistence time). Optional — defaults to `now` (the 5th
    * positional param this method already accepts) for any caller that
    * doesn't have a better value, same as every other timestamp in this
-   * store (Zorro Round-1 M2, `docs/feature/a4b-loop/test-report.md`:
+   * store (Review Round-1 M2, `docs/feature/a4b-loop/test-report.md`:
    * before this field existed, `runner.ts` had no way to pass the real
    * decision moment through, so `approvals.decided_at` always ended up a
    * few moments later than the true decision — this is what actually
@@ -161,7 +161,7 @@ export interface NewApprovalInput {
 
 /**
  * A durable marker that a `draft`/`review` node round actually ran, written
- * **regardless of how many claims it produced** — Zorro Round-2 R2-2
+ * **regardless of how many claims it produced** — Review Round-2 R2-2
  * (`docs/feature/a4b-loop/test-report.md`): `structured_claims`' `claims`
  * schema (`prompt/schema.ts`) has no `.min(1)`, so a real adapter can
  * legally return `claims: []` for a round. Before this table existed, a
@@ -170,7 +170,7 @@ export interface NewApprovalInput {
  * reads) had nothing to see, so a resume landing in a brand-new process
  * (no in-memory counter to inherit) would re-mint that same `step_ref`
  * number for the *next* round through that node, silently colliding — the
- * exact D1 bug Zorro Round-1 already fixed, just triggered by "no claims"
+ * exact D1 bug Review Round-1 already fixed, just triggered by "no claims"
  * instead of "no in-memory counter". `runner.ts` now writes exactly one
  * marker row per draft/review round, inside the same
  * `AuditStore.runInTransaction` call as that round's claim inserts (B3
@@ -338,7 +338,7 @@ export class AuditStore {
 
   private createSchema(): void {
     this.db.exec(`
-      -- Zorro Round-2 R2-4 (docs/feature/a4b-loop/test-report.md):
+      -- Review Round-2 R2-4 (docs/feature/a4b-loop/test-report.md):
       -- langgraph_thread_id used to have no uniqueness constraint at all —
       -- runner.ts's B2 guard (resumeRun's RunThreadMismatchError) only
       -- checked that a *given* runId/threadId pair actually matched, but
@@ -378,7 +378,7 @@ export class AuditStore {
         created_at TEXT NOT NULL
       );
 
-      -- Zorro Round-4 R5-B2 (docs/feature/a4b-loop/test-report.md):
+      -- Review Round-4 R5-B2 (docs/feature/a4b-loop/test-report.md):
       -- no lock/CAS/serialization backs resumeRun() against two concurrent
       -- calls resuming the *same* run -- Elisha's decision (2026-07-21,
       -- same posture as D1) is that full concurrency control is out of
@@ -405,13 +405,13 @@ export class AuditStore {
         UNIQUE (run_id, step_ref)
       );
 
-      -- Zorro Round-2 R2-2 (docs/feature/a4b-loop/test-report.md): a
+      -- Review Round-2 R2-2 (docs/feature/a4b-loop/test-report.md): a
       -- durable "this draft/review round ran" marker, written unconditionally
       -- (even when claim_count is 0), so listStepRefsByRun()/rebuildStepCounters()
       -- always have a real row to see for every round — not just the rounds
       -- that happened to produce at least one claim. See NewStepMarkerInput's
       -- doc comment above for the full D1-adjacent bug this closes.
-      -- Zorro Round-4 R5-B2 (docs/feature/a4b-loop/test-report.md): same
+      -- Review Round-4 R5-B2 (docs/feature/a4b-loop/test-report.md): same
       -- cheap defense-in-depth as approvals' UNIQUE above -- a durable
       -- "this round ran" marker should never be written twice for the same
       -- (run_id, step_ref) either, concurrent resumeRun() calls included.
@@ -537,8 +537,8 @@ export class AuditStore {
 
   /**
    * All runs currently at `status` — `runner.ts`'s `getResumableRuns()` thin
-   * wrapper (A4b PRD §5 "runner.ts": "给未来 A5 一个现成入口...不算额外范
-   * 围") is the only caller in this increment; no CLI/UI consumes it yet
+   * wrapper (A4b PRD §5 "runner.ts": "gives a future A5 a ready-made
+   * entry point...doesn't count as added scope") is the only caller in this increment; no CLI/UI consumes it yet
    * (PRD §2 non-goal).
    */
   listRunsByStatus(status: WorkflowRunStatus): WorkflowRun[] {
@@ -556,12 +556,12 @@ export class AuditStore {
    * across `structured_claims`, `approvals`, **and `step_markers`** — the
    * on-disk source of truth `runner.ts`'s `resumeRun()` rebuilds its
    * per-node `stepCounters` from, instead of trusting a caller-supplied
-   * in-memory value alone (Zorro Round-1 D1, `docs/feature/a4b-loop/test-report.md`:
+   * in-memory value alone (Review Round-1 D1, `docs/feature/a4b-loop/test-report.md`:
    * a resume that lands in a brand-new process — or simply an in-memory
    * `stepCounters` a caller forgot to thread through — used to restart a
    * revisited node's counter at `#1`, colliding with a `step_ref` already
    * on disk from an earlier round). `step_markers` is what makes this
-   * complete for a **zero-claim** round too (Zorro Round-2 R2-2): without
+   * complete for a **zero-claim** round too (Review Round-2 R2-2): without
    * it, a round that produced no claims left no row in either of the other
    * two tables, so this method — and `rebuildStepCounters()`, which only
    * knows what this method returns — couldn't see it happened at all.
@@ -670,7 +670,7 @@ export class AuditStore {
 
   // ---- step_markers ------------------------------------------------------
 
-  /** See `NewStepMarkerInput`'s doc comment (Zorro Round-2 R2-2) for why this table/method exists. */
+  /** See `NewStepMarkerInput`'s doc comment (Review Round-2 R2-2) for why this table/method exists. */
   insertStepMarker(input: NewStepMarkerInput, now: string = nowIso()): StepMarker {
     const result = this.insertStepMarkerStmt.run(input.runId, input.stepRef, input.node, input.actor, input.claimCount, now);
     const id = Number(result.lastInsertRowid);

@@ -30,7 +30,7 @@ export class SystemConfig {
     return DEFAULTS[key];
   }
 
-  /** Persists `key`/`value`, stamping `updated_at` (upsert — PRD §9.0's #7 "aeloop 新补" column). */
+  /** Persists `key`/`value`, stamping `updated_at` (upsert — PRD §9.0's #7 "aeloop-added" column). */
   set(key: string, value: string, now: string = nowIso()): void {
     this.store.setConfigEntry(key, value, now);
   }

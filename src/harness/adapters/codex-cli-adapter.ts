@@ -110,7 +110,7 @@ export class CodexCliAdapter implements ModelAdapter {
     const trace = extractTrace(events);
     this.lastTrace = trace;
 
-    // Zorro round-1 blocker B1: unconditionally find the LAST agent_message
+    // Review Round-1 blocker B1: unconditionally find the LAST agent_message
     // item first, THEN require its `.text` to be a string — never silently
     // fall back to an earlier agent_message just because the true last
     // one's `.text` is malformed. Falling back would reintroduce exactly
@@ -151,8 +151,8 @@ export class CodexCliAdapter implements ModelAdapter {
    * `id`) — but `InvokeResult.provider` carries the same non-empty
    * invariant as `.model` (`types.ts:72`), so it gets the same runtime
    * guard rather than trusting the type alone (mirrors
-   * `LiteLLMAdapter.requireProviderId()`, A2's Zorro round-1 blocker 2 —
-   * this adapter didn't inherit that fix, Zorro A3 round-1 blocker B2).
+   * `LiteLLMAdapter.requireProviderId()`, A2's Review Round-1 blocker 2 —
+   * this adapter didn't inherit that fix, A3's Review Round-1 blocker B2).
    */
   private requireProviderId(): string {
     if (typeof this.id !== "string" || this.id.trim().length === 0) {
@@ -163,7 +163,7 @@ export class CodexCliAdapter implements ModelAdapter {
 
   /**
    * Real `<cmd> --version` probe, exit code 0 → available — not a check
-   * that `cmd` is merely configured (DESIGN §8.5 "deepseek 列表可见≠可调用"
+   * that `cmd` is merely configured (DESIGN §8.5 "deepseek listed ≠ callable"
    * lesson, same posture `LiteLLMAdapter.checkAvailability()` already
    * takes for the direct-api side).
    */
@@ -198,7 +198,7 @@ export class CodexCliAdapter implements ModelAdapter {
  * number/string, or an array), is skipped, not fatal (mirrors
  * `ToolExecVerifier`'s own "don't throw on malformed input" posture;
  * codex's own banner/warnings have a small chance of leaking a non-JSON
- * line into stdout). **Zorro round-1 minor Y2**: `JSON.parse` alone
+ * line into stdout). **Review Round-1 minor Y2**: `JSON.parse` alone
  * accepts any valid JSON value, not just objects — a stray `null`/scalar/
  * array line used to sail through as a "CodexJsonlEvent" with no `.type`
  * property, and every downstream read of `event.type`/`event.item` would
@@ -247,7 +247,7 @@ function extractTrace(events: CodexJsonlEvent[]): ToolCallRecord[] {
  * raw item (not just its `.text`) so the caller decides how to handle a
  * malformed `.text` — critically, **unconditionally** tracks whichever
  * agent_message item was seen last, regardless of whether its `.text` is a
- * valid string (Zorro round-1 blocker B1): the previous version only
+ * valid string (Review Round-1 blocker B1): the previous version only
  * updated `last` when `.text` was already a string, so a true-last
  * agent_message with a malformed `.text` silently fell back to returning
  * an *earlier*, valid-looking one — exactly the "declared something false

@@ -3,10 +3,10 @@
  * else (PRD §5 / §9.1, DESIGN §7, §8.5#1).
  *
  * This is the file the PRD's hardest acceptance item (§8 "ProviderRouter
- * 真路由") is about: adding a new provider must never require touching
+ * real routing") is about: adding a new provider must never require touching
  * this file again. That's why it takes `roles` (just the slice of
- * `ProfileConfig` it needs — PRD §5's "显式传所需依赖,不传整个大对象",
- * matching A1's `PromptComposer`/`MemoryStore` style) and an
+ * `ProfileConfig` it needs — PRD §5's "explicitly pass only the dependencies
+ * needed, not the whole object", matching A1's `PromptComposer`/`MemoryStore` style) and an
  * `AdapterRegistry` it already knows nothing about the contents of. It
  * performs one lookup, does zero I/O, and never references any concrete
  * `ModelAdapter` implementation (`LiteLLMAdapter`, `ClaudeCliAdapter`,

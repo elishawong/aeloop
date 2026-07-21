@@ -127,7 +127,7 @@ describe("PromptComposer — role registered with an explicit `null` schema (opt
   });
 });
 
-describe("PromptComposer — schema registry is external, not hardcoded in composer.ts (Zorro review, feature/issue-1-a0-a1-scaffold)", () => {
+describe("PromptComposer — schema registry is external, not hardcoded in composer.ts (review, feature/issue-1-a0-a1-scaffold)", () => {
   it("a role with a persona but NO registry entry at all throws SchemaNotRegisteredError, not a silent omission", () => {
     const dir = makeTmpPersonasDir();
     writeFileSync(path.join(dir, "reviewer.md"), "# Reviewer\n\nBe thorough.\n", "utf-8");

@@ -1,216 +1,216 @@
-# PRD — aeloop A0+A1:引擎脚手架 + Context/Prompt 层(含 ContextInjector 接线 + M2/M3 必修项)
+# PRD — aeloop A0+A1: Engine Scaffold + Context/Prompt Layer (incl. ContextInjector wiring + M2/M3 required items)
 
-> 骨架来源:`ai-agent/OPS/_templates/feature/PRD.md`。
-> 防幻觉:`[?]` = 我未验证 / 需要 spike 或指挥官确认,不编造接口/版本/参数。
+> Skeleton source: `ai-agent/OPS/_templates/feature/PRD.md`.
+> Anti-hallucination: `[?]` = unverified by me / needs a spike or commander confirmation; no invented interfaces/versions/parameters.
 
-- **项目**:aeloop(`elishawong/aeloop`,私有仓)
-- **分支**:`feature/issue-1-a0-a1-scaffold`(单分支,批次内顺序提交 —— 理由见 §7 分支策略)
-- **优先级**:P1
-- **状态**:已批(2026-07-20 Elisha 批准,5 个 `[?]` 已定案 —— 见 §9.0)
-- **最后更新**:2026-07-20
-- **关联 issue**:[elishawong/aeloop#1](https://github.com/elishawong/aeloop/issues/1)(本增量)· 上游追踪 [elishawong/ai-agent#120](https://github.com/elishawong/ai-agent/issues/120)(统一引擎架构总 issue)
-- **设计权威**:`aeloop/docs/DESIGN.md`(§1.5-1.7 四层关系 / §5 DB schema / §6 文件结构 / §8 里程碑 / §8.5 必修清单)
+- **Project**: aeloop (`elishawong/aeloop`, private repo)
+- **Branch**: `feature/issue-1-a0-a1-scaffold` (single branch, sequential commits within batches — rationale in §7 Branch Strategy)
+- **Priority**: P1
+- **Status**: Approved (approved by Elisha 2026-07-20; 5 `[?]` items finalized — see §9.0)
+- **Last updated**: 2026-07-20
+- **Related issue**: [elishawong/aeloop#1](https://github.com/elishawong/aeloop/issues/1) (this increment) · Upstream tracking [elishawong/ai-agent#120](https://github.com/elishawong/ai-agent/issues/120) (unified engine architecture umbrella issue)
+- **Design authority**: `aeloop/docs/DESIGN.md` (§1.5-1.7 four-layer relationship / §5 DB schema / §6 file structure / §8 milestones / §8.5 required checklist)
 
 ---
 
-## 1. 问题 / 用户 / 方案
+## 1. Problem / Users / Approach
 
-- **要解决的问题**:aeloop 现为空仓(仅项目自带层:CLAUDE.md/docs/.claude/skills)。需要从零建出引擎最内两层(Prompt、Context)+ 脚手架,同时**从第一天避开 Verity M2/M3 已实测暴露的洞**(层写完测试绿但没接线;confirmation 无事务;缺列;JSON.parse 裸抛;rejected 记忆未过滤)。
-- **给谁用**:aeloop 引擎本身(下游是 A2 Harness 的 PromptComposer 调用方、A4 Loop 的 Coder/Tester 节点);短期内直接使用者是 Cypher/Zorro 在后续增量里跑测试和接线。
-- **一句话方案**:按 DESIGN §6 目标结构,建出 `src/prompt/`、`src/context/`、`src/profile/`、`src/shared/` + 配套 vitest/tsconfig/package.json,并用**一条端到端垂直切片测试**证明 Context(ContextInjector,含 rejected 过滤)→ Prompt(PromptComposer)真的接通,而不是三层各自绿但没胶水。
+- **Problem to solve**: aeloop is currently an empty repo (only the project's own layer: CLAUDE.md/docs/.claude/skills). We need to build the innermost two engine layers (Prompt, Context) + scaffold from scratch, while **avoiding from day one the holes Verity M2/M3 already exposed in real testing** (layers wrote tests green but were never wired together; confirmation without a transaction; missing columns; JSON.parse throwing raw; rejected memories not filtered).
+- **For whom**: the aeloop engine itself (downstream consumers are the A2 Harness's PromptComposer caller, the A4 Loop's Coder/Tester nodes); in the near term the direct users are Cypher/Zorro running tests and wiring in subsequent increments.
+- **One-line approach**: Following the target structure in DESIGN §6, build out `src/prompt/`, `src/context/`, `src/profile/`, `src/shared/` plus matching vitest/tsconfig/package.json, and use **one end-to-end vertical-slice test** to prove that Context (ContextInjector, including rejected filtering) → Prompt (PromptComposer) is actually wired together — not three layers each green in isolation with no glue.
 
-## 2. 目标 / 非目标
+## 2. Goals / Non-Goals
 
-**目标(A0 脚手架)**:
-- TypeScript + Node v24 项目骨架:package.json / tsconfig(strict + `noUncheckedIndexedAccess`)/ vitest.config.ts / .env.example。
-- `src/profile/loader.ts`:读 `AI_AGENT_PROFILE`(`helix` | `verity`)→ 定位并解析对应 profile 目录下的 `config.yaml`;`profiles/verity/` 不存在时**优雅降级**(明确的「未找到」错误 / 状态,不裸抛、不静默假装成功)。
-- `profiles/helix/config.yaml` + `profiles/helix/personas/{coder,tester}.md` 最小示例,供 loader / persona 测试使用。
+**Goals (A0 scaffold)**:
+- TypeScript + Node v24 project skeleton: package.json / tsconfig (strict + `noUncheckedIndexedAccess`) / vitest.config.ts / .env.example.
+- `src/profile/loader.ts`: read `AI_AGENT_PROFILE` (`helix` | `verity`) → locate and parse the `config.yaml` under the corresponding profile directory; when `profiles/verity/` doesn't exist, **degrade gracefully** (an explicit "not found" error/state, no raw throw, no silently pretending success).
+- Minimal `profiles/helix/config.yaml` + `profiles/helix/personas/{coder,tester}.md` examples, for loader/persona tests to use.
 
-**目标(A1 Context + Prompt)**:
-- Context 层:SQLite(+FTS5)store(`memories` / `memory_confirmations` / `system_config` 三张表,对齐 DESIGN §5 ER,补齐 Verity 缺列)、StalenessEngine、ConfirmationService(三态:confirm/correct/reject,`db.transaction` 包裹)、ContextInjector(注入 + 滤 rejected)、types/errors、RecallError 不静默。
-- Prompt 层:`ClaimSchema`/`CoderOutput`/`TesterOutput`(zod)、persona loader(按角色名动态查 registry,不写死 `{coder,tester}`)、PromptComposer(人格 + schema + 注入的记忆 → 最终 prompt 字符串)。
-- **硬性垂直切片**:一条端到端测试证明 `ContextInjector` 真的把 `memories` 表里 confirmed 记忆注入进 `PromptComposer` 输出、rejected 记忆被滤掉 —— 不是分层孤立测试。
+**Goals (A1 Context + Prompt)**:
+- Context layer: SQLite (+FTS5) store (`memories` / `memory_confirmations` / `system_config` three tables, aligned to DESIGN §5 ER, filling in columns missing from Verity), StalenessEngine, ConfirmationService (three states: confirm/correct/reject, wrapped in `db.transaction`), ContextInjector (injection + filtering rejected), types/errors, RecallError that doesn't fail silently.
+- Prompt layer: `ClaimSchema`/`CoderOutput`/`TesterOutput` (zod), persona loader (looks up the registry dynamically by role name, doesn't hardcode `{coder,tester}`), PromptComposer (persona + schema + injected memories → final prompt string).
+- **Hard vertical slice**: one end-to-end test proving `ContextInjector` really injects confirmed memories from the `memories` table into `PromptComposer`'s output, with rejected memories filtered out — not isolated per-layer tests.
 
-**非目标(明确不做,留给后续增量)**:
-- ❌ Harness 层(ProviderRouter / LiteLLMAdapter / SchemaValidator / adapters/*)—— A2。
-- ❌ CLI 桥接适配器(ClaudeCliAdapter / CodexCliAdapter)+ ToolExecVerifier —— A3(含 codex exec spike)。
-- ❌ Loop 层(LangGraph 编排 / G1-G3 gate / 阈值升级 / checkpoint)—— A4;`workflow_runs` / `structured_claims` / `approvals` 三张表**不在本增量建表范围**(A1 只建 `memories`/`memory_confirmations`/`system_config`)。
-- ❌ CLI/TUI(彩色 diff / y/n 批准)—— A5。
-- ❌ profile 双跑真实验收(helix/verity 各跑一次真实任务)—— A6。
-- ❌ `workflows/coder-tester-loop.json` workflow 定义文件 —— 要 Loop 层(A4)才有消费方,本增量不建。
+**Non-goals (explicitly out of scope, left for later increments)**:
+- ❌ Harness layer (ProviderRouter / LiteLLMAdapter / SchemaValidator / adapters/*) — A2.
+- ❌ CLI bridge adapters (ClaudeCliAdapter / CodexCliAdapter) + ToolExecVerifier — A3 (including the codex exec spike).
+- ❌ Loop layer (LangGraph orchestration / G1-G3 gates / threshold escalation / checkpoints) — A4; the three tables `workflow_runs` / `structured_claims` / `approvals` are **not in this increment's table-creation scope** (A1 only builds `memories`/`memory_confirmations`/`system_config`).
+- ❌ CLI/TUI (colored diff / y/n approval) — A5.
+- ❌ Real profile dual-run acceptance (running one real task each for helix/verity) — A6.
+- ❌ The `workflows/coder-tester-loop.json` workflow definition file — needs the Loop layer (A4) as a consumer, not built in this increment.
 
-## 3. 用户故事
+## 3. User Stories
 
-- 作为**后续增量的 Harness/Loop 开发者(A2 起的 Cypher)**,我想要 `PromptComposer` 已经能从 `ContextInjector` 拿到过滤好的记忆并拼出完整 prompt,以便 A2 直接调用而不用回头修 Context/Prompt 的接线。
-- 作为**指挥官**,我想要每个里程碑收尾有一条可运行的测试证明"层与层真的接通了",而不是相信文档自称完成(Verity M2/M3 的教训)。
-- 作为**profile 使用者(未来 A6)**,我想要 `AI_AGENT_PROFILE=helix` 时找不到 `profiles/verity/` 也不报错崩溃,只在真正需要 verity overlay 时才报错。
+- As **a developer of a later increment's Harness/Loop (Cypher starting from A2)**, I want `PromptComposer` to already be able to get filtered memories from `ContextInjector` and assemble a complete prompt, so A2 can call it directly instead of going back to fix the Context/Prompt wiring.
+- As **the commander**, I want every milestone wrap-up to have a runnable test proving "the layers are actually connected," rather than trusting docs that claim completion (the lesson from Verity M2/M3).
+- As **a profile user (future A6)**, I want that when `AI_AGENT_PROFILE=helix` and `profiles/verity/` can't be found, it doesn't error out and crash — it should only error when a verity overlay is genuinely needed.
 
-## 4. 数据模型
+## 4. Data Model
 
-> 权威:DESIGN §5 ER 图。本增量**只建 3 张表**(其余 3 张属 Loop/Harness,不在此增量 DDL 范围)。
+> Authority: DESIGN §5 ER diagram. This increment **only builds 3 tables** (the other 3 belong to Loop/Harness, not in this increment's DDL scope).
 
-### 4.1 本增量落地的表
+### 4.1 Tables shipped in this increment
 
-**`memories`**(对齐 DESIGN §5,含相对 Verity M2 补齐的列):
-| 列 | 类型 | 说明 |
+**`memories`** (aligned to DESIGN §5, including columns added relative to Verity M2):
+| Column | Type | Notes |
 |---|---|---|
 | id | INTEGER PK | |
-| type | TEXT | 12 种(identity/snapshot/active_task/idea/decision/postmortem/map/constraint/relation/agent_spec/requirement/project_registry) |
+| type | TEXT | 12 types (identity/snapshot/active_task/idea/decision/postmortem/map/constraint/relation/agent_spec/requirement/project_registry) |
 | title | TEXT | |
 | content | TEXT | |
 | source_file | TEXT | |
-| tags | TEXT | 序列化存储(JSON 或分隔符 —— `[?]` 见 §9) |
+| tags | TEXT | serialized storage (JSON or delimiter — `[?]` see §9) |
 | confidence_state | TEXT | `unconfirmed` / `confirmed` / `rejected` |
-| stale_override_days | INTEGER NULL | NULL 则读 `system_config` |
+| stale_override_days | INTEGER NULL | NULL reads from `system_config` |
 | created_at | TEXT | |
 | updated_at | TEXT | |
-| **confirmed_at** | TEXT NULL | **A1 新补**(Verity M2 缺失,见 DESIGN §8.5 #7) |
-| **confirmed_by** | TEXT NULL | **A1 新补** |
+| **confirmed_at** | TEXT NULL | **new in A1** (missing in Verity M2, see DESIGN §8.5 #7) |
+| **confirmed_by** | TEXT NULL | **new in A1** |
 
 **`memory_confirmations`**:
-| 列 | 类型 | 说明 |
+| Column | Type | Notes |
 |---|---|---|
 | id | INTEGER PK | |
 | memory_id | INTEGER FK → memories.id | |
 | action | TEXT | `confirm` / `correct` / `reject` |
 | old_content | TEXT | |
 | new_content | TEXT | |
-| **actor** | TEXT | **A1 新补**(Verity M2 缺失) |
+| **actor** | TEXT | **new in A1** (missing in Verity M2) |
 | created_at | TEXT | |
 
 **`system_config`**:
-| 列 | 类型 | 说明 |
+| Column | Type | Notes |
 |---|---|---|
 | key | TEXT PK | `default_stale_days` / `default_reject_threshold` / … |
 | value | TEXT | |
-| **updated_at** | TEXT | **A1 新补**(Verity M2 缺失) |
+| **updated_at** | TEXT | **new in A1** (missing in Verity M2) |
 
-### 4.2 本增量不建的表(留给 A2-A4,仅记录不实现)
-`workflow_runs`(A4)、`structured_claims`(A4,`ClaimSchema` 的 zod 校验形状本增量要定,但持久化到这张表是 A4 的事)、`approvals`(A4)。
+### 4.2 Tables not built in this increment (left for A2-A4, recorded but not implemented)
+`workflow_runs` (A4), `structured_claims` (A4 — this increment defines the zod validation shape for `ClaimSchema`, but persisting it to this table is A4's job), `approvals` (A4).
 
-### 4.3 迁移策略
-`[?]` 首版是否需要正式 migration 工具,还是 `store.ts` 启动时 `CREATE TABLE IF NOT EXISTS` + `CREATE VIRTUAL TABLE IF NOT EXISTS ... USING fts5(...)` 一把梭(因为 aeloop 是个人 CLI 工具、每 profile 一份全新 db,不存在"生产库要滚动升级"的场景)。**建议**:A1 先用 `CREATE TABLE IF NOT EXISTS` 内联建表(简单、无额外依赖),不引入独立 migration 框架;若未来需要 schema 变更再补迁移脚本。此建议未经指挥官确认,标 `[?]`。
+### 4.3 Migration strategy
+`[?]` Whether the first version needs a formal migration tool, or whether `store.ts` can just do `CREATE TABLE IF NOT EXISTS` + `CREATE VIRTUAL TABLE IF NOT EXISTS ... USING fts5(...)` on startup (because aeloop is a personal CLI tool with a fresh db per profile — there's no "production DB needing rolling upgrades" scenario). **Recommendation**: A1 should use inline `CREATE TABLE IF NOT EXISTS` first (simple, no extra dependency), and not introduce a separate migration framework; add a migration script later only if a schema change is actually needed. This recommendation is unconfirmed by the commander, marked `[?]`.
 
-## 5. 逐文件任务清单
+## 5. File-by-file task list
 
-### A0 脚手架
-- `package.json` — deps:`zod`、`js-yaml`、SQLite 驱动(§9.0#1 已定案:`better-sqlite3`);devDeps:`typescript`、`vitest`、`@types/node`(+ DB 驱动对应 `@types/*` 如需要)。**不含 `@types/js-yaml`**(Zorro 复审 `feature/issue-1-a0-a1-scaffold` 发现:`tsc --traceResolution` 实测证明 TypeScript 从未解析这个包——js-yaml 5.x 自带 `dist/js-yaml.d.ts` 并通过自身 `package.json` 的 `exports`/`types` 字段被直接使用,`@types/js-yaml` 是彻底的死依赖;已 `pnpm remove @types/js-yaml`,`pnpm build`/`pnpm lint`/`pnpm test` 去掉后仍全绿,详见 progress.md B1 条目的根因订正)。scripts:`build`(`tsc -p tsconfig.build.json` —— B0 已落 `tsconfig.build.json`,排除 `*.test.ts` 使测试产物不进 `dist/` 污染分发,对齐 §8.5#8)、`test`(`vitest run`)、`test:watch`、`lint`(`tsc --noEmit`,含测试文件类型检查)。包管理器 pnpm。
-- `tsconfig.json` — `strict: true`、`noUncheckedIndexedAccess: true`、`target`/`module` 对齐 Node v24(ESM 优先,`[?]` 需确认 CommonJS vs ESM,见 §9)、`outDir: dist`、`rootDir: src`。
-- `vitest.config.ts` — 基本配置,`include: ['src/**/*.test.ts']`。
-- `.env.example` — `LITELLM_BASE_URL=` / `LITELLM_TOKEN=`(仅 verity profile 用到,helix 本增量不需要真实值)、`AI_AGENT_PROFILE=helix`。
-- `src/index.ts` — 引擎入口 barrel(本增量只 re-export A0/A1 已建的模块,不假装 A2+ 存在)。
-- `src/shared/types.ts` — 跨层公共类型(如 `Role` 开放字符串类型、`ISODateString` 等最小集合,不过度设计)。
-- `src/profile/loader.ts` — `AI_AGENT_PROFILE` 读取 + `profiles/<name>/config.yaml` 定位解析(js-yaml)+ `${ENV}` 占位替换;`profiles/verity/` 缺席时返回类型化"未找到"结果,不 throw 裸错误。
-- `src/profile/errors.ts` — `ProfileNotFoundError` 等类型化错误。
-- `src/profile/loader.test.ts` — 覆盖:helix 正常加载 / verity 缺席优雅降级 / config.yaml 格式错误(YAML parse 失败)不裸抛。
-- `profiles/helix/config.yaml` — 最小示例(对齐 DESIGN §7 结构:providers/roles/workflow.reject_threshold),本增量 providers 字段先占位(claude-cli/codex-cli 的真实调用是 A3 的事,这里只需 loader 能解析出结构)。
-- `profiles/helix/personas/coder.md` — 最小示例 persona 文本(纯文本,厂商无关)。
-- `profiles/helix/personas/tester.md` — 同上。
+### A0 scaffold
+- `package.json` — deps: `zod`, `js-yaml`, SQLite driver (finalized in §9.0#1: `better-sqlite3`); devDeps: `typescript`, `vitest`, `@types/node` (+ the DB driver's `@types/*` if needed). **Does not include `@types/js-yaml`** (found during Zorro's re-review of `feature/issue-1-a0-a1-scaffold`: `tsc --traceResolution` empirically proved TypeScript never resolves this package — js-yaml 5.x ships its own `dist/js-yaml.d.ts` and is used directly via its own `package.json`'s `exports`/`types` fields, making `@types/js-yaml` a completely dead dependency; already `pnpm remove @types/js-yaml`, and `pnpm build`/`pnpm lint`/`pnpm test` remained all green after removal — see the root-cause correction in the progress.md B1 entry for details). scripts: `build` (`tsc -p tsconfig.build.json` — B0 already shipped `tsconfig.build.json`, excluding `*.test.ts` so test artifacts don't pollute `dist/`, aligned with §8.5#8), `test` (`vitest run`), `test:watch`, `lint` (`tsc --noEmit`, including type-checking test files). Package manager: pnpm.
+- `tsconfig.json` — `strict: true`, `noUncheckedIndexedAccess: true`, `target`/`module` aligned to Node v24 (ESM-first, `[?]` needs confirmation on CommonJS vs ESM, see §9), `outDir: dist`, `rootDir: src`.
+- `vitest.config.ts` — basic config, `include: ['src/**/*.test.ts']`.
+- `.env.example` — `LITELLM_BASE_URL=` / `LITELLM_TOKEN=` (only used by the verity profile, helix doesn't need real values in this increment), `AI_AGENT_PROFILE=helix`.
+- `src/index.ts` — engine entry barrel (this increment only re-exports modules already built in A0/A1, doesn't pretend A2+ exists).
+- `src/shared/types.ts` — cross-layer shared types (e.g. `Role` as an open string type, `ISODateString`, etc. — a minimal set, not over-engineered).
+- `src/profile/loader.ts` — reads `AI_AGENT_PROFILE` + locates/parses `profiles/<name>/config.yaml` (js-yaml) + substitutes `${ENV}` placeholders; when `profiles/verity/` is absent, returns a typed "not found" result, doesn't throw a raw error.
+- `src/profile/errors.ts` — typed errors like `ProfileNotFoundError`.
+- `src/profile/loader.test.ts` — covers: normal helix load / verity absence graceful degradation / malformed config.yaml (YAML parse failure) not thrown raw.
+- `profiles/helix/config.yaml` — minimal example (aligned to DESIGN §7 structure: providers/roles/workflow.reject_threshold); this increment leaves the providers field as a placeholder (the real calls for claude-cli/codex-cli are A3's job — here the loader just needs to parse out the structure).
+- `profiles/helix/personas/coder.md` — minimal example persona text (plain text, vendor-agnostic).
+- `profiles/helix/personas/tester.md` — same as above.
 
-### A1 Context 层
-- `src/context/types.ts` — `Memory`、`MemoryConfirmation`、`SystemConfigEntry`、`ConfidenceState` 等类型,对齐 §4 表结构。
-- `src/context/errors.ts` — `RecallError`(不静默,替代吞错误返回空数组)、`ConfirmationError`、类型化 JSON 解析错误。
-- `src/context/store.ts` — SQLite 连接 + `CREATE TABLE IF NOT EXISTS`(memories/memory_confirmations/system_config)+ `CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(...)` + FTS5 触发器同步(insert/update/delete)、基础 CRUD、FTS 召回查询(失败态用 `RecallError` 包装,不静默返回空)。
-- `src/context/config.ts` — `SystemConfig` 读写(`default_stale_days`/`default_reject_threshold` 等默认值 + 覆盖),`updated_at` 写入。
-- `src/context/staleness.ts` — `StalenessEngine`:按 `stale_override_days` 或 `system_config.default_stale_days` 判定一条记忆是否 stale。
-- `src/context/confirmation.ts` — `ConfirmationService`:`confirm(memoryId, actor)` / `correct(memoryId, newContent, actor)` / `reject(memoryId, actor)` 三方法,**全部 `db.transaction` 包裹**(写 `memories.confidence_state`/`confirmed_at`/`confirmed_by` + 插入 `memory_confirmations` 行含 `actor` 是同一个事务);补 "无既有确认记录" 缺失路径测试(见 §9 `replaceLatest` 语义 `[?]`)。
-- `src/context/injector.ts` — `ContextInjector`:①核心记忆全量 + FTS5 关键词召回;②**滤掉 `confidence_state === 'rejected'`**;③ stale/unconfirmed 记忆保留但带警告标记(不滤,只标注,对齐 DESIGN §3 sequence 图注释);④ 输出结构供 `PromptComposer` 消费。
-- `src/context/store.test.ts` / `config.test.ts` / `staleness.test.ts` / `confirmation.test.ts` / `injector.test.ts` — 各自单元测试,含:confirmation 事务原子性(中途失败整体回滚)、injector 滤 rejected 的针对性测试、RecallError 触发路径测试。
+### A1 Context layer
+- `src/context/types.ts` — `Memory`, `MemoryConfirmation`, `SystemConfigEntry`, `ConfidenceState` and other types, aligned to the §4 table structure.
+- `src/context/errors.ts` — `RecallError` (not silent, replaces swallowing errors into an empty array), `ConfirmationError`, typed JSON parse errors.
+- `src/context/store.ts` — SQLite connection + `CREATE TABLE IF NOT EXISTS` (memories/memory_confirmations/system_config) + `CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(...)` + FTS5 trigger sync (insert/update/delete), basic CRUD, FTS recall queries (failure states wrapped in `RecallError`, not silently returning empty).
+- `src/context/config.ts` — `SystemConfig` read/write (defaults for `default_stale_days`/`default_reject_threshold` etc. + overrides), writes `updated_at`.
+- `src/context/staleness.ts` — `StalenessEngine`: determines whether a memory is stale based on `stale_override_days` or `system_config.default_stale_days`.
+- `src/context/confirmation.ts` — `ConfirmationService`: three methods `confirm(memoryId, actor)` / `correct(memoryId, newContent, actor)` / `reject(memoryId, actor)`, **all wrapped in `db.transaction`** (writing `memories.confidence_state`/`confirmed_at`/`confirmed_by` + inserting a `memory_confirmations` row including `actor` is the same transaction); add tests for the "no existing confirmation record" missing-path case (see the §9 `replaceLatest` semantics `[?]`).
+- `src/context/injector.ts` — `ContextInjector`: ① full set of core memories + FTS5 keyword recall; ② **filters out `confidence_state === 'rejected'`**; ③ stale/unconfirmed memories are kept but tagged with a warning marker (not filtered, only flagged, aligned with the annotation in DESIGN §3's sequence diagram); ④ outputs a structure for `PromptComposer` to consume.
+- `src/context/store.test.ts` / `config.test.ts` / `staleness.test.ts` / `confirmation.test.ts` / `injector.test.ts` — individual unit tests each, including: confirmation transaction atomicity (mid-way failure rolls back the whole thing), a targeted test for injector filtering rejected, RecallError trigger-path tests.
 
-### A1 Prompt 层
-- `src/prompt/schema.ts` — `ClaimSchema`(对齐 `structured_claims` 概念但这里只是 zod 校验形状,不含持久化列如 `run_id`)、`CoderOutput`、`TesterOutput`(zod)。
-- `src/prompt/personas.ts` — persona loader:按角色名字符串**动态**从 profile 的 `personas/` 目录查找对应 `.md`(不写死 `if role === 'coder'`),角色不存在时类型化错误;补"角色 persona 文件缺失"路径测试。
-- `src/prompt/composer.ts` — `PromptComposer`:输入(角色名 + `ContextInjector` 输出 + 任务描述)→ 输出最终 prompt 字符串(人格文本 + schema 说明 + 注入的记忆,rejected 已被上游滤掉、不需要 composer 重复过滤)。
-- `src/prompt/schema.test.ts` / `personas.test.ts` / `composer.test.ts`。
+### A1 Prompt layer
+- `src/prompt/schema.ts` — `ClaimSchema` (aligned with the `structured_claims` concept but here it's just a zod validation shape, not including persistence columns like `run_id`), `CoderOutput`, `TesterOutput` (zod).
+- `src/prompt/personas.ts` — persona loader: **dynamically** looks up the matching `.md` under the profile's `personas/` directory by role name string (not hardcoded as `if role === 'coder'`); typed error when the role doesn't exist; add a test for the "role's persona file is missing" path.
+- `src/prompt/composer.ts` — `PromptComposer`: input (role name + `ContextInjector` output + task description) → output the final prompt string (persona text + schema description + injected memories; rejected has already been filtered upstream so composer doesn't need to filter again).
+- `src/prompt/schema.test.ts` / `personas.test.ts` / `composer.test.ts`.
 
-### 垂直切片(A1 收尾,硬性交付)
-- `src/context-prompt.e2e.test.ts`(或等价位置,命名 `[?]` 待定)—— 端到端测试:①用 `store.ts` 写入 3 条记忆(confirmed/unconfirmed/rejected 各一条)→ ②`ContextInjector.inject(...)` → ③喂给 `PromptComposer.compose('coder', ...)` → ④断言最终 prompt 字符串包含 confirmed 内容、**不包含** rejected 内容、unconfirmed 内容存在但带警告标记。这条测试就是 DESIGN §8.5 "aeloop 每个里程碑收尾必须有一条薄垂直切片真正接通" 的硬证据。
+### Vertical slice (A1 wrap-up, a hard deliverable)
+- `src/context-prompt.e2e.test.ts` (or an equivalent location, exact naming `[?]` TBD) — end-to-end test: ① use `store.ts` to write 3 memories (one each confirmed/unconfirmed/rejected) → ② `ContextInjector.inject(...)` → ③ feed into `PromptComposer.compose('coder', ...)` → ④ assert the final prompt string contains the confirmed content, **does not contain** the rejected content, and contains the unconfirmed content with a warning marker. This test is the hard evidence for DESIGN §8.5's "every aeloop milestone wrap-up must have a thin vertical slice that really proves connectivity."
 
-### 构建/分发相关(DESIGN §8.5 #8)
-- 确认 `package.json` 的 `files` 字段(或 `.npmignore`)包含 `profiles/*/personas/**/*.md`,使 `pnpm add -g` 安装时 persona 文本随包分发。**结构性说明**:aeloop 目标文件结构里 personas 位于顶层 `profiles/`、不在 `src/` 下,tsc 编译不会处理它们,所以 Verity 那种"dist 不拷 .md"问题在 aeloop 目录结构下**不会以相同形式重现**;本增量只需确认打包配置正确即可,不需要额外的构建期拷贝脚本。若 §9 `[?]`(ESM/CJS、driver 选型)决定引入构建工具链变化,届时重新核实此结论。
+### Build/distribution related (DESIGN §8.5 #8)
+- Confirm that `package.json`'s `files` field (or `.npmignore`) includes `profiles/*/personas/**/*.md`, so persona text is distributed along with the package on `pnpm add -g` installs. **Structural note**: in aeloop's target file structure, personas live under the top-level `profiles/`, not under `src/`, so `tsc` compilation never touches them — Verity's "dist doesn't copy .md" problem **cannot recur in the same form** under aeloop's directory structure; this increment only needs to confirm the packaging config is correct, no extra build-time copy script needed. If the §9 `[?]` (ESM/CJS, driver choice) ends up introducing a toolchain change, this conclusion should be re-verified then.
 
-### Zorro 复审修复(2026-07-20,同分支 `feature/issue-1-a0-a1-scaffold` 第二轮,B0-B10 之后)
-> 首轮 Zorro 独立审判 FAIL,以下是修复本身新增/改动的文件清单,补记进 §5 供后续读者追溯(原 B0-B10 逐文件清单已完成,不回改,这里只加增量)。
-- `src/shared/safe-path.ts`(新增)+ `src/shared/safe-path.test.ts`(新增)—— `isSinglePathSegment`/`isContainedRealpath` 两层路径穿越防御,`src/prompt/personas.ts`(`loadPersona`)与 `src/profile/loader.ts`(`loadProfile`)共用。
-- `src/prompt/personas.ts` —— 新增 `InvalidRoleNameError`,`loadPersona` 在触碰文件系统前先做路径安全校验。
-- `src/profile/errors.ts` —— 新增 `InvalidProfileNameError`。
-- `src/profile/loader.ts` —— `loadProfile` 同样接入路径安全校验;新增 `assertProfileConfigShape`(必需顶层字段 `profile`/`providers`/`roles` 最小校验,替换裸 `as ProfileConfig`)。
-- `src/context/store.ts` —— 新增 `toSafeFtsQuery`(FTS5 关键词安全转义:按空白分词 + 逐词转 quoted phrase),`searchMemories` 改吃安全转义后的查询串。
-- `src/context/injector.ts` —— 新增 `CORE_MEMORY_TYPES`(`identity`/`constraint`/`decision`),`inject()` 的"核心全量"改为按类型过滤而非全表扫描,让 FTS5 召回分支真正生效。
-- `src/prompt/schema-registry.ts`(新增)—— `SchemaRegistry`/`DEFAULT_OUTPUT_SCHEMAS`/`SchemaNotRegisteredError`,把角色→schema 映射从 `composer.ts` 内部硬编码搬出为外部可注入 registry。
-- `src/prompt/composer.ts` —— `PromptComposer` 构造函数新增可选 `schemas: SchemaRegistry` 参数;角色不在 registry 里 → 抛 `SchemaNotRegisteredError`(替代原来的静默省略)。
-- `src/context-prompt.e2e.test.ts` —— 两条测试都改用真实含连字符的任务文本(`"Explain the retry-backoff strategy."` 等)喂给 `inject()`,不再用 `inject(undefined)` 绕开 FTS5 召回路径。
-- `package.json` —— `pnpm remove @types/js-yaml`(死依赖,详见本文件"依赖"小节 + progress.md B1 条目根因订正)。
-- 对应测试文件(`personas.test.ts`/`loader.test.ts`/`store.test.ts`/`injector.test.ts`/`composer.test.ts`/`confirmation.test.ts`)均补充/重写了对抗性断言,详见 progress.md 新增的 B11 条目。
+### Zorro re-review fixes (2026-07-20, same branch `feature/issue-1-a0-a1-scaffold`, second round, after B0-B10)
+> First round Zorro independent verdict was **FAIL**; below is the file list added/changed by the fix itself, appended to §5 for future readers to trace (the original B0-B10 file-by-file list is already complete and is not being rewritten — this only adds the increment).
+- `src/shared/safe-path.ts` (new) + `src/shared/safe-path.test.ts` (new) — two layers of path-traversal defense, `isSinglePathSegment`/`isContainedRealpath`, shared by `src/prompt/personas.ts` (`loadPersona`) and `src/profile/loader.ts` (`loadProfile`).
+- `src/prompt/personas.ts` — added `InvalidRoleNameError`; `loadPersona` now does path-safety validation before touching the filesystem.
+- `src/profile/errors.ts` — added `InvalidProfileNameError`.
+- `src/profile/loader.ts` — `loadProfile` likewise wired into path-safety validation; added `assertProfileConfigShape` (minimal validation of required top-level fields `profile`/`providers`/`roles` existing with correct types, replacing a raw `as ProfileConfig`).
+- `src/context/store.ts` — added `toSafeFtsQuery` (FTS5 keyword safe-escaping: split on whitespace + convert each word to a quoted phrase), `searchMemories` now consumes the safely escaped query string.
+- `src/context/injector.ts` — added `CORE_MEMORY_TYPES` (`identity`/`constraint`/`decision`), `inject()`'s "core full set" changed from a full table scan to filtering by type, so the FTS5 recall branch actually takes effect.
+- `src/prompt/schema-registry.ts` (new) — `SchemaRegistry`/`DEFAULT_OUTPUT_SCHEMAS`/`SchemaNotRegisteredError`, moving the role→schema mapping out of `composer.ts`'s internal hardcoding into an externally injectable registry.
+- `src/prompt/composer.ts` — `PromptComposer`'s constructor gets a new optional `schemas: SchemaRegistry` parameter; a role not in the registry → throws `SchemaNotRegisteredError` (replacing the previous silent omission).
+- `src/context-prompt.e2e.test.ts` — both tests now feed `inject()` real task text containing hyphens (e.g. `"Explain the retry-backoff strategy."`), no longer using `inject(undefined)` to bypass the FTS5 recall path.
+- `package.json` — `pnpm remove @types/js-yaml` (dead dependency, see this file's "Dependencies" subsection + the root-cause correction in the progress.md B1 entry for details).
+- Corresponding test files (`personas.test.ts`/`loader.test.ts`/`store.test.ts`/`injector.test.ts`/`composer.test.ts`/`confirmation.test.ts`) all had adversarial assertions added/rewritten — see the new B11 entry in progress.md for details.
 
-## 6. 批次拆解
+## 6. Batch breakdown
 
-> 单位:`[S]` ≈ 2-4h、`[M]` ≈ 半天到一天、`[L]` ≈ 1-2 天(本仓无既有估时惯例,此为本 PRD 自定义量级,仅供排期参考)。全部在同一分支 `feature/issue-1-a0-a1-scaffold` 上顺序提交 —— 理由见 §7。
+> Units: `[S]` ≈ 2-4h, `[M]` ≈ half a day to a day, `[L]` ≈ 1-2 days (this repo has no existing estimation convention; this is a custom scale for this PRD, for scheduling reference only). All committed sequentially on the same branch `feature/issue-1-a0-a1-scaffold` — rationale in §7.
 
-| 批次 | 内容 | 依赖 | 规模 |
+| Batch | Content | Dependency | Size |
 |---|---|---|---|
-| **B0** | package.json / tsconfig / vitest.config / .env.example / pnpm scripts | 无(起点) | [S] |
-| **B1** | src 骨架目录 + shared/types.ts + profile/loader.ts + profile/errors.ts + profiles/helix/config.yaml + personas 示例 + 对应测试 | B0 | [M] |
-| **B2** | context/types.ts + errors.ts + store.ts(建表 + FTS5 + CRUD + RecallError)+ store.test.ts | B1(需要 profile 决定 db 路径约定,但 store 本身可先用显式路径参数实现,不强耦合 profile) | [M] |
-| **B3** | context/config.ts(SystemConfig)+ staleness.ts(StalenessEngine)+ 对应测试 | B2 | [S] |
-| **B4** | context/confirmation.ts(ConfirmationService 三态 + db.transaction + 补列)+ confirmation.test.ts(含事务原子性 + 缺失路径测试) | B2 | [M] |
-| **B5** | context/injector.ts(ContextInjector,含滤 rejected)+ injector.test.ts | B2 + B3 + B4 | [M] |
-| **B6** | prompt/schema.ts(zod:ClaimSchema/CoderOutput/TesterOutput)+ schema.test.ts | B0(独立于 Context,可与 B2-B5 并行写但同分支顺序提交) | [S] |
-| **B7** | prompt/personas.ts(动态角色 persona loader)+ personas.test.ts | B1(需要 profile 提供 personas 目录) | [S] |
-| **B8** | prompt/composer.ts(PromptComposer)+ composer.test.ts | B5 + B6 + B7 | [M] |
-| **B9** | 垂直切片端到端测试(Context→Prompt 真接通,含 rejected 过滤断言) | B8 | [S] |
-| **B10** | 打包配置核实(`files`/`.npmignore` 含 personas `.md`)+ README/CLAUDE.md 打钩更新 + docs/ROADMAP.md/PROGRESS.md/CHANGELOG.md 回写 | B9 | [S] |
+| **B0** | package.json / tsconfig / vitest.config / .env.example / pnpm scripts | none (starting point) | [S] |
+| **B1** | src skeleton directories + shared/types.ts + profile/loader.ts + profile/errors.ts + profiles/helix/config.yaml + persona examples + corresponding tests | B0 | [M] |
+| **B2** | context/types.ts + errors.ts + store.ts (table creation + FTS5 + CRUD + RecallError) + store.test.ts | B1 (needs profile to determine the db-path convention, but store itself can be implemented first with an explicit path parameter, not tightly coupled to profile) | [M] |
+| **B3** | context/config.ts (SystemConfig) + staleness.ts (StalenessEngine) + corresponding tests | B2 | [S] |
+| **B4** | context/confirmation.ts (ConfirmationService three states + db.transaction + added columns) + confirmation.test.ts (including transaction atomicity + missing-path tests) | B2 | [M] |
+| **B5** | context/injector.ts (ContextInjector, includes filtering rejected) + injector.test.ts | B2 + B3 + B4 | [M] |
+| **B6** | prompt/schema.ts (zod: ClaimSchema/CoderOutput/TesterOutput) + schema.test.ts | B0 (independent of Context, could be written in parallel with B2-B5 but committed sequentially on the same branch) | [S] |
+| **B7** | prompt/personas.ts (dynamic role persona loader) + personas.test.ts | B1 (needs profile to provide the personas directory) | [S] |
+| **B8** | prompt/composer.ts (PromptComposer) + composer.test.ts | B5 + B6 + B7 | [M] |
+| **B9** | vertical-slice end-to-end test (Context→Prompt actually connected, including a rejected-filtering assertion) | B8 | [S] |
+| **B10** | packaging config verification (`files`/`.npmignore` includes personas `.md`) + README/CLAUDE.md checkbox updates + docs/ROADMAP.md/PROGRESS.md/CHANGELOG.md write-back | B9 | [S] |
 
-**依赖图要点**:B6(Prompt schema)不依赖 Context,理论上可与 B2-B5 并行开发;但因本增量由同一个 Cypher 顺序实现(非多人协作),不额外开分支拆分,B6 排在 B2-B5 之后只是顺序选择,不是硬依赖 —— 若未来需要多 agent 并行,B6/B7 可独立拆到并行分支。B9 垂直切片是唯一**必须等前面全部完成**才能做的收尾批次,不可提前造假通过。
+**Dependency graph notes**: B6 (Prompt schema) doesn't depend on Context and could in theory be developed in parallel with B2-B5; but since this increment is implemented sequentially by the same Cypher (not multi-person collaboration), no separate branch is split out — B6 being placed after B2-B5 is purely a sequencing choice, not a hard dependency. If multi-agent parallelism is needed in the future, B6/B7 could be split onto a parallel branch. B9, the vertical slice, is the only wrap-up batch that **must wait for everything before it to be complete** — it cannot be faked through early.
 
-## 7. 分支策略
+## 7. Branch strategy
 
-单分支 `feature/issue-1-a0-a1-scaffold`,批次按 §6 顺序提交,理由:
-- 本增量是一个人(Cypher)从零建全新 src/ 骨架,批次间大部分是真依赖(B2→B3→B4→B5→B8→B9 链式),没有独立可合并的并行工作流。
-- B6(Prompt schema)虽逻辑独立,但代码量小、无需为此单独开分支承担合并开销。
-- 若指挥官希望拆更细粒度的 PR 供 Zorro 分批审(而非一次性大 diff),可在同一分支内按 B0-B1 / B2-B5(Context)/ B6-B9(Prompt+切片)/ B10 四个自然断点分别提交并请求阶段性审查,不必等全部完工才交审。
+Single branch `feature/issue-1-a0-a1-scaffold`, batches committed in the §6 order, rationale:
+- This increment is one person (Cypher) building an entirely new `src/` skeleton from scratch; most of the inter-batch dependencies are real (a B2→B3→B4→B5→B8→B9 chain) — there's no independently mergeable parallel workflow.
+- B6 (Prompt schema) is logically independent, but the code volume is small and doesn't warrant the merge overhead of its own branch.
+- If the commander wants finer-grained PRs for Zorro to review in batches (rather than one giant diff), commits within this same branch can be split at the natural breakpoints B0-B1 / B2-B5 (Context) / B6-B9 (Prompt+slice) / B10 and reviewed in stages, without waiting for full completion.
 
-## 8. 可测验收标准(可勾选)
+## 8. Testable acceptance criteria (checkable)
 
-- [x] `pnpm build` 成功(tsc strict + noUncheckedIndexedAccess 无报错)。—— B10 复核实测通过。
-- [x] `pnpm test` 全绿(vitest run)。—— B10 复核实测 **96/96**。
-- [x] `AI_AGENT_PROFILE=helix` 时 `profile/loader.ts` 正确解析 `profiles/helix/config.yaml`;`AI_AGENT_PROFILE=verity` 且 `profiles/verity/` 不存在时返回类型化"未找到"结果而非抛裸异常或静默返回空对象。—— B1(`948fd24`)。
-- [x] `memories`/`memory_confirmations`/`system_config` 三张表按 §4.1 列齐全建出(含新补 `confirmed_at`/`confirmed_by`/`actor`/`updated_at` 四列)。—— B2(`0eea001`)。
-- [x] `ConfirmationService` 的 `confirm`/`correct`/`reject` 三方法均用 `db.transaction` 包裹;有一条测试证明"事务中途失败则整体回滚,不留半写状态"。—— B4(`b24fa3f`)。
-- [x] `ContextInjector` 有一条**针对性测试**证明 `confidence_state === 'rejected'` 的记忆不会出现在注入结果里。—— B5(`06259c9`)。
-- [x] persona loader 按角色名字符串动态解析(非硬编码 `{coder,tester}`),有测试覆盖"角色 persona 文件缺失"路径。—— B7(`88852a5`)。
-- [x] 所有 `JSON.parse` 调用点(本增量涉及的:`tags` 反序列化 / config.yaml 相关如适用)都包在 try-catch 里,失败进类型化 error,不裸抛 `SyntaxError`。—— B10 复核 `grep -rn "JSON.parse" src` 唯一命中点(`store.ts:209` tags 反序列化)包在 try-catch → `MemoryTagsParseError`;`profile/loader.ts` 的 `loadYaml(...)` 同样包在 try-catch → `ProfileConfigParseError`。
-- [x] **硬性垂直切片测试存在且通过**:一条端到端测试证明 Context(`ContextInjector`)→ Prompt(`PromptComposer`)真的接通(种子数据 → 注入 → 组装 → 断言最终 prompt 内容),不是分层孤立测试拼出来的假象。—— B9(`4eb97e4`)。
-- [x] `package.json` `files`/`.npmignore` 确认 `profiles/*/personas/**/*.md` 会随包分发。—— B10 用 `pnpm pack` 实打包核实:`files` 字段(无 `.npmignore`,`files` 单独生效)已含 `profiles/*/personas/**/*.md` + `profiles/*/config.yaml`(B0 已落好,B10 只复核);`tar -tzf` 确认 tarball 内 `dist/` 无任何 `*.test.*` 泄漏。
-- [x] `docs/ROADMAP.md` 对应 A0/A1 勾选项更新、`docs/PROGRESS.md` 清空或更新、`CHANGELOG.md` 加行、`profiles/verity/` 未被误提交(`git status` 确认 `.gitignore` 生效)。—— B10 本批完成。
+- [x] `pnpm build` succeeds (tsc strict + noUncheckedIndexedAccess, no errors). — Re-verified in B10, passed.
+- [x] `pnpm test` all green (vitest run). — Re-verified in B10, **96/96** actually passed.
+- [x] When `AI_AGENT_PROFILE=helix`, `profile/loader.ts` correctly parses `profiles/helix/config.yaml`; when `AI_AGENT_PROFILE=verity` and `profiles/verity/` doesn't exist, returns a typed "not found" result instead of throwing a raw exception or silently returning an empty object. — B1 (`948fd24`).
+- [x] The three tables `memories`/`memory_confirmations`/`system_config` are built with all columns per §4.1 (including the four newly added columns `confirmed_at`/`confirmed_by`/`actor`/`updated_at`). — B2 (`0eea001`).
+- [x] `ConfirmationService`'s `confirm`/`correct`/`reject` methods are all wrapped in `db.transaction`; a test proves "if the transaction fails mid-way, it rolls back entirely, leaving no half-written state." — B4 (`b24fa3f`).
+- [x] `ContextInjector` has a **targeted test** proving that memories with `confidence_state === 'rejected'` never show up in the injection result. — B5 (`06259c9`).
+- [x] The persona loader resolves dynamically by role-name string (not hardcoded `{coder,tester}`), with test coverage for the "role's persona file is missing" path. — B7 (`88852a5`).
+- [x] Every `JSON.parse` call site in this increment (`tags` deserialization / config.yaml-related as applicable) is wrapped in try-catch, failing into a typed error rather than throwing a raw `SyntaxError`. — Re-verified in B10: `grep -rn "JSON.parse" src` finds the only hit (`store.ts:209`, tags deserialization) wrapped in try-catch → `MemoryTagsParseError`; `profile/loader.ts`'s `loadYaml(...)` is likewise wrapped in try-catch → `ProfileConfigParseError`.
+- [x] **The hard vertical-slice test exists and passes**: an end-to-end test proving Context (`ContextInjector`) → Prompt (`PromptComposer`) is really connected (seed data → inject → compose → assert final prompt content), not a false impression stitched together from isolated layer tests. — B9 (`4eb97e4`).
+- [x] `package.json`'s `files`/`.npmignore` confirmed that `profiles/*/personas/**/*.md` will be distributed with the package. — B10 verified with an actual `pnpm pack`: the `files` field (no `.npmignore`, `files` works standalone) already includes `profiles/*/personas/**/*.md` + `profiles/*/config.yaml` (already shipped in B0, B10 just re-checked); `tar -tzf` confirmed no `*.test.*` leaked into the tarball's `dist/`.
+- [x] `docs/ROADMAP.md`'s A0/A1 checkboxes updated, `docs/PROGRESS.md` cleared or updated, a `CHANGELOG.md` line added, `profiles/verity/` never accidentally committed (`git status` confirms `.gitignore` is effective). — Completed in this B10 batch.
 
-## 9. 依赖 / 风险
+## 9. Dependencies / Risks
 
-### 9.0 决策已定(2026-07-20 指挥官批,下方 `[?]` 据此收敛,不再当未决项)
-1. **SQLite 驱动 = better-sqlite3**(稳定优先;node:sqlite 实测 FTS5 可用但仍 Experimental,留作未来减依赖备选)。
-2. **模块系统 = ESM**(`"type":"module"` + NodeNext);B0 若发现 vitest/better-sqlite3 在 ESM 下有坑,当场报告不硬扛。
-3. **lint = A0 只用 `tsc --noEmit`,不引 eslint**;eslint 留到后续增量再补(引擎长期要养,但非 A0 范围)。
-4. **`tags` 序列化 = JSON 数组字符串**(`JSON.stringify`/`JSON.parse` + try-catch)。
-5. **`replaceLatest` 语义 = 按语义自实现**(Verity 源码在公司内网、越界不读,不照抄外部命名);`ConfirmationService.correct()` 承载「修正最新内容」,补有/无既有确认记录两条路径测试。
+### 9.0 Decisions finalized (approved by the commander 2026-07-20; the `[?]`s below converge accordingly and are no longer open items)
+1. **SQLite driver = better-sqlite3** (stability first; `node:sqlite` empirically works with FTS5 but is still Experimental, kept as a future dependency-reduction option).
+2. **Module system = ESM** (`"type":"module"` + NodeNext); if B0 finds vitest/better-sqlite3 have any issues under ESM, report immediately rather than forcing through.
+3. **lint = A0 only uses `tsc --noEmit`, no eslint**; eslint is deferred to a later increment (the engine needs it long-term, but it's out of A0's scope).
+4. **`tags` serialization = a JSON array string** (`JSON.stringify`/`JSON.parse` + try-catch).
+5. **`replaceLatest` semantics = implemented from scratch based on meaning** (the Verity source lives on the internal company network — out of bounds, not to be read; not copied from external naming); `ConfirmationService.correct()` carries the "correct the latest content" responsibility, with tests for both the "with" and "without" an existing confirmation record paths.
 
-**依赖**:
-- Node v24(已确认本机 `v24.1.0`,与 `CLAUDE.md` §2 一致)。
-- npm registry 可达(本次核实以下包当前可解析版本,供 `package.json` 版本区间参考,非锁定具体版本):`zod@4.4.3`、`js-yaml@5.2.1`、`vitest@4.1.10`、`typescript@7.0.2`、`better-sqlite3@12.11.1`。以上为 2026-07-20 当天 `npm view` 实测结果,写入 `package.json` 时用 `^` 区间而非锁死这些精确值。
+**Dependencies**:
+- Node v24 (confirmed locally as `v24.1.0`, consistent with `CLAUDE.md` §2).
+- npm registry reachability (this run confirmed the currently resolvable versions of the following packages, for `package.json` version-range reference, not pinned exact versions): `zod@4.4.3`, `js-yaml@5.2.1`, `vitest@4.1.10`, `typescript@7.0.2`, `better-sqlite3@12.11.1`. These are actual `npm view` results as of 2026-07-20; use `^` ranges rather than pinning these exact values in `package.json`.
 
-**风险 / 历史 `[?]`(1-5 已由 §9.0 指挥官批复收敛为定案,不再是未决项 —— 保留原文字作可追源记录,标注改为「已定案」而非 `[?]`;Zorro 复审 `feature/issue-1-a0-a1-scaffold` 指出这五条早该在 §9.0 落定后同步改标,原 `[?]` 是文档未回写的残留)**:
+**Risks / historical `[?]`s (items 1-5 have been converged into finalized decisions by the commander's approval in §9.0, no longer open — the original text is kept as a traceable record, with the label changed to "finalized" instead of `[?]`; Zorro's re-review of `feature/issue-1-a0-a1-scaffold` pointed out that all five of these should have had their labels synced once §9.0 was finalized — the original `[?]` was a leftover from a doc that was never written back)**:
 
-1. **[已定案,见 §9.0#1]** SQLite 驱动:better-sqlite3 vs node:sqlite。已本机验证 `node:sqlite`(Node v24.1.0 内置)的 `DatabaseSync` 支持 `CREATE VIRTUAL TABLE ... USING fts5(...)` 且可正常建表(实测通过,见本次 PRD 撰写过程中的 spike:`node -e "require('node:sqlite')..."` 建 FTS5 表成功)。但 `node:sqlite` 目前仍带 `ExperimentalWarning`(实验性 API,可能变动),而 `better-sqlite3@12.11.1` 是成熟稳定的第三方原生模块。指挥官已批:A0/A1 用 `better-sqlite3`,`node:sqlite` 的验证结果记录在案作为未来减依赖的备选。
-2. **[已定案,见 §9.0#2]** ESM vs CommonJS。指挥官已批:ESM(`"type": "module"` + `NodeNext` module 解析)。B0 spike 实测无阻塞(见 progress.md B0 条目),未改回 CommonJS。
-3. **[已定案,见 §9.0#3]** lint 工具选型。指挥官已批:A0 只用 `tsc --noEmit`,不引 eslint;eslint 留到后续增量再补。
-4. **[已定案,见 §9.0#4]** `tags` 列序列化格式。指挥官已批:JSON 数组字符串(`JSON.stringify`/`JSON.parse`,配 try-catch),已在 `store.ts`/`errors.ts`(`MemoryTagsParseError`)落地。
-5. **[已定案,见 §9.0#5]** `replaceLatest` / persona 缺失路径测试的确切语义。指挥官已批:按语义自实现,不照抄 Verity 内网命名。`ConfirmationService.correct()` 处理"修正一条记忆的最新内容",已补齐"有既有确认记录"/"无既有确认记录"两条路径测试 + `correct()→reject()` 元数据边界测试(confirmation.test.ts,Zorro 复审本轮补充);persona loader 已补"角色文件缺失"路径测试。
-6. **风险(非 [?],是提醒)**:B2(store.ts)是本增量体量最大的单文件(建表+FTS5 触发器+CRUD+召回),建议在 B2 内部再细分小提交(建表→CRUD→FTS5 触发器→召回查询),避免一次性大改动不好审。
-7. **风险**:垂直切片测试(B9)是整个增量能否通过 Zorro 审的关键项,必须真实种子数据跑真实 SQLite 文件(或内存 db),不能 mock 掉 `ContextInjector`/`PromptComposer` 之间的调用来"造出"通过的假象——这正是 DESIGN §8.5 点名的方法论警示,Zorro 审查时会重点对抗式核这条。**Zorro 首轮复审(2026-07-20)实测抓到 B9 走的是 `inject(undefined)`(绕开了真实 FTS5 召回路径)+ `ContextInjector` 的"核心全量"当时等于全表扫描(FTS5 召回分支是死代码)两个问题,均已在本轮修复(见 `injector.ts` 的 `CORE_MEMORY_TYPES` + `context-prompt.e2e.test.ts` 改用真实含连字符任务文本过 `inject()`)——印证本条风险提醒本身是准的。**
+1. **[Finalized, see §9.0#1]** SQLite driver: better-sqlite3 vs node:sqlite. Locally verified that `node:sqlite`'s (built into Node v24.1.0) `DatabaseSync` supports `CREATE VIRTUAL TABLE ... USING fts5(...)` and can create tables normally (empirically confirmed — during this PRD's drafting, a spike: `node -e "require('node:sqlite')..."` successfully created an FTS5 table). But `node:sqlite` still carries an `ExperimentalWarning` (an experimental API, subject to change), while `better-sqlite3@12.11.1` is a mature, stable third-party native module. The commander has approved: A0/A1 use `better-sqlite3`, with the `node:sqlite` verification results kept on record as a future dependency-reduction option.
+2. **[Finalized, see §9.0#2]** ESM vs CommonJS. The commander has approved: ESM (`"type": "module"` + `NodeNext` module resolution). The B0 spike found no real blocker (see the B0 entry in progress.md); it was not reverted to CommonJS.
+3. **[Finalized, see §9.0#3]** Lint tool choice. The commander has approved: A0 only uses `tsc --noEmit`, no eslint; eslint is deferred to a later increment.
+4. **[Finalized, see §9.0#4]** `tags` column serialization format. The commander has approved: a JSON array string (`JSON.stringify`/`JSON.parse`, with try-catch), already implemented in `store.ts`/`errors.ts` (`MemoryTagsParseError`).
+5. **[Finalized, see §9.0#5]** The exact semantics of `replaceLatest` / persona missing-path tests. The commander has approved: implement from scratch based on meaning, not copied from Verity's internal naming. `ConfirmationService.correct()` handles "correcting the latest content of a memory," and now has both "with an existing confirmation record" / "without one" path tests + a `correct()→reject()` metadata boundary test (`confirmation.test.ts`, added in this Zorro re-review round); the persona loader already has a "role file missing" path test.
+6. **Risk (not a `[?]`, a reminder)**: B2 (store.ts) is the largest single file in this increment (table creation + FTS5 triggers + CRUD + recall) — recommend further splitting it into smaller commits within B2 (table creation → CRUD → FTS5 triggers → recall query) to avoid one giant hard-to-review change.
+7. **Risk**: the vertical-slice test (B9) is the key item for whether this whole increment passes Zorro's review — it must run real seed data against a real SQLite file (or in-memory db), and must not mock out the call between `ContextInjector`/`PromptComposer` to "manufacture" a fake pass — this is exactly the methodology warning called out in DESIGN §8.5, and Zorro will adversarially scrutinize this item closely. **Zorro's first-round re-review (2026-07-20) caught exactly two problems in B9 in real testing: it went through `inject(undefined)` (bypassing the real FTS5 recall path), and `ContextInjector`'s "core full set" was at the time equal to a full table scan (making the FTS5 recall branch dead code) — both have been fixed in this round (see `injector.ts`'s `CORE_MEMORY_TYPES` + `context-prompt.e2e.test.ts` switching to real task text with hyphens to exercise `inject()`) — confirming that this risk note was accurate.**
 
-## 10. 项目约束检查
+## 10. Project constraint check
 
-- **模型无关?** 是——本增量(A0/A1)不出现任何具体 provider/model 名字;`profiles/helix/config.yaml` 里的 `providers.claude-cli`/`codex-cli` 只是配置结构占位,真实调用逻辑在 A3,本增量的 loader 只解析 YAML 结构、不硬编码判断分支。
-- **无跨层反向依赖?** 是——`src/prompt/` 不 import `src/context/` 的内部实现细节(`PromptComposer` 只依赖 `ContextInjector` 的**输出类型**,不反向依赖 Prompt);`src/context/` 不 import `src/harness/`/`src/loop/`(这两层本增量不存在)。
-- **`profiles/verity/` 不入仓?** 是——本增量完全不创建 `profiles/verity/` 任何文件;仓库 `.gitignore` 已有 `profiles/verity/` 规则(已核实,见 aeloop 仓根 `.gitignore`),B10 收尾会再核一次 `git status` 确认没有误建。
-- **角色不硬编码?** 是——persona loader 与 `PromptComposer` 按角色名字符串动态查找,不写 `if role === 'coder'`(对齐 DESIGN §1.7)。
-- **引擎代码不含 Helix 人格?** 是——`src/` 下所有代码零 Helix/companion/私人记忆内容,仅 `profiles/helix/` 下的示例 persona 文本(个人 overlay,允许在私有仓内存在)。
+- **Model-agnostic?** Yes — this increment (A0/A1) contains no specific provider/model names; the `providers.claude-cli`/`codex-cli` entries in `profiles/helix/config.yaml` are just configuration-structure placeholders, with the real invocation logic in A3; this increment's loader only parses the YAML structure and doesn't hardcode any branching logic.
+- **No reverse cross-layer dependencies?** Yes — `src/prompt/` does not import internal implementation details of `src/context/` (`PromptComposer` only depends on `ContextInjector`'s **output type**, not a reverse dependency on Prompt); `src/context/` does not import `src/harness/`/`src/loop/` (neither layer exists in this increment).
+- **`profiles/verity/` not checked in?** Yes — this increment creates no `profiles/verity/` files whatsoever; the repo's `.gitignore` already has a `profiles/verity/` rule (confirmed, see the aeloop repo root `.gitignore`); B10's wrap-up will re-check `git status` once more to confirm nothing was accidentally created.
+- **Roles not hardcoded?** Yes — the persona loader and `PromptComposer` both look up dynamically by role-name string, not `if role === 'coder'` (aligned with DESIGN §1.7).
+- **Engine code contains no Helix persona?** Yes — everything under `src/` is 100% free of Helix/companion/personal-memory content; only `profiles/helix/` contains example persona text (a personal overlay, allowed to exist within the private repo).

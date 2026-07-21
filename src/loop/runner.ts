@@ -3,14 +3,16 @@
  * `graph.ts` (A4b PRD §5 "runner.ts"). This is the **only** file that
  * simultaneously holds both "graph deps" (`router`/`composer`) and "audit
  * deps" (`AuditStore`/`BaseCheckpointSaver`) — every graph node/gate under
- * `src/loop/` continues to know nothing about `AuditStore` (PRD §8's "图节
- * 点/门继续保持零 I/O 纯度" acceptance criterion; `grep -rn
+ * `src/loop/` continues to know nothing about `AuditStore` (PRD §8's "graph
+ * nodes/gates continue to maintain zero I/O purity" acceptance criterion;
+ * `grep -rn
  * "better-sqlite3\|Database(" src/loop/gates.ts src/loop/escalation.ts
  * src/loop/graph.ts src/loop/nodes` must stay empty).
  *
  * **How this file attributes new audit rows to the right node/round**
- * (the mechanism PRD §5's "对比 invoke 前后的 state,把新出现的...落
- * approvals/structured_claims" describes, at the level of precision build
+ * (the mechanism PRD §5's "diff the state before/after invoke, and persist
+ * whatever newly appears...into approvals/structured_claims" describes, at
+ * the level of precision build
  * had to work out): `compiled.stream(input, {...cfg, streamMode:
  * "updates"})` — verified empirically against this repo's real
  * `buildLoopGraph()`/`compileLoopGraph()` output before writing this file
@@ -27,13 +29,14 @@
  * `invoke()` is never used in this file for that reason.
  *
  * **`step_ref`'s per-node counters are threaded through `RunHandle` *and*
- * rebuilt from disk on every `resumeRun()` call** (PRD §4.2: "这个计数器
- * 只存在于 runner.ts 的运行期变量里, 不落盘为 LoopState 的一部分" — still
+ * rebuilt from disk on every `resumeRun()` call** (PRD §4.2: "this counter
+ * only lives in runner.ts's runtime variable, it isn't persisted as part
+ * of LoopState" — still
  * true, `stepCounters` itself is never persisted as its own column/table —
  * but the *authoritative starting point* for a resume is no longer only
  * whatever in-memory value the caller happens to hand back).
  *
- * **Zorro Round-1 D1 rework** (`docs/feature/a4b-loop/test-report.md`):
+ * **Review Round-1 D1 rework** (`docs/feature/a4b-loop/test-report.md`):
  * this used to trust the caller-supplied `stepCounters` param alone,
  * defaulting to `{}`. That was fine for a same-process resume where the
  * caller always threads the previous call's returned `stepCounters`
@@ -56,7 +59,7 @@
  * `startRun()` doesn't need this — a brand-new run has no prior rows to
  * rebuild from, so its counters correctly start at `{}`.
  *
- * **Zorro Round-2 R2-2 addendum** (`docs/feature/a4b-loop/test-report.md`):
+ * **Review Round-2 R2-2 addendum** (`docs/feature/a4b-loop/test-report.md`):
  * D1's disk-rebuild only works if every round actually leaves a row for
  * `AuditStore.listStepRefsByRun()` to find. A round whose `claims` array is
  * empty (legal per `prompt/schema.ts` — no `.min(1)`) used to leave *no*
@@ -105,7 +108,7 @@ export interface StartRunInput {
   profile: string;
   workflowDefId: string;
   injectedContext: ContextInjectionResult;
-  /** This run's threshold snapshot — the caller (test/future CLI) is responsible for computing it per PRD §9.2 决策2's priority chain (config.yaml -> system_config -> hardcoded 2); `startRun` only ever receives an already-resolved number. */
+  /** This run's threshold snapshot — the caller (test/future CLI) is responsible for computing it per PRD §9.2 Decision 2's priority chain (config.yaml -> system_config -> hardcoded 2); `startRun` only ever receives an already-resolved number. */
   rejectThreshold: number;
 }
 
@@ -127,7 +130,7 @@ export interface RunHandle {
 const GATE_NODE_NAMES: readonly string[] = [LOOP_NODES.g1, LOOP_NODES.g2, LOOP_NODES.g3, LOOP_NODES.escalation];
 
 /**
- * Zorro Round-5 R6-B1 rework (`docs/feature/a4b-loop/test-report.md`): R5-B1
+ * Review Round-5 R6-B1 rework (`docs/feature/a4b-loop/test-report.md`): R5-B1
  * (below `resumeDecisionsFor()`'s history) originally lumped g1/g2/g3 into
  * one shared `GATE_RESUME_DECISIONS = ["approved","rejected","escalate"]`
  * domain — but the three gates' *real* accepted decisions, per each
@@ -194,7 +197,7 @@ const STEP_REF_PATTERN = /^(.+)#(\d+)$/;
 /**
  * Rebuilds per-node `stepCounters` from every `step_ref` already on disk
  * for this run (`AuditStore.listStepRefsByRun`) — see the file header's
- * "Zorro Round-1 D1 rework" note. A `step_ref` this doesn't recognize the
+ * "Review Round-1 D1 rework" note. A `step_ref` this doesn't recognize the
  * shape of is skipped, not thrown on — this is a best-effort reconstruction
  * of a counter, not a schema validator.
  */
@@ -225,7 +228,7 @@ function mergeStepCounters(a: Record<string, number>, b: Record<string, number>)
  * `workflow_runs`' `status`/`current_state`/`reject_count` should be right
  * now — factored out of `runStreamAndPersist`'s old single end-of-call
  * computation (PRD §5 runner.ts point 4) so it can be called after every
- * processed chunk, not just once at the very end (see Zorro Round-5 R6-B2
+ * processed chunk, not just once at the very end (see Review Round-5 R6-B2
  * rework in `runStreamAndPersist`'s own doc comment for why "only once at
  * the end" was the bug this closes).
  */
@@ -268,7 +271,7 @@ async function computeRunProgress(
  * position via one `getState()` call to compute `workflow_runs`'
  * `status`/`current_state`/`reject_count` (PRD §5 runner.ts point 4).
  *
- * **Zorro Round-5 R6-B2 rework** (`docs/feature/a4b-loop/test-report.md`):
+ * **Review Round-5 R6-B2 rework** (`docs/feature/a4b-loop/test-report.md`):
  * `workflow_runs`' `status`/`current_state` used to be synced from
  * `computeRunProgress()` (née this function's own inline tail) exactly
  * once, *after* the `for await` loop below had fully drained the stream —
@@ -284,8 +287,8 @@ async function computeRunProgress(
  * node that produced it) while `workflow_runs.current_state` stayed
  * wherever it was *before* this call started, a permanent split between
  * the checkpoint (the graph's real position) and the business ledger this
- * product's audit trail is supposed to make legible. Zorro's hand
- * reproduction: G1 approve succeeds (an `approvals` row lands, checkpoint
+ * product's audit trail is supposed to make legible. Manual reproduction:
+ * G1 approve succeeds (an `approvals` row lands, checkpoint
  * advances past G1 into `review`), the tester adapter throws inside
  * `review` before that node can produce a chunk — `approvals` shows
  * `g1#1/approved`, the checkpoint's `next` is `["review"]`, but
@@ -343,13 +346,13 @@ async function runStreamAndPersist(
         if (update.coderOutput && update.coderResult) {
           const coderOutput = update.coderOutput;
           const coderResult = update.coderResult;
-          // Zorro Round-1 B3 (docs/feature/a4b-loop/test-report.md): a
+          // Review Round-1 B3 (docs/feature/a4b-loop/test-report.md): a
           // multi-claim round is one logical audit event — PRD §4.2/§5's
           // `runInTransaction` exists precisely to make "insert N claims for
           // this round" atomic, so a mid-group insert failure never leaves
           // half the round's claims on disk.
           audit.runInTransaction(() => {
-            // Zorro Round-2 R2-2 (docs/feature/a4b-loop/test-report.md):
+            // Review Round-2 R2-2 (docs/feature/a4b-loop/test-report.md):
             // write this round's step marker *unconditionally*, before the
             // claims loop below — `coderOutput.claims` has no `.min(1)`
             // (prompt/schema.ts), so a real coder can legally return zero
@@ -409,7 +412,7 @@ async function runStreamAndPersist(
         // stream call can never complete a gate) and any future direct
         // caller of this un-exported helper gets the same protection.
         //
-        // Zorro Round-3 R3-2 (docs/feature/a4b-loop/test-report.md): this
+        // Review Round-3 R3-2 (docs/feature/a4b-loop/test-report.md): this
         // used to check only `decidedBy === undefined`, which a caller
         // bypassing this function's `string | undefined` type at runtime
         // (e.g. `null as unknown as string`) could slip past — the graph
@@ -439,7 +442,7 @@ async function runStreamAndPersist(
               reasoningText: entry.reasoningText ?? null,
               decision: entry.decision,
               decidedBy: decidedBy!,
-              decidedAt: entry.decidedAt, // Zorro Round-1 M2: the gate's real decision moment, not the DB-write moment.
+              decidedAt: entry.decidedAt, // Review Round-1 M2: the gate's real decision moment, not the DB-write moment.
             });
           }
         });
@@ -450,7 +453,7 @@ async function runStreamAndPersist(
       // rather than any node-specific write.
     }
 
-    // Zorro Round-5 R6-B2 (see this function's doc comment): sync
+    // Review Round-5 R6-B2 (see this function's doc comment): sync
     // `workflow_runs` to the graph's real position after *every* chunk this
     // loop finishes processing — not only once after the whole stream
     // drains — so a later node throwing before it can yield its own chunk
@@ -531,10 +534,10 @@ export async function startRun(deps: StartRunDeps, input: StartRunInput): Promis
  * `resumeRun()`) produced is read here (`stepCounters` is accepted as a
  * plain, caller-supplied value, not implicitly captured from a closure).
  * This is what "production-grade cross-process resume" concretely means
- * for this file (A4b PRD §5 runner.ts: "这个函数不要求调用方持有任何来自
- * startRun() 的内存对象引用").
+ * for this file (A4b PRD §5 runner.ts: "this function doesn't require the
+ * caller to hold any in-memory object reference from startRun()").
  *
- * **Zorro Round-1 B2 rework** (`docs/feature/a4b-loop/test-report.md`):
+ * **Review Round-1 B2 rework** (`docs/feature/a4b-loop/test-report.md`):
  * `runId` and `threadId` used to be trusted as an already-matching pair —
  * `threadId` drove the graph, `runId` alone drove every audit write, with
  * nothing checking the two actually named the same run. A caller that
@@ -546,7 +549,7 @@ export async function startRun(deps: StartRunDeps, input: StartRunInput): Promis
  * mismatch (fail loud, zero writes) rather than ever reaching a single
  * `audit.insert*` call with an unverified pair.
  *
- * **Zorro Round-2 R2-5 rework** (`docs/feature/a4b-loop/test-report.md`):
+ * **Review Round-2 R2-5 rework** (`docs/feature/a4b-loop/test-report.md`):
  * a `decidedBy` guard used to live only inside `runStreamAndPersist`'s
  * per-chunk loop (still there below, as a backstop for any other caller of
  * that shared helper) — which only fires *after* `compiled.stream()` has
@@ -561,7 +564,7 @@ export async function startRun(deps: StartRunDeps, input: StartRunInput): Promis
  * `getRunById`/the graph/anything else, so a runtime-invalid `decidedBy`
  * now fails loud before touching the checkpoint or the DB at all.
  *
- * **Zorro Round-3 R3-2 rework** (`docs/feature/a4b-loop/test-report.md`):
+ * **Review Round-3 R3-2 rework** (`docs/feature/a4b-loop/test-report.md`):
  * this guard (and its `runStreamAndPersist` backstop) originally checked
  * only `decidedBy === undefined`, which caught a bypassing caller that
  * passed `undefined` but not one that passed `null` (`null !== undefined`
@@ -571,7 +574,7 @@ export async function startRun(deps: StartRunDeps, input: StartRunInput): Promis
  * `typeof decidedBy !== "string"`, which rejects `null` and any other
  * non-string value the same way they already rejected `undefined`.
  *
- * **Zorro Round-4 R5-B1 rework** (`docs/feature/a4b-loop/test-report.md`):
+ * **Review Round-4 R5-B1 rework** (`docs/feature/a4b-loop/test-report.md`):
  * `resume`'s parameter type, `GateResumeValue | EscalationResumeValue`, is
  * an **undiscriminated** union — nothing here used to check that the
  * `resume` value's decision domain actually matched the gate the run was
@@ -586,7 +589,7 @@ export async function startRun(deps: StartRunDeps, input: StartRunInput): Promis
  * writing anything" ordering) via `resumeDecisionsFor(run.currentState)`,
  * throwing `ResumeDecisionDomainMismatchError` (zero writes) on a mismatch.
  *
- * **Zorro Round-5 R6-B1 rework** (`docs/feature/a4b-loop/test-report.md`):
+ * **Review Round-5 R6-B1 rework** (`docs/feature/a4b-loop/test-report.md`):
  * the R5-B1 guard above closed the *cross-domain* case (an Escalation-shaped
  * value reaching a g1/g2/g3 gate, or vice versa) but `resumeDecisionsFor()`
  * still mapped all three gates to one shared three-value
@@ -637,7 +640,7 @@ export async function resumeRun(
   const cfg = { configurable: { thread_id: threadId } };
   const command = new Command<GateResumeValue | EscalationResumeValue, Record<string, unknown>, RealGraphNode>({ resume });
 
-  // Zorro Round-1 D1 rework (see file header): rebuild each node's counter
+  // Review Round-1 D1 rework (see file header): rebuild each node's counter
   // from what's actually on disk for this run, merged with whatever the
   // caller supplied, instead of trusting the caller-supplied value alone.
   const dbStepCounters = rebuildStepCounters(deps.audit, runId);
@@ -651,7 +654,8 @@ export async function resumeRun(
  * Thin wrapper over `AuditStore.listRunsByStatus` — gives a future A5 CLI a
  * ready-made entry point for "what can I resume right now" without this
  * increment building any list/interactive command around it (PRD §2
- * non-goal / §5 runner.ts: "这条不是本增量测试要覆盖的重点")).
+ * non-goal / §5 runner.ts: "this isn't something this increment's tests
+ * need to cover as a focus")).
  */
 export function getResumableRuns(deps: { audit: AuditStore }, status: "running" | "escalated"): WorkflowRun[] {
   return deps.audit.listRunsByStatus(status);

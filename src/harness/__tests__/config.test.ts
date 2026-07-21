@@ -131,7 +131,7 @@ describe("buildAdapterRegistry — cli-bridge provider (A3)", () => {
   });
 });
 
-// 🔴 Deliberately supersedes A2's assertion for this same test (Zorro:
+// 🔴 Deliberately supersedes A2's assertion for this same test (Reviewer note:
 // diff this block against `git log -p -- src/harness/__tests__/config.test.ts`
 // to confirm it's an intentional PRD-called-out change, not a regression) —
 // A2's `buildAdapterRegistry()` explicitly skipped `cli-bridge` construction
@@ -142,7 +142,7 @@ describe("buildAdapterRegistry — cli-bridge provider (A3)", () => {
 // `config.ts`), so the same real config now populates the registry — the
 // assertion below intentionally inverts A2's "stays empty" expectation into
 // "both providers now resolve to real adapters", per A3 PRD §5/§8's explicit
-// acceptance item "打破 A2 断言的地方被显式记录".
+// acceptance item "places that break A2's assertions are explicitly documented".
 describe("buildAdapterRegistry — real subscription profile (both providers cli-bridge, now populated by A3)", () => {
   it("constructs real ClaudeCliAdapter/CodexCliAdapter instances for both real providers — A2's 'stays empty' expectation for this exact config no longer holds now that the cli-bridge branch is implemented", () => {
     const result = loadProfile("subscription");
@@ -168,13 +168,13 @@ describe("buildAdapterRegistry — real subscription profile (both providers cli
   });
 });
 
-// Zorro round-1 🟡 (指挥官已批「一起修」): `profile/loader.ts:147` explicitly
+// Review Round-1 🟡 (commander approved "fix together"): `profile/loader.ts:147` explicitly
 // leaves full schema validation of `providers`' nested shapes to this layer
 // — these three cases cover the malformed-entry shapes that would
 // previously either crash with a raw `TypeError` (null/non-object entry,
 // non-string `base_url` surfacing later inside `LiteLLMAdapter`) or vanish
 // silently with no signal at all (unknown `kind`).
-describe("buildAdapterRegistry — malformed provider entries (Zorro round-1 🟡)", () => {
+describe("buildAdapterRegistry — malformed provider entries (Review Round-1 🟡)", () => {
   it("a null provider entry (malformed yaml: `providers: { x: null }`) throws InvalidProviderConfigError, not a raw TypeError", () => {
     const config = {
       profile: "fixture",
@@ -241,7 +241,7 @@ describe("buildAdapterRegistry — malformed provider entries (Zorro round-1 �
     }
   });
 
-  it("Zorro A3 round-1 blocker B2 regression: an empty provider-map key throws InvalidProviderConfigError instead of reaching an adapter constructor", () => {
+  it("A3's Review Round-1 blocker B2 regression: an empty provider-map key throws InvalidProviderConfigError instead of reaching an adapter constructor", () => {
     const config: ProfileConfig = {
       profile: "fixture",
       providers: {

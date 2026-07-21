@@ -1,13 +1,13 @@
-# Zorro 审查报告 — aeloop A4a Loop 编排(Round 1)
+# Zorro Review Report — aeloop A4a Loop Orchestration (Round 1)
 
-> 稽核官 Zorro 对抗式独立复审。生产者(Cypher)≠审查者(Zorro)。
-> 跨模型二签:Codex `gpt-5.6-sol`(read-only 沙箱)+ Claude 变异测试双引擎,互抓幻觉。
-> 分支 `feature/issue-13-a4a-loop`,审前 HEAD `539f650`(工作区未 commit)。
-> 关联:[elishawong/aeloop#13](https://github.com/elishawong/aeloop/issues/13) · 上游 [ai-agent#120](https://github.com/elishawong/ai-agent/issues/120)
+> Independent adversarial review by auditor Zorro. Producer (Cypher) ≠ reviewer (Zorro).
+> Cross-model double sign-off: Codex `gpt-5.6-sol` (read-only sandbox) + Claude mutation testing, dual-engine, catching each other's hallucinations.
+> Branch `feature/issue-13-a4a-loop`, HEAD before review `539f650` (working tree not committed).
+> Related: [elishawong/aeloop#13](https://github.com/elishawong/aeloop/issues/13) | upstream [ai-agent#120](https://github.com/elishawong/ai-agent/issues/120)
 
 ---
 
-## Codex 独立审查 attestation(原样嵌入,wrapper 输出,未改一字)
+## Codex independent review attestation (embedded verbatim, wrapper output, not a single character changed)
 
 ```json
 {
@@ -30,77 +30,76 @@
 }
 ```
 
-- `raw_output_sha256`:`09a322c146447c3ee6ff2c5c2fe87dab2cc6943fc84734ebeaa7a9ce732cd464`(非空,独立审查真实完成)
-- Codex 沙箱为 read-only:能读源码/diff/文档、能跑 `pnpm lint`/`tsc --noEmit`/直接运行 fixture,**但无法跑 `pnpm test`**(read-only 阻止 Vitest 建 `.vite-temp` 临时目录,30 个 suite 全部在 import 前 EPERM 停止)。测试红绿证据由 **Zorro 自己在沙箱外真跑**提供(下方),Codex 负责静态/逻辑核对——分工正确。
+- `raw_output_sha256`: `09a322c146447c3ee6ff2c5c2fe87dab2cc6943fc84734ebeaa7a9ce732cd464` (non-empty, independent review genuinely completed)
+- Codex's sandbox is read-only: it can read source/diff/docs, run `pnpm lint`/`tsc --noEmit`, and directly execute fixtures, **but cannot run `pnpm test`** (read-only blocks Vitest from creating its `.vite-temp` scratch directory — all 30 suites hit EPERM before import completes). Test red/green evidence is supplied by **Zorro running outside the sandbox** (below); Codex handles static/logical verification — division of labor is correct.
 
-## 审查结论:**FAIL**
+## Review verdict: **FAIL**
 
-- **Blocker:1 条** · **Minor:2 条**
-- **两模型同判 FAIL**,且都判在同一根因(偏离3:真实 `graph.ts` 的非 happy-path 拓扑无测试覆盖)。
-- 生产 `pathMap` 当前静态值**与 PRD 一致**(无 live bug 正在发货),但缺覆盖 = 未来任何对真实图 reject 边的改动会**带绿发货**,违反 PRD §8 明写的验收项 + DESIGN §8.5 反"孤立绿测试"方法论。
-
----
-
-### 🔴 必须改(blocker)
-
-**B1 — 真实 `graph.ts` 的 reject / fix-forward 条件边零行为覆盖(偏离3 最终判定)**
-- **落点**:`src/loop/graph.ts:73-83`(review→g2、g2→draft、g3→draft 三条 pathMap 目标)· 违反 `docs/feature/a4a-loop/PRD.md:267`(验收项:"`addConditionalEdges` 的每一条分支……都各自有一条测试实际走过")· DESIGN §8.5 反孤立绿测试。
-- **根因**:`graph.test.ts` 用**本地复刻**的 `buildToyGraph()`(`src/loop/__tests__/graph.test.ts:88-103`)把生产 `pathMap` **抄了第二份**,所有 reject/fix-forward 分支跑的是这份复刻图。真实 `buildLoopGraph()` 只被 `checkpoint.test.ts:125/141` 和 `loop.e2e.test.ts:137` 调用,而这两者**都只走 happy path**(`G1 approved → review pass → G3 approved → apply`)。真实图里 `G1 rejected→draft`、`G2 approved→draft`、`G3 rejected→draft`(以及真实图的 G2 fail-loud 路径)**没有任何测试实际走过**。
-- **变异证据(Zorro 亲跑,决定性)**:
-  - 把真实 `graph.ts` 的 G2 pathMap `draft: LOOP_NODES.draft` 改成 `draft: LOOP_NODES.apply`(结构合法——`draft` 仍经 `START→draft` 可达,不触发 `UnreachableNodeError`)→ **全 26 个 loop 测试仍全绿**。这正是 PRD §8:267 要防的"复刻图对、生产图改坏仍全绿"。
-  - 对照:把真实 `graph.ts` 的 **happy-path** 边(G1 `review: LOOP_NODES.review`→`draft`)改坏 → `checkpoint.test.ts` + `loop.e2e.test.ts` **立刻转红**(happy path 确实被真实图覆盖)。所以缺的精确是**非 happy-path 那几条真实边**,不是全部。
-  - 注:`review→g2` 若被 mis-map,会因 `g2` 变不可达被 LangGraph 编译期 `UnreachableNodeError` 顺带挡下(结构校验,非行为测试);但 `G2→draft`/`G3→draft` mis-map 后 `draft` 仍可达,纯行为错误零报警。
-- **两模型一致**:Codex(gpt-5.6-sol)独立指出同一 blocker(见其八项核查 #1);Zorro 变异测试实证坐实。Cypher 在 PRD 自报偏离3 时称 B4/B5"间接覆盖"真实图——变异证明该覆盖**只到 happy path,不到 reject 分支**,间接覆盖不成立。
-- **建议改法(低风险,非重设计)**:让 `graph.test.ts` 直接驱动真实 `buildLoopGraph()`(把 draft/review 依赖换成 `FakeAdapter`,复用 `checkpoint.test.ts` 已有的 FakeCoder/FakeTester 手法),用真实图跑一遍 G1 reject / review reject→G2 approve / G3 reject / G2 fail-loud 每条分支;或在 `checkpoint.test.ts` 追加 reject-path 用例。核心是**每条真实图条件边至少被真实 `buildLoopGraph()` 走过一次**,消灭"复刻拓扑"这份可漂移的第二真源。
-
-### 🟡 建议改(minor,非 FAIL 触发,但应随返工一并修)
-
-**M1 — `gateLog`"只在内存、进程退出即消失"的注释/PRD 陈述不准确**
-- **落点**:`src/loop/types.ts:63`("it does not survive process exit")+ `docs/feature/a4a-loop/PRD.md` §9.2#3。
-- **实情**:`gateLog` 是 `LoopState` 的 Annotation channel(`types.ts:112`),真实图用 `SqliteSaver` 编译(`graph.ts:92`),LangGraph 会把**整个 state(含 gateLog)序列化进 SQLite checkpoint**——`checkpoint.test.ts` 的两阶段 resume 正是证明整份 state 落盘可恢复。准确说法应是"gateLog **不写入 A4b 的 `approvals` 业务表**",而不是"只在内存/进程退出即消失"。功能无错(A4a 确实不建业务表),纯属注释/PRD 措辞过度声明,幻觉门 minor。两模型一致(Codex 八项核查 #8 / §9.2#3)。
-
-**M2 — fixture 头部"ONLY by codex-cli-adapter.test.ts"陈述过期**
-- **落点**:`src/harness/adapters/__tests__/fixtures/fake-codex.fixture.mjs:3`("used ONLY by codex-cli-adapter.test.ts")。
-- **实情**:该 fixture 现已被 `src/loop.e2e.test.ts:59/89`(`tester-pass` 场景)spawn。头部虽新增了"**A4a addition**"块说明 tester-pass,但第 3 行的"ONLY"旧句未同步。文档 staleness,minor。
-
-### ✅ 检查过且 OK(独立核实,非采信自报)
-
-- **占位符拒收**:无 TODO/stub/假数据冒充真实(Codex + Zorro 双查零命中)。
-- **危险代码**:无删库/明文密钥/注入/未授权外发/越权(Codex 确认)。
-- **G2 fail-loud**:`routeAfterG2`(`gates.ts:141-144`)非 `"approved"` 抛 `UnhandledGateDecisionError`;G1/G3 default 抛普通 `Error`——区分合理(G1/G3 两分支都实现、default=损坏兜底;G2 的 `"rejected"` 是合法 `GateDecision` 但 A4a 刻意无目标,专用错误)。**变异证据**:删掉 `routeAfterG2` 的 throw 改成无条件 `return "draft"` → `graph.test.ts` "G2 non-approved throws" 转红。
-- **interrupt 前置副作用重跑坑规避**:`buildPayload` 在 `interrupt()`(`gates.ts:45`)前、纯读 state 无副作用;`GateLogEntry`+`new Date().toISOString()`(`gates.ts:49`)在 `interrupt()` 返回后才构造。符合 spike Q3。
-- **rejectCount 递增语义**:`tester.ts:63` 仅 `verdict === "reject"` 时 +1;A4a 零代码读 `rejectCount` 做路由(阈值判断留 A4b)。**变异证据**:改成无条件 `state.rejectCount + 1` → `tester.test.ts` "does not change rejectCount when pass" 转红。
-- **四层无反向依赖**:`grep -rln "from.*loop" src/harness src/context src/prompt` **零命中**;`src/loop/*` 只 import `harness/`/`prompt/`,context 仅 type-only(`types.ts:16`)。
-- **loop 层零 spawn/fetch**:`grep -rn "spawn\|fetch(" src/loop --include="*.ts"` **零命中**。
-- **checkpoint 非闭包状态 resume**:`checkpoint.test.ts` 丢弃 phase1 全部对象后用全新实例 + 同 db 路径 + 同 thread_id 续跑。**变异证据**:把 `createSqliteCheckpointer` 改成返回全新 `MemorySaver`(无共享磁盘)→ `checkpoint.test.ts` 转红(`fs.existsSync(dbPath)` false)——证明该测试真依赖磁盘跨实例,不是假绿。
-- **垂直切片真接通**:`loop.e2e.test.ts` 真跑 MemoryStore→ContextInjector→PromptComposer→`buildAdapterRegistry`→ProviderRouter→真实 cli-bridge adapter(真 spawn fixture 子进程)→真实图→真实 SqliteSaver→G1/G3 interrupt+resume→`applied:true`,唯一替身是 fixture 子进程。角色绑定 coder→claude-cli/tester→codex-cli 与真实 `profiles/subscription/config.yaml:18` 一致。**变异证据**:把 e2e 的 roles 绑反 → `SchemaValidationError`(coder 拿到 tester fixture 缺 `diff`),证明绑定真被行为验证、绑反不会静默过。
-- **tester-pass fixture 无污染**:只加独立 `case`,未改 A3 已有场景;产出符合 `TesterOutput`(`verdict:"pass"`/`issues:[]`/合法 `claims[]`/`confidence`)。A3 既有测试仍全绿(下方 254/254 含之)。
-- **命令实测(Zorro 沙箱外真跑)**:`pnpm build`(tsc strict + noUncheckedIndexedAccess)= 通过;`pnpm lint`(`tsc --noEmit`)= 通过;`pnpm test` = **254/254 全绿(30 suites)**。变异全部验完后工作区已复原,复原后再跑一遍 254/254 仍绿。
-
-### 七道门
-
-- 需求贴合 **[✗]**(B1:PRD §8:267 真实图分支覆盖验收项未满足) · 影响范围 **[✓]** · 占位符拒收 **[✓]** · 危险代码 **[✓]** · 幻觉核查 **[✗]**(M1:`gateLog` 不落盘的陈述与真实 checkpoint 行为矛盾;偏离3"间接覆盖"自报被变异证伪) · 文档齐套 **[✓]**(PRD/spike/impact/本 report 齐;M2 是既有 fixture 头部 staleness,非缺失) · 文档同步(仅大设计级)**[N.A.]**(A4a 未触及 BASE-ARCHITECTURE/AI_COMPANY_PLAN/CORE/CLAUDE 四份权威文档结构)
-
-### 📚 知识库(核对,不维护)
-
-- 本次改动是否触及已索引模块 **[是]**——`CHARTS/knowledge/aeloop.md`(ai-agent 仓)本增量新增 5 条 Loop 层索引(types/errors/workflow-def · nodes · gates · checkpoint · graph)。
-- 对照真实代码是否仍准 **[✓]**——逐条核实接口签名(`buildLoopGraph`/`compileLoopGraph`/`LoopGraphDeps`/`createGateNode` 四参/四个 `routeAfter*` 返回类型/`GateDecision`/`GatePayload`/`GateLogEntry`/`LoopNodeName` 含 `Exclude<...,"__end__">` 边界/`createSqliteCheckpointer`)全部与真实代码一致;依赖方向、"graph.test.ts 不调 buildLoopGraph 而本地复刻拓扑"这条**也如实写进了知识库**(与偏离3 一致)。无悬空引用、无路径漂移。
-- 若漂移已要求 Cypher 同步 **[N.A.]**——未发现漂移。惟建议:B1 返工闭掉覆盖缺口后,知识库 graph.ts 条目里"graph.test.ts 本地复刻拓扑、不调 buildLoopGraph"那句应随之更新(届时真实图会被直接测到)。
+- **Blockers: 1** | **Minor: 2**
+- **Both models independently judged FAIL**, and both landed on the same root cause (Deviation 3: the real `graph.ts`'s non-happy-path topology has zero test coverage).
+- The production `pathMap`'s current static values **match the PRD** (no live bug is shipping right now), but the missing coverage means **any future change to the real graph's reject edges could ship green**, violating an explicit acceptance item in PRD §8 + DESIGN §8.5's anti-"isolated green tests" methodology.
 
 ---
 
-## 复审循环指引
+### 🔴 Must fix (blocker)
 
-Cypher 修 B1(真实图每条条件边至少被 `buildLoopGraph()` 走过一次)+ 顺手修 M1/M2 → Zorro Round 2 复审(重点重跑上面 B1 那条变异:mis-map 真实图 reject 边后对应测试必须转红)→ 通过 + CI 绿 → 交指挥官终批。**未经指挥官审批不 commit / 不 merge。**
+**B1 — Real `graph.ts`'s reject / fix-forward conditional edges have zero behavioral coverage (final ruling on Deviation 3)**
+- **Location**: `src/loop/graph.ts:73-83` (the three pathMap targets for review→g2, g2→draft, g3→draft) | violates `docs/feature/a4a-loop/PRD.md:267` (acceptance item: "every branch of `addConditionalEdges` … must have at least one test that actually exercises it") | DESIGN §8.5's anti-isolated-green-test stance.
+- **Root cause**: `graph.test.ts` uses a **locally re-implemented** `buildToyGraph()` (`src/loop/__tests__/graph.test.ts:88-103`) that **copies the production `pathMap` a second time** — all reject/fix-forward branches run against this duplicate graph. The real `buildLoopGraph()` is only invoked by `checkpoint.test.ts:125/141` and `loop.e2e.test.ts:137`, and **both of those only walk the happy path** (`G1 approved → review pass → G3 approved → apply`). In the real graph, `G1 rejected→draft`, `G2 approved→draft`, `G3 rejected→draft` (and the real graph's G2 fail-loud path) **have never actually been exercised by any test**.
+- **Mutation evidence (Zorro ran this personally, decisive)**:
+  - Changed the real `graph.ts`'s G2 pathMap `draft: LOOP_NODES.draft` to `draft: LOOP_NODES.apply` (structurally valid — `draft` is still reachable via `START→draft`, so it does not trigger `UnreachableNodeError`) → **all 26 loop tests still pass green**. This is exactly the "duplicate graph correct, production graph broken, still all green" scenario PRD §8:267 is meant to guard against.
+  - Control: changed the real `graph.ts`'s **happy-path** edge (G1's `review: LOOP_NODES.review` → `draft`) → `checkpoint.test.ts` + `loop.e2e.test.ts` **immediately turn red** (the happy path is indeed covered by the real graph). So what's precisely missing is **the real, non-happy-path edges**, not everything.
+  - Note: if `review→g2` were mis-mapped, `g2` would become unreachable and LangGraph's compile-time `UnreachableNodeError` would incidentally catch it (a structural check, not a behavioral test); but mis-mapping `G2→draft`/`G3→draft` leaves `draft` still reachable, a pure behavioral error with zero alarm.
+- **Both models agree**: Codex (gpt-5.6-sol) independently flagged the same blocker (see its eight-point checklist #1); Zorro's mutation testing confirmed it empirically. When Cypher self-reported Deviation 3 in the PRD, they claimed B4/B5 "indirectly cover" the real graph — mutation testing proves that coverage **only reaches the happy path, not the reject branches**; the "indirect coverage" claim does not hold.
+- **Suggested fix (low-risk, not a redesign)**: Have `graph.test.ts` drive the real `buildLoopGraph()` directly (swap the draft/review dependencies for a `FakeAdapter`, reusing the FakeCoder/FakeTester technique already present in `checkpoint.test.ts`), and exercise G1 reject / review reject→G2 approve / G3 reject / G2 fail-loud, each branch once, against the real graph; or append reject-path cases to `checkpoint.test.ts`. The core requirement is that **every real conditional edge in the graph be walked at least once by the real `buildLoopGraph()`**, eliminating the "duplicate topology" as a second source of truth that can drift.
+
+### 🟡 Should fix (minor, not FAIL-triggering, but should be fixed alongside the rework)
+
+**M1 — The comment/PRD statement that `gateLog` "only lives in memory and disappears on process exit" is inaccurate**
+- **Location**: `src/loop/types.ts:63` ("it does not survive process exit") + `docs/feature/a4a-loop/PRD.md` §9.2#3.
+- **Reality**: `gateLog` is an Annotation channel of `LoopState` (`types.ts:112`); the real graph is compiled with `SqliteSaver` (`graph.ts:92`), and LangGraph serializes **the entire state (including gateLog) into the SQLite checkpoint** — `checkpoint.test.ts`'s two-phase resume is exactly what proves the whole state survives on disk and can be recovered. The accurate statement should be "gateLog **is not written into A4b's `approvals` business table**," not "only in memory / disappears on process exit." There is no functional bug (A4a indeed does not build the business table); this is purely an over-claiming comment/PRD wording issue, a minor hallucination-gate finding. Both models agree (Codex eight-point checklist #8 / §9.2#3).
+
+**M2 — Fixture header's "ONLY by codex-cli-adapter.test.ts" statement is stale**
+- **Location**: `src/harness/adapters/__tests__/fixtures/fake-codex.fixture.mjs:3` ("used ONLY by codex-cli-adapter.test.ts").
+- **Reality**: This fixture is now also spawned by `src/loop.e2e.test.ts:59/89` (the `tester-pass` scenario). The header does have a newly added "**A4a addition**" block explaining tester-pass, but the "ONLY" wording on line 3 was not updated to match. Documentation staleness, minor.
+
+### ✅ Checked and OK (independently verified, not taken on self-report)
+
+- **Placeholder rejection**: No TODOs/stubs/fake data masquerading as real (both Codex + Zorro checked independently, zero hits).
+- **Dangerous code**: No destructive deletes/plaintext secrets/injection/unauthorized egress/privilege escalation (confirmed by Codex).
+- **G2 fail-loud**: `routeAfterG2` (`gates.ts:141-144`) throws `UnhandledGateDecisionError` for anything other than `"approved"`; G1/G3 default-throw a plain `Error` — the distinction is reasonable (both G1/G3 branches are implemented, default = broken-state fallback; G2's `"rejected"` is a legal `GateDecision` but A4a deliberately gives it no target, hence a dedicated error type). **Mutation evidence**: removing `routeAfterG2`'s throw and replacing it with an unconditional `return "draft"` → the "G2 non-approved throws" case in `graph.test.ts` turns red.
+- **rejectCount increment semantics**: `tester.ts:63` only increments on `verdict === "reject"`; A4a has zero code that reads `rejectCount` for routing decisions (threshold logic deferred to A4b). **Mutation evidence**: changing it to unconditionally `state.rejectCount + 1` → the "does not change rejectCount when pass" case in `tester.test.ts` turns red.
+- **Four-layer no-reverse-dependency**: `grep -rln "from.*loop" src/harness src/context src/prompt` → **zero hits**; `src/loop/*` only imports `harness/`/`prompt/`, and context is type-only (`types.ts:16`).
+- **Zero spawn/fetch in the loop layer**: `grep -rn "spawn\|fetch(" src/loop --include="*.ts"` → **zero hits**.
+- **Checkpoint non-closure-state resume**: `checkpoint.test.ts` discards all phase-1 objects, then resumes to completion with a brand-new instance + same db path + same thread_id. **Mutation evidence**: changing `createSqliteCheckpointer` to return a fresh `MemorySaver` (no shared disk) → `checkpoint.test.ts` turns red (`fs.existsSync(dbPath)` is false) — proving this test genuinely depends on cross-instance disk state, not a false green.
+- **Vertical slice truly wired end-to-end**: `loop.e2e.test.ts` genuinely runs MemoryStore→ContextInjector→PromptComposer→`buildAdapterRegistry`→ProviderRouter→a real cli-bridge adapter (real spawn of a fixture subprocess)→a real graph→a real SqliteSaver→G1/G3 interrupt+resume→`applied:true`, the only stand-in being the fixture subprocess. Role bindings coder→claude-cli / tester→codex-cli match the real `profiles/subscription/config.yaml:18`. **Mutation evidence**: swapping the roles in the e2e config → `SchemaValidationError` (coder receives the tester fixture, which lacks `diff`), proving the binding is genuinely behavior-verified and a reversed binding does not silently pass.
+- **tester-pass fixture is non-contaminating**: only adds an independent `case`, does not modify any existing A3 scenario; its output conforms to `TesterOutput` (`verdict:"pass"`/`issues:[]`/valid `claims[]`/`confidence`). All existing A3 tests still pass green (included in the 254/254 below).
+- **Command verification (Zorro ran these outside the sandbox)**: `pnpm build` (tsc strict + noUncheckedIndexedAccess) = passes; `pnpm lint` (`tsc --noEmit`) = passes; `pnpm test` = **254/254 green (30 suites)**. After all mutations were fully run and reverted, the working tree was restored and re-run — still 254/254 green.
+
+### The seven gates
+
+- Requirement alignment **[✗]** (B1: PRD §8:267's acceptance item for real-graph branch coverage not satisfied) | Blast radius **[✓]** | Placeholder rejection **[✓]** | Dangerous code **[✓]** | Hallucination check **[✗]** (M1: the claim that `gateLog` doesn't persist to disk contradicts the real checkpoint behavior; Deviation 3's self-reported "indirect coverage" was disproven by mutation testing) | Documentation completeness **[✓]** (PRD/spike/impact/this report all present; M2 is pre-existing fixture header staleness, not a missing item) | Documentation sync (major-design-doc level only) **[N.A.]** (A4a does not touch the four authoritative documents BASE-ARCHITECTURE/AI_COMPANY_PLAN/CORE/CLAUDE)
+
+### 📚 Knowledge base (verified, not maintained)
+
+- Does this change touch an already-indexed module **[Yes]** — `CHARTS/knowledge/aeloop.md` (ai-agent repo) gains 5 new Loop-layer index entries in this increment (types/errors/workflow-def | nodes | gates | checkpoint | graph).
+- Still accurate against the real code **[✓]** — verified interface signatures line by line (`buildLoopGraph`/`compileLoopGraph`/`LoopGraphDeps`/`createGateNode`'s four params / the four `routeAfter*` return types / `GateDecision`/`GatePayload`/`GateLogEntry`/`LoopNodeName` including the `Exclude<...,"__end__">` boundary / `createSqliteCheckpointer`) — all match the real code; the dependency direction, and the fact that "graph.test.ts doesn't call buildLoopGraph but re-implements the topology locally," **was also honestly recorded in the knowledge base** (consistent with Deviation 3). No dangling references, no path drift.
+- If drift was found, was Cypher required to sync it **[N.A.]** — no drift found. One suggestion: once B1's coverage gap is closed via rework, the knowledge base's graph.ts entry line "graph.test.ts re-implements the topology locally, doesn't call buildLoopGraph" should be updated accordingly (at that point the real graph will be directly tested).
+
+---
+
+## Review-cycle guidance
+
+Cypher fixes B1 (every conditional edge of the real graph must be walked by `buildLoopGraph()` at least once) + fixes M1/M2 along the way → Zorro Round 2 re-review (focus: re-run the B1 mutation above — mis-mapping the real graph's reject edges must turn the corresponding tests red) → pass + green CI → hand to the commander for final approval. **No commit / no merge without the commander's approval.**
 
 ---
 ---
 
-# Round 2 复审(返工后)
+# Round 2 Review (after rework)
 
-> Cypher 按 R1 报告返工三条(B1 + M1 + M2)。Zorro 独立核实,不采信自述。分支 `feature/issue-13-a4a-loop`,审前 HEAD `539f650`,未 commit。
+> Cypher reworked the three items per the R1 report (B1 + M1 + M2). Zorro independently verified, did not take self-reports at face value. Branch `feature/issue-13-a4a-loop`, HEAD before review `539f650`, not committed.
 
-## Codex R2 独立审查 attestation(原样嵌入,wrapper 输出)
+## Codex R2 independent review attestation (embedded verbatim, wrapper output)
 
 ```json
 {
@@ -123,106 +122,106 @@ Cypher 修 B1(真实图每条条件边至少被 `buildLoopGraph()` 走过一次)
 }
 ```
 
-- R2 `raw_output_sha256`:`ce3fa5486d4c0a762ce1a651388545344aec3a252782cbad4e5329b6fb6962ec`(非空,与 R1 `09a322c1…` 不同,是本轮真实独立执行)。
-- Codex R2 首次启动疑似跨仓超时无果(已知问题 ai-agent#115);**有界重试**后拿到真实输出(started 23:57→completed 00:02,~5 min)。read-only 沙箱同 R1,`pnpm test` 仍被 EPERM 挡下,测试红绿由 Zorro 沙箱外亲跑提供。
+- R2 `raw_output_sha256`: `ce3fa5486d4c0a762ce1a651388545344aec3a252782cbad4e5329b6fb6962ec` (non-empty, different from R1's `09a322c1…`, a genuine independent execution for this round).
+- Codex R2's first launch appeared to hang on a cross-repo timeout with no result (known issue ai-agent#115); **a bounded retry** produced real output (started 23:57 → completed 00:02, ~5 min). Same read-only sandbox as R1; `pnpm test` still blocked by EPERM; test red/green evidence is supplied by Zorro running outside the sandbox.
 
-## R2 结论:**FAIL**(两模型同判)
+## R2 verdict: **FAIL** (both models agree)
 
-- **Blocker:1 条(B1 收窄但未完全关闭)** · **Minor:2 条**
-- B1 的**大洞已修好**(真实图不再无测试);但 Codex 抓到一个我自己 R2 变异集**漏掉**的残留缝隙——正是跨模型二签的价值所在,如实记录。
+- **Blockers: 1 (B1 narrowed but not fully closed)** | **Minor: 2**
+- B1's **big hole has been fixed** (the real graph is no longer untested); but Codex caught a residual gap **that my own R2 mutation set missed** — exactly the value of cross-model double sign-off, recorded honestly here.
 
-### 🔴 必须改(blocker)
+### 🔴 Must fix (blocker)
 
-**B1-residual — G3 reject→draft 用例缺"必经 draft"回归断言,一类 sneaky mis-map 仍带绿发货**
-- **落点**:`src/loop/__tests__/graph.test.ts:248-271`("G3 rejects once" 用例)· 真实边 `src/loop/graph.ts:82`(`draft: LOOP_NODES.draft`)。
-- **根因**:该用例 G3 reject 后**只断言 `next===[g1]`**(line 262),没有像姊妹用例那样取 `coder` 并断言 `coder.calls===2`(对照:G1-reject 用例 line 199、G2-approve 用例 line 236 都锁了 `coder.calls===2` 证明 draft 真重跑)。
-- **变异证据(Zorro 亲跑,决定性)**:把真实 `graph.ts` 的 G3 `draft: LOOP_NODES.draft` 改成 `draft: LOOP_NODES.g1`(sneaky——跳过 coder 重绘、直接回 g1,`next` 观测值仍是 `[g1]`)→ **全 5 个 graph.test.ts 仍全绿**。而我 R2 自己那轮 G3 变异用的是 `draft→apply`(loud,会被 `applied`/`next` 抓到转红),所以**我一个人会误放这条**;Codex 用 `draft→g1` 揭出残留缝隙。两模型交叉才补上。
-- **为什么是真 bug 不是吹毛求疵**:G3-reject→draft 的语义是"终审打回→coder 拿反馈重绘"。若误接成 →g1,G3 打回后会 g1→review→g3 无限循环审同一份**从未修改**的 diff,反馈永远到不了 coder——真实功能缺陷,值得锁成回归断言。
-- **建议改法(一行级)**:"G3 rejects once" 用例从 `buildDeps` 取 `coder`,G3 reject 后加 `expect(coder.calls).toBe(2)`(+ 可选断言第二次 coder prompt 含 G3 的 `reasoningText`),与 G1-reject/G2-approve 两个姊妹用例对齐。
+**B1-residual — the G3 reject→draft case lacks a "draft must actually re-run" regression assertion; one class of sneaky mis-map can still ship green**
+- **Location**: `src/loop/__tests__/graph.test.ts:248-271` (the "G3 rejects once" case) | real edge `src/loop/graph.ts:82` (`draft: LOOP_NODES.draft`).
+- **Root cause**: this case, after G3 reject, **only asserts `next===[g1]`** (line 262) — unlike its sibling cases, it does not also grab `coder` and assert `coder.calls===2` (compare: the G1-reject case line 199 and the G2-approve case line 236 both pin `coder.calls===2` to prove draft genuinely re-ran).
+- **Mutation evidence (Zorro ran this personally, decisive)**: changed the real `graph.ts`'s G3 `draft: LOOP_NODES.draft` to `draft: LOOP_NODES.g1` (sneaky — skips the coder re-draft and jumps straight back to g1; the observed `next` value is still `[g1]`) → **all 5 graph.test.ts cases still pass green**. My own R2 mutation round used `draft→apply` for the G3 mutation (loud — caught by `applied`/`next`, turns red), so **I alone would have missed this one**; Codex surfaced the residual gap using `draft→g1`. It took the two models cross-checking each other to catch it.
+- **Why this is a real bug, not nitpicking**: the semantics of G3-reject→draft are "final sign-off rejected → coder redrafts with the feedback." If it's mis-wired to →g1 instead, a G3 rejection would loop g1→review→g3 endlessly reviewing the same, **never-modified** diff — the feedback would never reach the coder. A genuine functional defect worth locking down with a regression assertion.
+- **Suggested fix (one-line-level)**: in the "G3 rejects once" case, grab `coder` from `buildDeps`, and after the G3 reject, add `expect(coder.calls).toBe(2)` (+ optionally assert that the second coder prompt contains G3's `reasoningText`), aligning it with its two sibling cases G1-reject/G2-approve.
 
-### 🟡 建议改(minor)
+### 🟡 Should fix (minor)
 
-**M1-residual — `types.ts:66` 注释过度声明 checkpoint.test 证明了什么**
-- 注释称"phase 2's brand-new instance reads back a `gateLog`-bearing state from disk"。但 `checkpoint.test.ts` 暂停在**未决策的 G1**,此刻 `gateLog` 仍是初始空数组(`checkpoint.test.ts:94` `gateLog: []`),且测试**从不跨实例断言 gateLog 内容**。gateLog 随 SqliteSaver 落盘的**机制判断正确**(graph.ts:92 配 checkpointer + gateLog 是 Annotation channel),只是"该测试具体证明了 gateLog 内容跨实例恢复"这句过度声明。改法:软化措辞(该测证明的是**整份 state** 跨实例恢复;gateLog 有内容且被 checkpoint 的实证在 `loop.e2e.test.ts` 末尾 `final.gateLog` 断言里,可改引它)。两模型一致。
+**M1-residual — `types.ts:66` comment over-claims what checkpoint.test proves**
+- The comment states "phase 2's brand-new instance reads back a `gateLog`-bearing state from disk." But `checkpoint.test.ts` pauses at an **undecided G1**, at which point `gateLog` is still the initial empty array (`checkpoint.test.ts:94` `gateLog: []`), and the test **never asserts gateLog's contents across instances**. The **mechanism-level judgment that gateLog gets persisted via SqliteSaver is correct** (graph.ts:92 configures a checkpointer, and gateLog is an Annotation channel) — it's only the claim that "this specific test proves gateLog's content survives across instances" that over-states things. Fix: soften the wording (what this test proves is that **the entire state** survives across instances; the actual proof that gateLog has content and gets checkpointed is in the `final.gateLog` assertion at the end of `loop.e2e.test.ts` — the comment could reference that instead). Both models agree.
 
-**M2-new — 返工后两处注释仍称 graph.test.ts 用 "toy graph/toy nodes",已过期**
-- `src/loop/graph.ts:9`("`graph.test.ts` deliberately verifies it first, with toy nodes")+ `src/loop.e2e.test.ts:18`("not a toy graph (that's `graph.test.ts`'s job)")。返工已把 graph.test.ts 改成 FakeAdapter-backed 真实图,不再是 toy graph/toy nodes,这两句需同步。文档 staleness。
+**M2-new — two comments post-rework still call graph.test.ts a "toy graph/toy nodes" setup, now stale**
+- `src/loop/graph.ts:9` ("`graph.test.ts` deliberately verifies it first, with toy nodes") + `src/loop.e2e.test.ts:18` ("not a toy graph (that's `graph.test.ts`'s job)"). The rework already changed graph.test.ts to be FakeAdapter-backed against the real graph — it's no longer a toy graph/toy nodes. Both lines need to be updated to match. Documentation staleness.
 
-### ✅ 返工验收(独立核实)
+### ✅ Rework acceptance (independently verified)
 
-- **B1 修的是真图不是又一份复刻**:`graph.test.ts:48` 真 import `buildLoopGraph`/`compileLoopGraph`,五个用例均 `compileLoopGraph(buildLoopGraph(deps), ...)` 驱动真实图;文件内**零** `new StateGraph`/`addNode`/`addConditionalEdges`/`buildToyGraph` 拓扑定义(仅注释/describe 串提及历史)。**大洞已闭**——两模型一致确认"是真图、无残留复刻"。
-- **每条真实条件边的 mis-map 捕获(Zorro R2 变异逐条,决定性)**:
-  - G1 rejected→draft:mis-map `→apply` → "G1 reject once" 用例**行为转红** ✓
-  - G2 approved→draft:mis-map `→apply` → "tester rejects once" 用例**行为转红** ✓
-  - G3 rejected→draft:mis-map `→apply` → "G3 rejects once" 用例行为转红 ✓;**但** mis-map `→g1`(sneaky)→ **全绿**(见 blocker B1-residual)。
-  - review→g2:mis-map `→apply` → 编译期 `UnreachableNodeError`(g2 单一入边被孤立)——**结构校验**捕获(Cypher 自述属实,这是唯一靠结构而非行为断言兜底的边,仍 fail-closed 不可发货)。
-  - happy-path 边(G1 approved→review、review pass→g3、G3 approved→apply):由 happy-path 用例 + e2e/checkpoint 覆盖(R1 已证)。
-- **M1 行为正确**:gateLog 是 concat-reducer 的 Annotation channel(`types.ts:112`),真实图 `graph.ts:92` 配 SqliteSaver → 整份 state 落盘;A4a 无写 A4b `approvals` 表代码。
-- **M2 属实**:fixture 头部已更新为"也被 `src/loop.e2e.test.ts` spawn",e2e 确用它作 `codex-cli` 的 `bin`(`loop.e2e.test.ts:59/121/165`)。
-- **无回归**:`pnpm build`/`pnpm lint` 通过;`pnpm test` **254/254 全绿(30 suites,与 R1 同数——graph.test.ts 仍 5 用例)**;R1 已 PASS 项未破坏——G2 fail-loud(`gates.ts:141` typed error)、四层无反向依赖(grep 零命中)、loop 层零 spawn/fetch(grep 零命中)、垂直切片真接通、checkpoint 非闭包 resume 均仍成立。
-- **FakeTesterAdapter 队列**:先读 `calls` 再 `+=1`,`["reject","pass"]` 顺序正确,无 off-by-one(两模型一致)。
+- **B1's fix is a real graph, not another duplicate**: `graph.test.ts:48` genuinely imports `buildLoopGraph`/`compileLoopGraph`; all five cases drive the real graph via `compileLoopGraph(buildLoopGraph(deps), ...)`; the file contains **zero** `new StateGraph`/`addNode`/`addConditionalEdges`/`buildToyGraph` topology definitions (only comments/describe strings mention the history). **The big hole is closed** — both models independently confirm "this is a real graph, no residual duplicate."
+- **Mis-map capture for every real conditional edge (Zorro's R2 mutations, one by one, decisive)**:
+  - G1 rejected→draft: mis-map `→apply` → the "G1 reject once" case **turns red behaviorally** ✓
+  - G2 approved→draft: mis-map `→apply` → the "tester rejects once" case **turns red behaviorally** ✓
+  - G3 rejected→draft: mis-map `→apply` → the "G3 rejects once" case turns red behaviorally ✓; **but** mis-map `→g1` (sneaky) → **stays fully green** (see blocker B1-residual).
+  - review→g2: mis-map `→apply` → compile-time `UnreachableNodeError` (g2's sole inbound edge is orphaned) — caught by a **structural check** (Cypher's self-report on this is accurate — this is the one edge that relies on structural rather than behavioral assertions, and it's still fail-closed and unshippable).
+  - Happy-path edges (G1 approved→review, review pass→g3, G3 approved→apply): covered by the happy-path case + e2e/checkpoint (already proven in R1).
+- **M1 behavior is correct**: gateLog is a concat-reducer Annotation channel (`types.ts:112`); the real graph in `graph.ts:92` is configured with SqliteSaver → the entire state gets persisted to disk; A4a contains no code that writes to A4b's `approvals` table.
+- **M2 confirmed**: the fixture header now says "also spawned by `src/loop.e2e.test.ts`"; the e2e does indeed use it as the `bin` for `codex-cli` (`loop.e2e.test.ts:59/121/165`).
+- **No regressions**: `pnpm build`/`pnpm lint` pass; `pnpm test` = **254/254 green (30 suites, same count as R1 — graph.test.ts still has 5 cases)**; items already marked PASS in R1 remain intact — G2 fail-loud (`gates.ts:141` typed error), the four-layer no-reverse-dependency (grep zero hits), zero spawn/fetch in the loop layer (grep zero hits), the vertical slice truly wired end-to-end, and checkpoint non-closure-state resume all still hold.
+- **FakeTesterAdapter queue**: reads `calls` before incrementing it; `["reject","pass"]` order is correct, no off-by-one (both models agree).
 
-### 七道门(R2)
+### The seven gates (R2)
 
-- 需求贴合 **[✗]**(B1-residual:PRD §8:267 的"每条分支被测试实际走过"精神——G3-reject 分支虽走过但 mis-map 未锁死,与姊妹用例不一致) · 影响范围 **[✓]** · 占位符拒收 **[✓]** · 危险代码 **[✓]** · 幻觉核查 **[✗]**(M1-residual 注释过度声明) · 文档齐套 **[✓]**(M2 是注释 staleness,非缺失) · 文档同步(仅大设计级)**[N.A.]**
+- Requirement alignment **[✗]** (B1-residual: the spirit of PRD §8:267's "every branch actually exercised by a test" — the G3-reject branch was exercised but not locked against mis-map, inconsistent with its siblings) | Blast radius **[✓]** | Placeholder rejection **[✓]** | Dangerous code **[✓]** | Hallucination check **[✗]** (M1-residual: comment over-claim) | Documentation completeness **[✓]** (M2 is comment staleness, not a missing item) | Documentation sync (major-design-doc level only) **[N.A.]**
 
-### 📚 知识库(R2 核对)
+### 📚 Knowledge base (R2 verification)
 
-- 知识库 `CHARTS/knowledge/aeloop.md` graph.ts 条目那句"graph.test.ts 本地复刻拓扑、不调 buildLoopGraph"Cypher 已按返工同步(改成"直接调真实 buildLoopGraph 驱动")—— 核对与真实 graph.test.ts 一致 **[✓]**,无新悬空引用。
+- The knowledge base `CHARTS/knowledge/aeloop.md`'s graph.ts entry line "graph.test.ts re-implements the topology locally, doesn't call buildLoopGraph" has been synced by Cypher as part of the rework (now reads "directly calls the real buildLoopGraph to drive it") — verified consistent with the real graph.test.ts **[✓]**, no new dangling references.
 
-### R2 判定小结
+### R2 verdict summary
 
-R1 的 blocker(真实图**完全**无测试)**已修**;剩一条**收窄的** blocker(G3-reject 单条边的 sneaky mis-map 未被行为断言锁死)+ 2 minor 注释问题。**修法都是一行到几行级,无生产逻辑改动**(生产 `graph.ts` 本轮一行未动,R1 的 Codex 二签 `09a322c1…` 已覆盖其生产逻辑)。Cypher 补齐 G3-reject 用例的 `coder.calls===2` 断言 + 两处注释 → Zorro R3 只需重跑 G3 `draft→g1` 变异确认转红即可闭环。**未经指挥官审批不 commit / 不 merge。**
+R1's blocker (the real graph had **zero** test coverage) **is fixed**; one **narrowed** blocker remains (the sneaky mis-map on the single G3-reject edge isn't locked down by a behavioral assertion) + 2 minor comment issues. **The fixes are all one-line-to-few-line level, with zero production logic changes** (production `graph.ts` was not touched at all this round; R1's Codex double-sign-off `09a322c1…` already covers its production logic). Once Cypher adds the `coder.calls===2` assertion to the G3-reject case + fixes the two comments → Zorro Round 3 only needs to re-run the G3 `draft→g1` mutation to confirm it turns red, and this closes the loop. **No commit / no merge without the commander's approval.**
 
 ---
 ---
 
-# Round 3 复审(闭环)
+# Round 3 Review (closing the loop)
 
-> Cypher 按 R2 报告修三条(B1-residual blocker + M1 + M2)。Zorro 聚焦闭环,独立核实,不采信自述。分支 `feature/issue-13-a4a-loop`,审前 HEAD `539f650`,未 commit。
+> Cypher fixed the three items per the R2 report (B1-residual blocker + M1 + M2). Zorro focused on closure, independently verified, did not take self-reports at face value. Branch `feature/issue-13-a4a-loop`, HEAD before review `539f650`, not committed.
 
-## R3 结论:**PASS** ✅ — A4a 闭环
+## R3 verdict: **PASS** ✅ — A4a closed
 
-- 三条(1 blocker + 2 minor)全部修实并经变异/代码核验;build/lint/`pnpm test` **254/254 全绿**;工作区 byte-identical 复原。
+- All three items (1 blocker + 2 minor) genuinely fixed and verified via mutation/code inspection; build/lint/`pnpm test` **254/254 green**; working tree restored byte-identical.
 
-## Codex R3:**免二签**(如实标注理由,未假装拿到 sha)
+## Codex R3: **double sign-off waived** (reason stated honestly, no fabricated sha claimed)
 
-R3 改动**纯测试断言 + 注释级,生产逻辑零变更**:
-- 亲自 `git diff` 生产 `graph.ts`:与 R2 后**逐字一致,仅 line 9-12 注释块**改了措辞(把 "with toy nodes" 更新为 "driving this file's real buildLoopGraph()/compileLoopGraph() with FakeAdapter-backed deps");`addNode`/`addEdge`/四个 `addConditionalEdges` 的 pathMap 目标**一字未动**。
-- R2 的 Codex 二签 `ce3fa5486d4c0a762ce1a651388545344aec3a252782cbad4e5329b6fb6962ec`(非空)已对这份**未变的**生产逻辑做过独立审查。
-- B1-residual 的修复是**测试断言补强**,其闭合与否由**确定性变异测试**判定(G3 `draft→g1` → `expected 1 to be 2`),这是 model-independent 的客观检验,不是需要第二个模型的判断题。
+R3's changes are **test-assertion + comment level only, zero production logic changes**:
+- Personally ran `git diff` on production `graph.ts`: **byte-identical** to post-R2, except lines 9-12's comment block, whose wording changed (from "with toy nodes" to "driving this file's real buildLoopGraph()/compileLoopGraph() with FakeAdapter-backed deps"); the `addNode`/`addEdge`/the four `addConditionalEdges`' pathMap targets are **unchanged, character for character**.
+- R2's Codex double sign-off `ce3fa5486d4c0a762ce1a651388545344aec3a252782cbad4e5329b6fb6962ec` (non-empty) already independently reviewed this **unchanged** production logic.
+- The B1-residual fix is a **test-assertion strengthening**, and whether it's actually closed is determined by a **deterministic mutation test** (G3 `draft→g1` → `expected 1 to be 2`) — this is a model-independent, objective check, not a judgment call that needs a second model.
 
-据此免发 R3 Codex(经军师授权:生产逻辑未变 + R2 二签已覆盖 + R3 纯测试/注释)。**未拿到 R3 sha,不伪造**;A4a 全程的独立二签证据是 R1 `09a322c1…`(覆盖初版生产逻辑)+ R2 `ce3fa54…`(覆盖返工后未变的生产逻辑)两份真实签名。
+On this basis, R3's Codex run is waived (authorized by the strategist: production logic unchanged + R2's double sign-off already covers it + R3 is pure test/comment). **No R3 sha was obtained, and none is fabricated**; A4a's independent double-sign-off evidence across all rounds is the two genuine signatures R1 `09a322c1…` (covering the initial production logic) + R2 `ce3fa54…` (covering the post-rework, unchanged production logic).
 
-## R3 决定性核验(Zorro 亲跑,沙箱外真跑)
+## R3 decisive verification (Zorro ran these personally, outside the sandbox)
 
-### ✅ B1-residual 已闭合(决定性)
-- **变异**:真实 `graph.ts:84` `draft: LOOP_NODES.draft` → `draft: LOOP_NODES.g1`(R2 揭出的 sneaky mis-map:跳过 coder 重绘、仍停 g1)。
-- **结果**:"G3 rejects once" 用例**转红**,报 `AssertionError: expected 1 to be 2`——命中 Cypher 新加的 `expect(coder.calls).toBe(2)`(`graph.test.ts:266`,+ 打回前基线 `toBe(1)` line 258)。R2 时同一变异全绿漏检,现已锁死。改坏→确认红→复原 byte-identical。
+### ✅ B1-residual closed (decisive)
+- **Mutation**: real `graph.ts:84` `draft: LOOP_NODES.draft` → `draft: LOOP_NODES.g1` (the sneaky mis-map surfaced in R2: skips the coder re-draft, still stops at g1).
+- **Result**: the "G3 rejects once" case **turns red**, reporting `AssertionError: expected 1 to be 2` — caught by the new `expect(coder.calls).toBe(2)` Cypher added (`graph.test.ts:266`, + the pre-reject baseline `toBe(1)` on line 258). In R2, this same mutation slipped through all-green undetected; it is now locked down. Broke it → confirmed red → restored byte-identical.
 
-### ✅ loud 变异无退化(regression 扫)
-G1/G2/G3 三条 reject 边同时 mis-map `→apply` → 三个对应用例(G1-reject / tester-rejects / G3-reject)各自**行为转红**,无 `UnreachableNodeError`,无退化。复原 byte-identical。
+### ✅ No regression from the loud mutations (regression sweep)
+All three G1/G2/G3 reject edges simultaneously mis-mapped to `→apply` → the three corresponding cases (G1-reject / tester-rejects / G3-reject) each **turn red behaviorally**, no `UnreachableNodeError`, no regression. Restored byte-identical.
 
-### ✅ 生产 graph.ts 仅注释改动
-`diff /tmp/graph.r2.bak src/loop/graph.ts` = 仅 line 9-10→9-12 注释块;pathMap/边逐字一致。Cypher"只改注释"自述**亲自 diff 核实属实**,未蒙混。
+### ✅ Production graph.ts changed only in comments
+`diff /tmp/graph.r2.bak src/loop/graph.ts` = only the lines 9-10→9-12 comment block; pathMap/edges are character-for-character identical. Cypher's self-report of "only changed comments" **personally verified via diff**, no misrepresentation.
 
-### ✅ M1 注释与真实行为一致(幻觉门过)
-`types.ts:62-72` 改后措辞:checkpoint.test 的两阶段 resume 证明的是"whole state survives",其 interrupt 点在**未决 G1、gateLog 仍 `[]`**,从不断言 gateLog 内容;真正验证 gateLog 内容跨 checkpoint 的是 `loop.e2e.test.ts` 末尾 `final.gateLog` 断言。**核实**:`loop.e2e.test.ts:189-190` 确有 `final.gateLog.filter(entry => entry.gate === "G1_SEND_TO_TESTER"/"G3_FINAL_MERGE")` 对 G1/G3 条目的断言。措辞与代码/测试行为一致,不再过度声明。
+### ✅ M1 comment now matches real behavior (hallucination gate passes)
+`types.ts:62-72`'s revised wording: what checkpoint.test's two-phase resume proves is that "the whole state survives"; its interrupt point is at an **undecided G1, gateLog still `[]`**, and it never asserts gateLog's contents. What actually verifies gateLog's content surviving across a checkpoint is `loop.e2e.test.ts`'s final `final.gateLog` assertions. **Verified**: `loop.e2e.test.ts:189-190` does indeed assert on `final.gateLog.filter(entry => entry.gate === "G1_SEND_TO_TESTER"/"G3_FINAL_MERGE")` entries for G1/G3. Wording now matches the actual code/test behavior, no longer over-claiming.
 
-### ✅ M2 注释更新属实
-`graph.ts:9-12` + `loop.e2e.test.ts:18` 的"toy graph/toy nodes"过期措辞已更新(graph.ts 改成"driving real buildLoopGraph with FakeAdapter-backed deps";e2e 改成"driven here with real subprocess-backed ModelAdapters, not FakeAdapter-backed deps that's graph.test.ts/checkpoint.test.ts's job")。与返工后 graph.test.ts 真实形态一致。
+### ✅ M2 comment updates confirmed
+The stale "toy graph/toy nodes" wording in `graph.ts:9-12` + `loop.e2e.test.ts:18` has been updated (graph.ts now reads "driving real buildLoopGraph with FakeAdapter-backed deps"; e2e now reads "driven here with real subprocess-backed ModelAdapters, not FakeAdapter-backed deps — that's graph.test.ts/checkpoint.test.ts's job"). Consistent with graph.test.ts's real post-rework shape.
 
-### ✅ 无回归
-`pnpm build`(tsc strict + noUncheckedIndexedAccess)= 通过;`pnpm lint` = 通过;`pnpm test` = **254/254 全绿(30 suites)**。
+### ✅ No regressions
+`pnpm build` (tsc strict + noUncheckedIndexedAccess) = passes; `pnpm lint` = passes; `pnpm test` = **254/254 green (30 suites)**.
 
-## 七道门(R3,全过)
+## The seven gates (R3, all pass)
 
-- 需求贴合 **[✓]**(PRD §8:267 真实图每条条件边 mis-map 均被捕获:3 条 reject 边行为断言锁死 + review→g2 结构校验兜底 + happy-path 边由 e2e/checkpoint 覆盖) · 影响范围 **[✓]** · 占位符拒收 **[✓]** · 危险代码 **[✓]** · 幻觉核查 **[✓]**(M1/M2 注释均已与真实行为对齐) · 文档齐套 **[✓]** · 文档同步(仅大设计级)**[N.A.]**
+- Requirement alignment **[✓]** (PRD §8:267: every conditional edge of the real graph has its mis-map caught: 3 reject edges locked by behavioral assertions + review→g2 backstopped by structural checking + happy-path edges covered by e2e/checkpoint) | Blast radius **[✓]** | Placeholder rejection **[✓]** | Dangerous code **[✓]** | Hallucination check **[✓]** (M1/M2 comments now both match real behavior) | Documentation completeness **[✓]** | Documentation sync (major-design-doc level only) **[N.A.]**
 
-## 📚 知识库(R3)
+## 📚 Knowledge base (R3)
 
-未再触及知识库改动;R2 已确认 `CHARTS/knowledge/aeloop.md` graph.ts 条目与真实 graph.test.ts 一致,本轮生产/测试形态无使其漂移的变化 **[✓]**。
+No further knowledge-base changes touched this round; R2 already confirmed `CHARTS/knowledge/aeloop.md`'s graph.ts entry matches the real graph.test.ts, and there is no production/test shape change this round that would cause drift **[✓]**.
 
-## A4a 最终判定
+## A4a final verdict
 
-**PASS。** 经三轮对抗式复审(R1 FAIL→R2 FAIL→R3 PASS):真实图 `buildLoopGraph()`/`compileLoopGraph()` 的每一条 `addConditionalEdges` 分支(含所有 reject/fix-forward 回边)现均被真实图驱动的行为测试锁死,任一 pathMap mis-map(loud 或 sneaky)都会被捕获;垂直切片真接通、四层无反向依赖、loop 层零 spawn/fetch、checkpoint 非闭包 resume、G2 fail-loud 均成立;254/254 测试绿;跨模型二签 R1 `09a322c1…` + R2 `ce3fa54…` 覆盖生产逻辑演进,R3 纯测试/注释免签(已如实标注)。工作区 byte-identical 复原,HEAD 仍 `539f650`,未 commit/push/merge。**交指挥官终批 → 批准后方可 commit/merge。**
+**PASS.** After three rounds of adversarial review (R1 FAIL→R2 FAIL→R3 PASS): every `addConditionalEdges` branch of the real graph `buildLoopGraph()`/`compileLoopGraph()` (including every reject/fix-forward return edge) is now locked down by behavioral tests driven against the real graph, and any pathMap mis-map (loud or sneaky) will be caught; the vertical slice is genuinely wired end-to-end, the four-layer no-reverse-dependency holds, the loop layer has zero spawn/fetch, checkpoint non-closure-state resume holds, G2 fail-loud holds; 254/254 tests green; cross-model double sign-off R1 `09a322c1…` + R2 `ce3fa54…` covers the evolution of production logic, R3 is pure test/comment and its sign-off was waived (stated honestly above). Working tree restored byte-identical, HEAD still `539f650`, not committed/pushed/merged. **Handed to the commander for final approval → only after approval may it be committed/merged.**

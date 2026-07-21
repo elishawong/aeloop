@@ -93,7 +93,7 @@ export function resolveProfileDir(profile: string, profilesRoot: string = PROFIL
  * `profilesRoot` is an injection point for tests; production callers
  * should omit it and rely on the package-relative default.
  *
- * **Path safety** (Zorro review, feature/issue-1-a0-a1-scaffold): `profile`
+ * **Path safety** (review, feature/issue-1-a0-a1-scaffold): `profile`
  * is checked against `../shared/safe-path.js` *before* it ever reaches
  * `path.join` — a traversal string like `"../../../CLAUDE"` or an absolute
  * path throws typed `InvalidProfileNameError` rather than resolving to a
@@ -146,7 +146,7 @@ export function loadProfile(
 
 /**
  * Minimal required-field check before handing `parsed` off as a
- * `ProfileConfig` (Zorro review, feature/issue-1-a0-a1-scaffold: the prior
+ * `ProfileConfig` (review, feature/issue-1-a0-a1-scaffold: the prior
  * code did a bare `as ProfileConfig` cast right after confirming the YAML
  * root is *a* mapping — a `config.yaml` missing `providers`/`roles`
  * entirely, or with `profile` as a number, would sail through as `ok:
@@ -155,10 +155,11 @@ export function loadProfile(
  * have the right *outer* shape (string / mapping), not that every nested
  * field inside `providers`/`roles` is well-formed. Full schema validation
  * belongs to the layer that actually consumes those nested shapes (the
- * Harness layer, A2+, per PRD §5's note that this loader "只需解析出结
- * 构"), not this loader — confirmed implemented as of A2's Zorro round-1
- * fix: `harness/config.ts`'s `assertValidProviderConfig()` is that
- * validation for `providers[id]` entries (null/non-object entries,
+ * Harness layer, A2+, per PRD §5's note that this loader "only needs to
+ * parse out the structure"), not this loader — confirmed implemented as of
+ * A2's Review Round-1 fix: `harness/config.ts`'s
+ * `assertValidProviderConfig()` is that validation for `providers[id]`
+ * entries (null/non-object entries,
  * non-string `base_url`, unrecognized `kind` all throw typed
  * `InvalidProviderConfigError` there, not here).
  */

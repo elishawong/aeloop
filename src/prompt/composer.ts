@@ -1,6 +1,6 @@
 /**
  * `PromptComposer` — the piece that actually builds "a well-formed prompt"
- * (docs/DESIGN.md §1.5's Prompt-layer row: "← Context 的记忆;→ 一个
+ * (docs/DESIGN.md §1.5's Prompt-layer row: "← Context's memories; → a
  * well-formed prompt"). Takes a role name, an already-injected/filtered
  * context (`ContextInjector`'s output, B5), and a task description, and
  * produces the final prompt string: persona text + (when this role has one)
@@ -16,7 +16,8 @@
  * `rejected` memories are never handled here — by the time a
  * `ContextInjectionResult` reaches this module, `ContextInjector` (B5) has
  * already dropped every `confidence_state === "rejected"` memory (PRD §5:
- * "rejected 已被上游滤掉,不需要 composer 重复过滤"). This module trusts
+ * "rejected has already been filtered out upstream — composer doesn't need
+ * to filter it again"). This module trusts
  * that contract and renders whatever it's handed, whole — see
  * `composer.test.ts`'s "does not re-filter" case for what that means in
  * practice: even a hand-built injection result smuggling in a

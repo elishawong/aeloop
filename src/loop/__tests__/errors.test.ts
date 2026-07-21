@@ -5,7 +5,7 @@
  * this file locks the *message text itself*, which that test doesn't
  * assert on.
  *
- * Zorro Round-3 R3-1 (`docs/feature/a4b-loop/test-report.md`, R4-1
+ * Review Round-3 R3-1 (`docs/feature/a4b-loop/test-report.md`, R4-1
  * rework): the thrown message used to say `"...which A4a has no routing
  * target for (A4b will add one — see ...)"` — accurate in A4a's own
  * increment, but false once A4b actually shipped: A4b built the

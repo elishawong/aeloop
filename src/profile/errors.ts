@@ -54,7 +54,7 @@ function describeCause(cause: unknown): string {
 
 /**
  * `profile` failed one of the two path-safety checks in
- * `../shared/safe-path.js` (Zorro review, feature/issue-1-a0-a1-scaffold:
+ * `../shared/safe-path.js` (review, feature/issue-1-a0-a1-scaffold:
  * the same path-traversal hole found in `prompt/personas.ts`'s role
  * lookup — `profile` was `path.join`-ed straight into
  * `profilesRoot/<profile>/config.yaml` with no containment check). Distinct

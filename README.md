@@ -2,7 +2,12 @@
 
 **Model-agnostic, governance-first coder/tester engine.**
 
-Four nested layers — **Prompt ⊂ Context ⊂ Harness ⊂ Loop** — plus a profile overlay, so one engine powers two faces: **Helix** (personal subscription, claude/codex CLI) and **Verity** (company LiteLLM proxy) — corresponding to the `subscription` and `apikey` profiles, respectively. Neither is a submodule; both are *profiles* on aeloop.
+Four nested layers — **Prompt ⊂ Context ⊂ Harness ⊂ Loop** — plus a profile
+overlay, so one engine powers two profiles: a **personal subscription
+profile** (claude-cli / codex-cli, CLI bridge) and a **company API /
+LiteLLM profile** (LiteLLM proxy) — corresponding to the `subscription` and
+`apikey` overlays, respectively. Neither is a submodule; both are *profiles*
+on aeloop.
 
 ## Why
 
@@ -12,6 +17,28 @@ Four nested layers — **Prompt ⊂ Context ⊂ Harness ⊂ Loop** — plus a pr
 
 ## Status
 
-Pre-spec. This repo currently holds project scaffolding only; the engine `src/` is built via the standard spec → build → independent-review flow.
+A0 through A4b are complete: all four engine layers (Prompt, Context,
+Harness, Loop) are implemented, plus the profile/overlay mechanism.
+**300 tests passing** across 34 test files; `pnpm lint` (`tsc --noEmit`) and
+`pnpm build` are both clean. Remaining milestones are **A5 (CLI/TUI)** and
+**A6 (dual-profile acceptance run)** — see [`docs/ROADMAP.md`](./docs/ROADMAP.md)
+for the full milestone-by-milestone breakdown.
 
-See [`docs/DESIGN.md`](./docs/DESIGN.md) for the full design, [`CLAUDE.md`](./CLAUDE.md) for repo conventions.
+## Getting started
+
+```sh
+pnpm install
+cp .env.example .env   # set AI_AGENT_PROFILE and, for the apikey profile, LITELLM_BASE_URL/LITELLM_TOKEN
+pnpm test
+pnpm build
+```
+
+## Documentation
+
+- [`docs/DESIGN.md`](./docs/DESIGN.md) — full design: architecture, sequence diagrams, DB schema, file structure, milestones.
+- [`docs/ROADMAP.md`](./docs/ROADMAP.md) — milestone-by-milestone progress.
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — tech stack, project layout, commands, PR expectations.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md).

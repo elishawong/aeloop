@@ -1,11 +1,13 @@
 /**
- * Role → output-schema registry, kept **outside** `composer.ts` (Zorro
- * review, feature/issue-1-a0-a1-scaffold): the prior implementation defined
+ * Role → output-schema registry, kept **outside** `composer.ts` (review,
+ * feature/issue-1-a0-a1-scaffold): the prior implementation defined
  * `OUTPUT_SCHEMAS = { coder: CoderOutput, tester: TesterOutput }` as a
- * private constant inside `composer.ts` itself — that's the exact "硬编码
- * {coder,tester}" shape DESIGN §1.7 calls out for *personas* ("不用 Verity
- * 那个硬编码 {coder,tester} Record"), just repeated one layer over for
- * schemas. Registering a new role's schema now means building a
+ * private constant inside `composer.ts` itself — that's the exact "hardcoded
+ * {coder,tester}" shape DESIGN §1.7 calls out for *personas* ("persona/schema
+ * is looked up dynamically by role name via the registry, instead of the
+ * hardcoded `{coder,tester}` Record a prior internal implementation used —
+ * adding a role doesn't require touching the composer"), just repeated one
+ * layer over for schemas. Registering a new role's schema now means building a
  * `SchemaRegistry` object at the call site (e.g. `{
  * ...DEFAULT_OUTPUT_SCHEMAS, reviewer: ReviewerOutput }`) and passing it
  * into `PromptComposer`'s constructor — never editing this file or
@@ -19,7 +21,7 @@
  * the latter — an unregistered role is very likely a caller mistake (a new
  * role added to `personas/` whose schema wiring was simply forgotten), and
  * the previous silent-omit behavior is exactly what let that mistake pass
- * unnoticed (PRD §5 / Zorro review: "未知角色静默丢契约").
+ * unnoticed (PRD §5 / review: "unknown roles silently drop the contract").
  */
 import type { z } from "zod";
 import { CoderOutput, TesterOutput } from "./schema.js";

@@ -33,8 +33,9 @@ export type GateType = (typeof GATE_TYPES)[keyof typeof GATE_TYPES];
 /**
  * DESIGN §5 `approvals.decision` set. A4a shipped only `"approved" |
  * "rejected"`; A4b (PRD §4.1) adds the third value `"escalate"` —
- * `routeAfterG2`'s "主动升级→Esc" edge (DESIGN §4's `G2-- 主动升级 -->Esc`)
- * is the only router that recognizes it. `routeAfterG1`/`routeAfterG3`
+ * `routeAfterG2`'s "Proactively escalate→Esc" edge (DESIGN §4's
+ * `G2-- Proactively escalate -->Esc`) is the only router that recognizes
+ * it. `routeAfterG1`/`routeAfterG3`
  * never produce or expect it — receiving it would fall through to their
  * existing `default: throw` branches, same as any other unrecognized
  * value (A4b PRD §4.1's explicit note: this is not a new gap, it's the
@@ -65,10 +66,11 @@ export interface GateResumeValue {
 }
 
 /**
- * DESIGN §4's `HD`("人工决定") node's three out-edges, verbatim
- * (A4b PRD §4.1: "字面对应 DESIGN §4 状态图 HD 节点画出的三条出边...不是我
- * 发明的第四套词汇"): `"revise"` → back to `Draft` ("改码/重述"),
- * `"force_pass"` → `G3` ("强制通过"), `"abandon"` → `Cancel` ("放弃").
+ * DESIGN §4's `HD` ("Human Decision") node's three out-edges, verbatim
+ * (A4b PRD §4.1: "literally corresponds to the three out-edges drawn from
+ * DESIGN §4's state diagram HD node...not a fourth vocabulary I
+ * invented"): `"revise"` → back to `Draft` ("revise code/restate"),
+ * `"force_pass"` → `G3` ("force pass"), `"abandon"` → `Cancel` ("abandon").
  */
 export type EscalationDecision = "revise" | "force_pass" | "abandon";
 
@@ -123,8 +125,9 @@ export interface GateLogEntry {
  * summarize; the PRD is the source of truth for *why*).
  *
  * `injectedContext` is populated **once, outside the graph**, by whoever
- * calls `compiled.invoke()` the first time (PRD §4/§5's "为什么不在节点里
- * 重复调用 ContextInjector" — `nodes/coder.ts`/`nodes/tester.ts` only ever
+ * calls `compiled.invoke()` the first time (PRD §4/§5's "why not call
+ * ContextInjector repeatedly inside the node" — `nodes/coder.ts`/
+ * `nodes/tester.ts` only ever
  * import `ContextInjectionResult`'s *type*, never the `ContextInjector`
  * class itself, so this layer has no reverse dependency on `context/`'s
  * implementation).
@@ -156,7 +159,7 @@ export const LoopState = Annotation.Root({
    * This run's reject-count threshold, injected once outside the graph —
    * same "external, unchanging for the whole run" status as
    * `injectedContext` (A4b PRD §4.1). `runner.ts` is the layer responsible
-   * for computing the actual number handed in here (PRD §9.2 决策2's
+   * for computing the actual number handed in here (PRD §9.2 Decision 2's
    * config.yaml → system_config → hardcoded-2 priority chain); the graph
    * itself only ever reads it, never derives it.
    */

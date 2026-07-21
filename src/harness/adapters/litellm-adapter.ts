@@ -55,7 +55,7 @@ function describeCause(cause: unknown): string {
 
 /**
  * Strips trailing slashes so `${base_url}/chat/completions` never produces
- * a doubled `//` (PRD §5 / §8.5#6 — Verity's real-world footgun when
+ * a doubled `//` (PRD §5 / §8.5#6 — a prior internal implementation's real-world footgun when
  * `base_url` is configured with a trailing slash).
  */
 function normalizeBaseUrl(baseUrl: string): string {
@@ -141,7 +141,7 @@ export class LiteLLMAdapter implements ModelAdapter {
     // connection that dies mid-body (truncated chunked response, server
     // process killed after headers) makes undici reject `.text()` with a
     // bare `TypeError` ("terminated"/"aborted"), not a `SyntaxError`. That
-    // has to land inside this try/catch too (Zorro round-1 blocker 1),
+    // has to land inside this try/catch too (Review Round-1 blocker 1),
     // otherwise it would escape `invoke()` as an untyped error and break
     // `errors.ts:22-27`'s "adapters only ever throw AdapterInvokeError"
     // contract.
@@ -181,7 +181,7 @@ export class LiteLLMAdapter implements ModelAdapter {
   }
 
   /**
-   * Real network probe (PRD §5 / §8.5 "列表可见≠可调用") — `GET
+   * Real network probe (PRD §5 / §8.5 "listed ≠ callable") — `GET
    * ${base_url}/health/liveliness`, LiteLLM's documented no-auth,
    * no-upstream-call liveness endpoint (see file header). Never degrades
    * into a config-presence check when `base_url` *is* configured; the only
@@ -252,7 +252,7 @@ export class LiteLLMAdapter implements ModelAdapter {
    * practice (`config.ts` always passes the provider's own map key as
    * `id`) — but `InvokeResult.provider` carries the same non-empty
    * invariant as `.model` (`types.ts:72`), so it gets the same runtime
-   * guard rather than trusting the type alone (Zorro round-1 blocker 2).
+   * guard rather than trusting the type alone (Review Round-1 blocker 2).
    */
   private requireProviderId(): string {
     if (typeof this.id !== "string" || this.id.trim().length === 0) {

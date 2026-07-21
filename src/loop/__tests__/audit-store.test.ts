@@ -137,7 +137,7 @@ describe("AuditStore — workflow_runs", () => {
   });
 
   /**
-   * Zorro Round-2 R2-4 (`docs/feature/a4b-loop/test-report.md`):
+   * Review Round-2 R2-4 (`docs/feature/a4b-loop/test-report.md`):
    * `langgraph_thread_id` had no uniqueness constraint at all — theoretically
    * two `workflow_runs` rows could share the same thread_id, which would let
    * a mismatched `resumeRun(B.runId, A.threadId)` call pass `runner.ts`'s B2
@@ -277,7 +277,7 @@ describe("AuditStore — structured_claims / approvals foreign keys", () => {
     ).toThrow(/FOREIGN KEY constraint failed/i);
   });
 
-  it("ESCALATION_ACK approvals row stores the literal EscalationDecision value, not a remapped approved/rejected/override word (PRD §9.2 决策5)", () => {
+  it("ESCALATION_ACK approvals row stores the literal EscalationDecision value, not a remapped approved/rejected/override word (PRD §9.2 Decision 5)", () => {
     const audit = openStore();
     const run = audit.insertRun(
       {
@@ -305,7 +305,7 @@ describe("AuditStore — structured_claims / approvals foreign keys", () => {
 });
 
 /**
- * Zorro Round-4 R5-B2 (`docs/feature/a4b-loop/test-report.md`): neither
+ * Review Round-4 R5-B2 (`docs/feature/a4b-loop/test-report.md`): neither
  * `approvals` nor `step_markers` had any uniqueness constraint on
  * `(run_id, step_ref)` — Codex's concurrency probe demonstrated that two
  * concurrent `resumeRun()` calls resuming the same run (e.g. one `approve`

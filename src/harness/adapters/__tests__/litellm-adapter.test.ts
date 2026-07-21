@@ -7,7 +7,7 @@ import { LiteLLMAdapter } from "../litellm-adapter.js";
 
 /**
  * Local `node:http` fake server standing in for a LiteLLM proxy — no real
- * network, no third-party mock library (PRD §5's "真实但受控" testing
+ * network, no third-party mock library (PRD §5's "real but controlled" testing
  * philosophy, same one A1's tests use). Every request the server receives
  * is recorded in `requests` so tests can assert on method/url/headers, not
  * just on `LiteLLMAdapter`'s return value.
@@ -154,7 +154,7 @@ describe("LiteLLMAdapter", () => {
     expect(recorded?.headers.authorization).toBeUndefined();
   });
 
-  it("invoke(): a response body that dies mid-read (connection reset *after* headers are received) is thrown as AdapterInvokeError from the body-read path specifically, not a raw TypeError (Zorro round-1 blocker 1 / round-2: the original version raced the socket destroy against the client's TCP read, so it could fall into the *request-level* catch (litellm-adapter.ts:117-131) instead of the body-read catch (:148-156) this test exists to guard — a mutation test proved that version stayed green even with the round-1 fix reverted / round-3→round-4: replaced the `setTimeout(50)` time-based race — which could still fire before the client actually received headers under CI load, producing a flaky false-red — with a happens-before handshake: `globalThis.fetch` is wrapped so the server socket is destroyed only *after* the real `fetch()` call has resolved, i.e. only once the client has deterministically already received the response headers)", async () => {
+  it("invoke(): a response body that dies mid-read (connection reset *after* headers are received) is thrown as AdapterInvokeError from the body-read path specifically, not a raw TypeError (Review Round-1 blocker 1 / round-2: the original version raced the socket destroy against the client's TCP read, so it could fall into the *request-level* catch (litellm-adapter.ts:117-131) instead of the body-read catch (:148-156) this test exists to guard — a mutation test proved that version stayed green even with the round-1 fix reverted / round-3→round-4: replaced the `setTimeout(50)` time-based race — which could still fire before the client actually received headers under CI load, producing a flaky false-red — with a happens-before handshake: `globalThis.fetch` is wrapped so the server socket is destroyed only *after* the real `fetch()` call has resolved, i.e. only once the client has deterministically already received the response headers)", async () => {
     // Deterministic happens-before handshake (no timers): wrap the global
     // `fetch` that `LiteLLMAdapter.invoke()` calls so the server-side
     // socket is destroyed *after* `originalFetch()` resolves. `fetch()`
@@ -220,7 +220,7 @@ describe("LiteLLMAdapter", () => {
     }
   });
 
-  it("invoke(): a successful response with \"model\": \"\" falls back to the configured model — InvokeResult.model is never empty-string (Zorro round-1 blocker 2)", async () => {
+  it("invoke(): a successful response with \"model\": \"\" falls back to the configured model — InvokeResult.model is never empty-string (Review Round-1 blocker 2)", async () => {
     activeServer = await startFakeServer((_req, res) => {
       sendJson(res, 200, {
         model: "",
@@ -242,7 +242,7 @@ describe("LiteLLMAdapter", () => {
     expect(result.provider).not.toBe("");
   });
 
-  it("invoke(): a successful response with \"model\": \"   \" (whitespace-only) also falls back to the configured model — extractModel()'s blank check isn't just an empty-string check (P2 follow-up to Zorro round-1 blocker 2)", async () => {
+  it("invoke(): a successful response with \"model\": \"   \" (whitespace-only) also falls back to the configured model — extractModel()'s blank check isn't just an empty-string check (P2 follow-up to Review Round-1 blocker 2)", async () => {
     activeServer = await startFakeServer((_req, res) => {
       sendJson(res, 200, {
         model: "   ",

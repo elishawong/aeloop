@@ -65,8 +65,9 @@ export interface MemoryConfidencePatch {
  *
  * Takes an explicit `dbPath` (a file path, or `":memory:"` for tests).
  * This increment does not wire it to `profile/loader.ts` (PRD §6 B2 note:
- * "需要 profile 决定 db 路径约定,但 store 本身可先用显式路径参数实现,不强
- * 耦合 profile") — that wiring belongs to a later increment.
+ * "profile needs to decide the db path convention, but store itself can
+ * first be implemented with an explicit path parameter, without tightly
+ * coupling to profile") — that wiring belongs to a later increment.
  *
  * **Error-wrapping convention** (PRD §8 acceptance criteria): every *read*
  * method (`getMemoryById`/`listMemories`/`searchMemories`/

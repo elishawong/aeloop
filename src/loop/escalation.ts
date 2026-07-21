@@ -6,7 +6,7 @@
  * (`EscalationDecision`: `"revise" | "force_pass" | "abandon"`), a
  * *disjoint* domain from `GateResumeValue` (`GateDecision`:
  * `"approved" | "rejected" | "escalate"`, as of A4b — see gates.ts's
- * routers' header comment, Zorro Round-1 M3) that `createGateNode()`'s
+ * routers' header comment, Review Round-1 M3) that `createGateNode()`'s
  * type signature assumes, and it writes back a single `escalationDecision`
  * field rather than choosing among `g1Decision`/`g2Decision`/`g3Decision`
  * via `createGateNode()`'s `decisionField` switch. Generalizing the shared

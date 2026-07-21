@@ -1,13 +1,13 @@
-# aeloop 在途看板 (Backlog Mirror)
+# aeloop In-Progress Board (Backlog Mirror)
 
-> 📌 本 repo **GitHub Issues 的离线镜像**。真相在 Issues(`gh issue list --repo elishawong/aeloop`)。
-> 📏 **防膨胀**:只镜像「在途/待办」。做完即删(Issue 关掉即真相,不留尸)。idea 未过指挥官不进。
-> 规则见 [docs/README.md §2](./README.md)。
+> 📌 This repo's **offline mirror of GitHub Issues**. The source of truth is Issues (`gh issue list --repo elishawong/aeloop`).
+> 📏 **Anti-bloat**: only mirrors "in progress/to do" items. Deleted as soon as done (closing the Issue is the source of truth — no leftover corpses here). Ideas that haven't been approved by the commander don't get added.
+> Rules in [docs/README.md §2](./README.md).
 
-## 在途 / 待办(过了指挥官分诊的)
-| 优先级 | 标题 | 状态 | Issue |
+## In Progress / To Do (triaged and approved by the commander)
+| Priority | Title | Status | Issue |
 |---|---|---|---|
-| P2 | Conductor 层(最外层对话协调) | 已定方向,排期 **A6 之后**,当前不进代码 | [#2](https://github.com/elishawong/aeloop/issues/2) |
+| P2 | Conductor layer (outermost conversation coordination) | Direction decided, scheduled **after A6**, no code work right now | [#2](https://github.com/elishawong/aeloop/issues/2) |
 
-## inbox idea(未过指挥官,不算在途,仅记录)
-_（随手 `gh issue create --label idea --repo elishawong/aeloop`,过指挥官分诊后才升到上面看板。）_
+## Inbox Ideas (not yet approved by the commander, doesn't count as in-progress, record only)
+_(jot down with `gh issue create --label idea --repo elishawong/aeloop`; only promoted to the board above after the commander triages it.)_

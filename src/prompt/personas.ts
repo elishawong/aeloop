@@ -6,10 +6,12 @@ import { isContainedRealpath, isSinglePathSegment } from "../shared/safe-path.js
  * A role has no persona file under the given `personas/` directory.
  *
  * This is the "role name is dynamic, never hardcoded" contract (docs/
- * DESIGN.md §1.7: "persona/schema 按角色名动态查 registry,不用 Verity
- * 那个硬编码 {coder,tester} Record — 加角色不改 composer") made concrete:
- * the `personas/` directory *is* the role registry — adding a role means
- * dropping a new `<role>.md` file there, never touching this loader's code.
+ * DESIGN.md §1.7: "persona/schema is looked up dynamically by role name via
+ * the registry, instead of the hardcoded `{coder,tester}` Record a prior
+ * internal implementation used — adding a role doesn't require touching the
+ * composer") made concrete: the `personas/` directory *is* the role
+ * registry — adding a role means dropping a new `<role>.md` file there,
+ * never touching this loader's code.
  * An unknown role therefore isn't a programming error to throw a raw
  * exception for; it's an expected, typed outcome a caller (`PromptComposer`,
  * B8) can catch and react to.
@@ -28,7 +30,7 @@ export class PersonaNotFoundError extends Error {
 
 /**
  * `role` failed one of the two path-safety checks in `../shared/safe-path.js`
- * (Zorro review, feature/issue-1-a0-a1-scaffold: "role" was `path.join`-ed
+ * (review, feature/issue-1-a0-a1-scaffold: "role" was `path.join`-ed
  * straight into a file path with no containment check, so
  * `role = "../../../CLAUDE"` read the repo's own `CLAUDE.md`). Distinct
  * from `PersonaNotFoundError` — this is not "a legitimate role with no

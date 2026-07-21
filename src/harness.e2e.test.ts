@@ -1,18 +1,20 @@
 /**
- * B6 — the hardest requirement of A2 (PRD §5 "垂直切片(A2 收尾,硬性交付)"
- * / DESIGN §8.5's "aeloop 每个里程碑收尾必须有一条薄垂直切片真正接通"),
+ * B6 — the hardest requirement of A2 (PRD §5 "vertical slice (A2 wrap-up,
+ * hard deliverable)" / DESIGN §8.5's "every aeloop milestone wrap-up must
+ * have one thin vertical slice actually wired end-to-end"),
  * this time proving the *next* seam: that a real `PromptComposer` output
  * string actually flows through the three new Harness components —
  * `ProviderRouter` → `AdapterRegistry` → `SchemaValidator` — and comes out
  * the other side as a typed, schema-valid result. `src/context-prompt.e2e
  * .test.ts` (A1's B9) already proved Context → Prompt; this test starts
  * from that same real chain and extends it one layer further, exactly like
- * PRD §5 asks ("做法照抄 context-prompt.e2e.test.ts 的搭建方式,不重新发明").
+ * PRD §5 asks ("copy the setup approach of context-prompt.e2e.test.ts
+ * exactly, don't reinvent it").
  *
  * The only thing replaced with a test double anywhere in this file is the
  * `FakeAdapter` below — it stands in for "an actual network call to a
- * model provider", which is explicitly out of scope for A2 (PRD §2 非目标:
- * "不打真实 LiteLLM 公司代理"). Every other component — `MemoryStore`,
+ * model provider", which is explicitly out of scope for A2 (PRD §2 non-goals:
+ * "don't hit the real LiteLLM company proxy"). Every other component — `MemoryStore`,
  * `ContextInjector`, `PromptComposer`, `AdapterRegistry`, `ProviderRouter`,
  * `SchemaValidator` — is the real class, doing real work, wired together
  * exactly as a Loop-layer (A4) caller would wire them. If any of these

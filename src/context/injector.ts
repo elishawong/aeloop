@@ -11,8 +11,8 @@ export type InjectionWarning = "stale" | "unconfirmed" | null;
  * an FTS5 keyword hit against `query`.
  *
  * This is a documented **implementation choice**, not a spec fact — DESIGN
- * §3's sequence-diagram comment says "核心全量+FTS5召回" but never defines
- * which types are "core". Fixing this (Zorro review, feature/issue-1-a0-a1-scaffold):
+ * §3's sequence-diagram comment says "core = full recall + FTS5 recall" but never defines
+ * which types are "core". Fixing this (review, feature/issue-1-a0-a1-scaffold):
  * the prior implementation treated *every* memory as core (`core =
  * store.listMemories()`), which made the FTS5 recall branch dead code —
  * its results were always a subset of `core`, so merging them in changed
@@ -21,8 +21,8 @@ export type InjectionWarning = "stale" | "unconfirmed" | null;
  * (both produce the same result when core = everything).
  *
  * The three types chosen here — `identity`/`constraint`/`decision` — are
- * exactly the examples the Zorro review itself used for "永远要
- * (always-want)" memories: durable facts about who/what the agent is and
+ * exactly the examples the review itself used for
+ * "always-want" memories: durable facts about who/what the agent is and
  * what it has committed to, as opposed to session/task-scoped types
  * (`active_task`/`idea`/`snapshot`/`postmortem`/…) that should only surface
  * when a task's keywords actually recall them.
@@ -44,8 +44,8 @@ export interface ContextInjectionResult {
 
 /**
  * Injects memories for a Prompt-layer consumer (`PromptComposer`, B8) to
- * assemble into a final prompt. DESIGN §3 sequence: "ContextInjector 注入
- * (核心全量+FTS5召回, 滤 rejected, stale/unconfirmed 带警告)".
+ * assemble into a final prompt. DESIGN §3 sequence: "ContextInjector injects
+ * (core full recall + FTS5 recall, filters rejected, stale/unconfirmed tagged with warning)".
  *
  * Three rules, straight from that sequence-diagram note:
  * 1. Core memories (full recall) + FTS5 keyword recall for an optional
@@ -58,10 +58,11 @@ export interface ContextInjectionResult {
  *
  * Depends only on Context-layer types (`Memory`, `MemoryStore`,
  * `StalenessEngine`) — never imports anything from `src/prompt/` (DESIGN
- * §1.7: "嵌套 = 外层用内层,内层不知道外层"; no reverse dependency). A
+ * §1.7: "nesting = the outer layer uses the inner layer, the inner layer
+ * doesn't know about the outer layer"; no reverse dependency). A
  * `RecallError` thrown by `store.searchMemories()` propagates unchanged —
  * this class does not catch it and turn a failed recall into an empty
- * result (PRD §8: "RecallError 不静默").
+ * result (PRD §8: "RecallError is never silent").
  */
 export class ContextInjector {
   constructor(
