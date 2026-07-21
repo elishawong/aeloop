@@ -19,6 +19,7 @@ export interface WorkflowManifest {
   readonly inputVersion: string;
   readonly outputVersion: string;
   readonly roles: readonly string[];
+  readonly capabilities?: readonly string[];
 }
 
 export interface WorkflowRunContext {
