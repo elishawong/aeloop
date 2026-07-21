@@ -63,12 +63,19 @@ export interface InvokeRequest {
 
 /**
  * `ToolExecVerifier`'s verdict (`checkToolExecution()`, `src/harness/
- * tool-exec-verifier.ts`, A3 PRD §5): `"pass"` — a claim asserted
- * `verifiedBy: "tool_execution"` and the adapter's trace really shows at
- * least one tool call; `"fail"` — a claim asserted it but the trace is
- * empty (the "claimed ≠ done" case this whole verifier exists to catch);
- * `"na"` — nothing to verify (no claim asserted tool_execution, or
- * `content` couldn't even be parsed as a claims-bearing shape).
+ * tool-exec-verifier.ts`, A3 PRD §5). v2 (issue #11): when a claim
+ * asserting `verifiedBy: "tool_execution"` also declares a non-empty
+ * `toolsUsed: string[]` (`ClaimSchema`, `src/prompt/schema.ts`), every
+ * declared tool name must actually appear in the adapter's trace —
+ * `"pass"` only if all of them do, `"fail"` otherwise (real per-tool
+ * subset matching, not just "some tool ran"). Legacy compatibility: a
+ * `tool_execution` claim that omits `toolsUsed` (pre-v2 callers, or a
+ * model that just doesn't self-report it) falls back to v1's
+ * existence-only check — `"pass"` if the trace is non-empty at all,
+ * `"fail"` if empty (the "claimed ≠ done" case this whole verifier
+ * exists to catch). `"na"` either way — nothing to verify (no claim
+ * asserted tool_execution, or `content` couldn't even be parsed as a
+ * claims-bearing shape).
  */
 export type ToolExecChecked = "pass" | "fail" | "na";
 
@@ -139,7 +146,10 @@ export interface ToolCallRecord {
   /**
    * The raw underlying event object(s) this record was built from, kept
    * for debugging/audit only. `ToolExecVerifier` never reads into this —
-   * v1's check is existence-only (A3 PRD §0 decision 1 / §9.4).
+   * v2 matches only against `toolName` (per-tool subset match when a
+   * claim declares `toolsUsed`, existence-only fallback otherwise); no
+   * verifier version has ever inspected `raw` (A3 PRD §0 decision 1 /
+   * §9.4, refined by issue #11's v2).
    */
   raw: Record<string, unknown>;
 }

@@ -53,6 +53,55 @@ describe("ClaimSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("accepts a claim with toolsUsed declared alongside verifiedBy: tool_execution", () => {
+    const result = ClaimSchema.safeParse({
+      claimText: "the endpoint returns 404 for an unknown id",
+      confidence: "verified",
+      verifiedBy: "tool_execution",
+      toolsUsed: ["Read", "Bash"],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a claim without toolsUsed (legacy v1 shape stays valid)", () => {
+    const result = ClaimSchema.safeParse({
+      claimText: "x",
+      confidence: "verified",
+      verifiedBy: "tool_execution",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects an empty toolsUsed array (min length 1)", () => {
+    const result = ClaimSchema.safeParse({
+      claimText: "x",
+      confidence: "verified",
+      verifiedBy: "tool_execution",
+      toolsUsed: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a toolsUsed array containing an empty string", () => {
+    const result = ClaimSchema.safeParse({
+      claimText: "x",
+      confidence: "verified",
+      verifiedBy: "tool_execution",
+      toolsUsed: ["Read", ""],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects toolsUsed that isn't an array of strings", () => {
+    const result = ClaimSchema.safeParse({
+      claimText: "x",
+      confidence: "verified",
+      verifiedBy: "tool_execution",
+      toolsUsed: "Read",
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe("CoderOutput", () => {
