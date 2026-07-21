@@ -75,6 +75,9 @@
 ### A6. Dual profile run acceptance
 - [ ] Run subscription (claude+codex) and apikey (litellm) each through one real task end-to-end
 
+### Refactor foundation (pre-A6)
+- [~] Workflow plugin boundary, deterministic brain/contract/orchestrator boundary, profile-neutral CLI assembly, external private profile root, and credential-free company demo — local branch `refactor/conductor-foundation` (`df79d27`); requires a real company profile for final A6 acceptance
+
 ### Spikes (must run before implementation)
 - [x] codex exec non-interactive mode verification — issue #10 prerequisite spike (the claude side's `-p --output-format stream-json --verbose` was verified at the same time), see `docs/feature/a3-cli-bridge/spike-findings.md` for details (`2017280`)
 - [ ] deepseek liveness probe + structured-output verification (the apikey profile's tester half, under its pre-rename name — out of scope for A3, left as a tail item for A6/A2)

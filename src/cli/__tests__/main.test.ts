@@ -19,9 +19,11 @@ import { getRunOrigin, recordRunOrigin } from "../run-origin.js"; // real module
 import type { RunHandle } from "../../loop/runner.js";
 
 const assembleSubscriptionDepsMock = vi.fn();
+const assembleProfileDepsMock = vi.fn();
 const resolveRejectThresholdMock = vi.fn();
 vi.mock("../assemble.js", () => ({
   assembleSubscriptionDeps: (...args: unknown[]) => assembleSubscriptionDepsMock(...args),
+  assembleProfileDeps: (...args: unknown[]) => assembleProfileDepsMock(...args),
   resolveRejectThreshold: (...args: unknown[]) => resolveRejectThresholdMock(...args),
 }));
 
@@ -331,6 +333,22 @@ describe("main — resume dispatch", () => {
 });
 
 describe("main — list dispatch", () => {
+  it("selects the profile-neutral assembler for a company profile", async () => {
+    const previous = process.env["AI_AGENT_PROFILE"];
+    process.env["AI_AGENT_PROFILE"] = "company";
+    const deps = makeStubDeps({ profileConfig: { profile: "company", providers: {}, roles: {} } });
+    assembleProfileDepsMock.mockReturnValue(deps);
+    getResumableRunsMock.mockReturnValue([]);
+    try {
+      await main(["list"]);
+      expect(assembleProfileDepsMock).toHaveBeenCalledWith("company", process.env, undefined);
+      expect(assembleSubscriptionDepsMock).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) delete process.env["AI_AGENT_PROFILE"];
+      else process.env["AI_AGENT_PROFILE"] = previous;
+    }
+  });
+
   it("prints a table of running + escalated runs (id/task/currentState/updatedAt)", async () => {
     const deps = makeStubDeps();
     assembleSubscriptionDepsMock.mockReturnValue(deps);

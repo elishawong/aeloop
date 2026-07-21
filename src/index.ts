@@ -20,3 +20,5 @@ export * from "./prompt/schema.js";
 export * from "./prompt/schema-registry.js";
 export * from "./prompt/personas.js";
 export * from "./prompt/composer.js";
+export * from "./workflow/index.js";
+export * from "./conductor/index.js";

@@ -1,11 +1,15 @@
 /**
- * `assembleSubscriptionDeps()` — real dependency-graph wiring for the
- * `subscription` profile (PRD §6.5), centralizing the exact same
+ * `assembleProfileDeps()` — profile-neutral dependency-graph wiring,
+ * centralizing the exact same
  * real-object graph `src/loop.e2e.test.ts` already builds by hand:
  * `loadProfile()` -> `MemoryStore`/`ContextInjector` -> `PromptComposer` ->
  * `buildAdapterRegistry()`/`ProviderRouter` -> `AuditStore`+checkpointer.
  *
- * **Ordering note on the `subscription`-only guard** (PRD §2 non-goal #1 /
+ * **Profile selection is explicit and fail-closed**. The requested profile
+ * from the real environment must match the profile requested by the caller;
+ * a brain or CLI cannot silently switch overlays after startup.
+ *
+ * **Ordering note on the `subscription`-only guard** (legacy A5 behavior /
  * §10 acceptance: "`AI_AGENT_PROFILE=apikey aeloop start "..."` fails with a
  * clear, typed `UnsupportedProfileError` message"): the requested profile
  * *name* (from `env`) is checked **before** `loadProfile()` ever runs, not
@@ -87,17 +91,26 @@ export interface CliDeps extends StartRunDeps {
  * tests, never read/overridden implicitly by production callers
  * (`bin.ts` calls this with zero arguments).
  */
-export function assembleSubscriptionDeps(env: NodeJS.ProcessEnv = process.env, profilesRoot?: string): CliDeps {
-  const requestedProfile = env["AI_AGENT_PROFILE"] ?? SUBSCRIPTION_PROFILE;
-  if (requestedProfile !== SUBSCRIPTION_PROFILE) {
+export function assembleProfileDeps(
+  profileName: string,
+  env: NodeJS.ProcessEnv = process.env,
+  profilesRoot?: string,
+): CliDeps {
+  if (profileName.trim() === "") throw new Error("profileName must be a non-empty string");
+  const requestedProfile = env["AI_AGENT_PROFILE"] ?? profileName;
+  if (requestedProfile !== profileName) {
     throw new UnsupportedProfileError(requestedProfile);
   }
 
-  const result = loadProfile(requestedProfile, profilesRoot);
+  // Deployments can mount private profiles outside the source checkout (for
+  // example a company `apikey` profile) without copying credentials into the
+  // public repository. Tests and embedders may still pass an explicit root.
+  const resolvedProfilesRoot = profilesRoot ?? env["AELOOP_PROFILES_ROOT"];
+  const result = loadProfile(requestedProfile, resolvedProfilesRoot);
   if (!result.ok) {
     throw result.error;
   }
-  if (result.config.profile !== SUBSCRIPTION_PROFILE) {
+  if (result.config.profile !== profileName) {
     throw new UnsupportedProfileError(result.config.profile);
   }
 
@@ -134,6 +147,11 @@ export function assembleSubscriptionDeps(env: NodeJS.ProcessEnv = process.env, p
     memoryStore.close();
     throw err;
   }
+}
+
+/** Backward-compatible personal CLI entry point. */
+export function assembleSubscriptionDeps(env: NodeJS.ProcessEnv = process.env, profilesRoot?: string): CliDeps {
+  return assembleProfileDeps(SUBSCRIPTION_PROFILE, env, profilesRoot);
 }
 
 /**

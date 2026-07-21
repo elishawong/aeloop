@@ -7,7 +7,7 @@
 ## In Progress / To Do (triaged and approved by the commander)
 | Priority | Title | Status | Issue |
 |---|---|---|---|
-| P2 | Conductor layer (outermost conversation coordination) | Direction decided, scheduled **after A6**, no code work right now | [#2](https://github.com/elishawong/aeloop/issues/2) |
+| P2 | Conductor layer (outermost conversation coordination) | Foundation started before A6: deterministic contract/orchestrator boundary is in `refactor/conductor-foundation`; model-backed conversation remains after real dual-profile acceptance | [#2](https://github.com/elishawong/aeloop/issues/2) |
 
 ## Inbox Ideas (not yet approved by the commander, doesn't count as in-progress, record only)
 _(jot down with `gh issue create --label idea --repo elishawong/aeloop`; only promoted to the board above after the commander triages it.)_

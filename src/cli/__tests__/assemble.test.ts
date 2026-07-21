@@ -12,7 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assembleSubscriptionDeps, resolveRejectThreshold, type CliDeps } from "../assemble.js";
+import { assembleProfileDeps, assembleSubscriptionDeps, resolveRejectThreshold, type CliDeps } from "../assemble.js";
 import { UnsupportedProfileError } from "../errors.js";
 import { InvalidProviderConfigError } from "../../harness/errors.js";
 import { ProfileNotFoundError } from "../../profile/errors.js";
@@ -135,6 +135,49 @@ roles:
 
     expect(() => assembleSubscriptionDeps({ AI_AGENT_PROFILE: "subscription" }, profilesRoot)).toThrow(InvalidProviderConfigError);
     expect(closeSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("assembleProfileDeps", () => {
+  it("assembles a non-subscription profile without changing the engine wiring", () => {
+    const companyConfig = `
+profile: company
+
+providers:
+  company-litellm:
+    kind: direct-api
+    base_url: http://127.0.0.1:4000
+    model: company-coder
+
+roles:
+  coder:
+    provider: company-litellm
+  tester:
+    provider: company-litellm
+`;
+    const profilesRoot = makeProfilesRoot("company", companyConfig);
+    const deps = assembleProfileDeps("company", { AI_AGENT_PROFILE: "company" }, profilesRoot);
+    openDeps = deps;
+
+    expect(deps.profileConfig.profile).toBe("company");
+    expect(deps.router.route("coder")).toMatchObject({ id: "company-litellm", kind: "direct-api" });
+    expect(deps.router.route("tester")).toMatchObject({ id: "company-litellm", kind: "direct-api" });
+  });
+
+  it("loads a private profile root from AELOOP_PROFILES_ROOT when no explicit root is passed", () => {
+    const profilesRoot = makeProfilesRoot("company", `
+profile: company
+providers:
+  company-litellm:
+    kind: direct-api
+    base_url: http://127.0.0.1:4000
+roles:
+  coder: { provider: company-litellm }
+  tester: { provider: company-litellm }
+`);
+    const deps = assembleProfileDeps("company", { AI_AGENT_PROFILE: "company", AELOOP_PROFILES_ROOT: profilesRoot });
+    openDeps = deps;
+    expect(deps.profileConfig.profile).toBe("company");
   });
 });
 
