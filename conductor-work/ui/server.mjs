@@ -2,7 +2,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.CONDUCTOR_WORK_PORT ?? 4173);
@@ -46,7 +46,7 @@ function timeOf(ts) {
 }
 
 function pathToFileUrl(p) {
-  return new URL(`file://${p}`);
+  return pathToFileURL(p);
 }
 
 /**
