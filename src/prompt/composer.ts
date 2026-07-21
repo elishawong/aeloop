@@ -74,6 +74,16 @@ export class PromptComposer {
     }
 
     sections.push(`# Context\n\n${formatMemories(context.memories)}`);
+
+    // Only rendered when `ContextInjector` was constructed with a
+    // `ContextBudgetManager` (issue #36 slice 1) and it actually omitted
+    // something; `context.omitted` is `undefined` in every pre-existing
+    // caller (no budget configured), so this section is a pure addition —
+    // it changes nothing for callers that never opted into budgeting.
+    if (context.omitted && context.omitted.length > 0) {
+      sections.push(`# Omitted Context\n\n${formatOmitted(context.omitted)}`);
+    }
+
     sections.push(`# Task\n\n${task}`);
 
     return sections.join("\n\n---\n\n");
@@ -83,6 +93,17 @@ export class PromptComposer {
 function formatMemories(memories: InjectedMemory[]): string {
   if (memories.length === 0) return "(no memories injected)";
   return memories.map(formatMemory).join("\n\n");
+}
+
+/**
+ * Renders `ContextInjectionResult.omitted` so an operator/reviewer reading
+ * the final prompt can see what was left out and why (issue #36 slice 1:
+ * "Record omitted context IDs and reasons in evidence/audit output" — this
+ * is the human-visible half of that; audit/evidence-store wiring is a
+ * separate concern this slice does not implement).
+ */
+function formatOmitted(omitted: NonNullable<ContextInjectionResult["omitted"]>): string {
+  return omitted.map((entry) => `- [${entry.reason}] (${entry.type}) ${entry.title}`).join("\n");
 }
 
 function formatMemory(entry: InjectedMemory): string {

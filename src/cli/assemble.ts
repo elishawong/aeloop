@@ -58,6 +58,7 @@ import { loadProfile, type ProfileConfig } from "../profile/loader.js";
 import { MemoryStore } from "../context/store.js";
 import { SystemConfig } from "../context/config.js";
 import { StalenessEngine } from "../context/staleness.js";
+import { ContextBudgetManager } from "../context/budget.js";
 import { ContextInjector } from "../context/injector.js";
 import { PromptComposer } from "../prompt/composer.js";
 import { buildAdapterRegistry } from "../harness/config.js";
@@ -132,7 +133,8 @@ export function assembleProfileDeps(
   try {
     const systemConfig = new SystemConfig(memoryStore);
     const staleness = new StalenessEngine(systemConfig);
-    const injector = new ContextInjector(memoryStore, staleness);
+    const budgetManager = resolveContextBudgetManager(config);
+    const injector = new ContextInjector(memoryStore, staleness, budgetManager);
     const composer = new PromptComposer(personasDir);
 
     const registry = buildAdapterRegistry(config);
@@ -163,6 +165,26 @@ export function assembleSubscriptionDeps(env: NodeJS.ProcessEnv = process.env, p
  * object, so a test can exercise all three tiers without assembling a full
  * dependency graph.
  */
+/**
+ * Builds a `ContextBudgetManager` from `profileConfig.context.token_budget`
+ * (issue #36 slice 1), or `undefined` when that key is absent/not a valid
+ * positive integer — matching `ProfileConfig.context`'s own documented
+ * "absent = today's unbounded behavior" contract (`profile/loader.ts`).
+ * `ContextBudgetManager`'s own constructor already throws for a non-integer
+ * or non-positive value; a malformed `token_budget` in `config.yaml` should
+ * surface as a loud startup error, not silently fall back to "no budget",
+ * so that validation is intentionally *not* re-guarded here.
+ *
+ * Independently unit-testable — takes the parsed config directly, same
+ * "explicit inputs, no full `CliDeps` graph needed" shape as
+ * `resolveRejectThreshold()` below.
+ */
+export function resolveContextBudgetManager(profileConfig: ProfileConfig): ContextBudgetManager | undefined {
+  const tokenBudget = profileConfig.context?.token_budget;
+  if (tokenBudget === undefined) return undefined;
+  return new ContextBudgetManager(tokenBudget);
+}
+
 export function resolveRejectThreshold(profileConfig: ProfileConfig, systemConfig: SystemConfig): number {
   const fromProfile = profileConfig.workflow?.reject_threshold;
   if (typeof fromProfile === "number") return fromProfile;

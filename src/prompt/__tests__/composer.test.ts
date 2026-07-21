@@ -167,6 +167,38 @@ describe("PromptComposer — unknown role with no persona file at all", () => {
   });
 });
 
+describe("PromptComposer — renders omitted-context metadata (issue #36 slice 1)", () => {
+  it("renders an '# Omitted Context' section when context.omitted has entries", () => {
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
+    const context = makeContext([{ title: "Kept fact", content: "stays", warning: null }]);
+    context.omitted = [{ id: 42, type: "idea", title: "Dropped idea", reason: "token_budget_exceeded" }];
+
+    const prompt = composer.compose("coder", context, "task");
+
+    expect(prompt).toContain("# Omitted Context");
+    expect(prompt).toContain("[token_budget_exceeded] (idea) Dropped idea");
+  });
+
+  it("omits the '# Omitted Context' section entirely when context.omitted is undefined (no budget manager configured)", () => {
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
+    const context = makeContext([{ title: "Kept fact", content: "stays", warning: null }]);
+
+    const prompt = composer.compose("coder", context, "task");
+
+    expect(prompt).not.toContain("# Omitted Context");
+  });
+
+  it("omits the '# Omitted Context' section when context.omitted is an empty array", () => {
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
+    const context = makeContext([{ title: "Kept fact", content: "stays", warning: null }]);
+    context.omitted = [];
+
+    const prompt = composer.compose("coder", context, "task");
+
+    expect(prompt).not.toContain("# Omitted Context");
+  });
+});
+
 describe("PromptComposer — does not re-filter by confidenceState (PRD: rejected already filtered upstream)", () => {
   it("renders an entry verbatim even if its underlying memory.confidenceState is 'rejected'", () => {
     // Simulates a hand-built (not really possible via the real ContextInjector,

@@ -12,12 +12,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assembleProfileDeps, assembleSubscriptionDeps, resolveRejectThreshold, type CliDeps } from "../assemble.js";
+import {
+  assembleProfileDeps,
+  assembleSubscriptionDeps,
+  resolveContextBudgetManager,
+  resolveRejectThreshold,
+  type CliDeps,
+} from "../assemble.js";
 import { UnsupportedProfileError } from "../errors.js";
 import { InvalidProviderConfigError } from "../../harness/errors.js";
 import { ProfileNotFoundError } from "../../profile/errors.js";
 import { MemoryStore } from "../../context/store.js";
 import { SystemConfig } from "../../context/config.js";
+import { ContextBudgetManager } from "../../context/budget.js";
 import type { ProfileConfig } from "../../profile/loader.js";
 
 const VALID_CONFIG_YAML = `
@@ -233,6 +240,77 @@ describe("resolveRejectThreshold", () => {
     }
   });
 
+});
+
+describe("resolveContextBudgetManager (issue #36 slice 1)", () => {
+  it("returns undefined when profileConfig.context is entirely absent (backward compatibility)", () => {
+    const profileConfig: ProfileConfig = { profile: "subscription", providers: {}, roles: {} };
+    expect(resolveContextBudgetManager(profileConfig)).toBeUndefined();
+  });
+
+  it("returns undefined when profileConfig.context is present but token_budget is absent", () => {
+    const profileConfig: ProfileConfig = { profile: "subscription", providers: {}, roles: {}, context: {} };
+    expect(resolveContextBudgetManager(profileConfig)).toBeUndefined();
+  });
+
+  it("returns a ContextBudgetManager when profileConfig.context.token_budget is set", () => {
+    const profileConfig: ProfileConfig = {
+      profile: "subscription",
+      providers: {},
+      roles: {},
+      context: { token_budget: 500 },
+    };
+    const manager = resolveContextBudgetManager(profileConfig);
+    expect(manager).toBeInstanceOf(ContextBudgetManager);
+  });
+
+  it("propagates ContextBudgetManager's own validation error for an invalid token_budget (e.g. 0 or negative)", () => {
+    const profileConfig: ProfileConfig = {
+      profile: "subscription",
+      providers: {},
+      roles: {},
+      context: { token_budget: 0 },
+    };
+    expect(() => resolveContextBudgetManager(profileConfig)).toThrow(TypeError);
+  });
+});
+
+describe("assembleProfileDeps — context.token_budget wiring end-to-end (issue #36 slice 1)", () => {
+  it("with no context.token_budget in config.yaml, the assembled injector behaves unbounded (backward compatibility)", () => {
+    const profilesRoot = makeProfilesRoot("subscription"); // VALID_CONFIG_YAML has no `context:` key at all
+    const deps = assembleSubscriptionDeps({ AI_AGENT_PROFILE: "subscription" }, profilesRoot);
+    openDeps = deps;
+
+    deps.memoryStore.insertMemory({ type: "identity", title: "Huge", content: "x".repeat(50_000) }, new Date().toISOString());
+    const result = deps.injector.inject(undefined, new Date());
+
+    expect(result.omitted).toBeUndefined();
+    expect(result.memories).toHaveLength(1);
+  });
+
+  it("with context.token_budget set in config.yaml, the assembled injector enforces it and reports omissions", () => {
+    const configWithBudget = `${VALID_CONFIG_YAML}
+context:
+  token_budget: 20
+`;
+    const profilesRoot = makeProfilesRoot("subscription", configWithBudget);
+    const deps = assembleSubscriptionDeps({ AI_AGENT_PROFILE: "subscription" }, profilesRoot);
+    openDeps = deps;
+
+    const now = new Date().toISOString();
+    deps.memoryStore.insertMemory({ type: "constraint", title: "Kept", content: "must stay" }, now);
+    // "idea" is not a CORE_MEMORY_TYPES type, so a matching query is needed for it to reach the
+    // budget stage at all (see the equivalent injector.test.ts comment for why).
+    deps.memoryStore.insertMemory({ type: "idea", title: "Dropped", content: "gigantic ".repeat(80) }, now);
+
+    const result = deps.injector.inject("gigantic", new Date());
+
+    expect(result.memories.map((m) => m.memory.title)).toEqual(["Kept"]);
+    expect(result.omitted?.map((o) => o.title)).toEqual(["Dropped"]);
+  });
+});
+
+describe("resolveRejectThreshold", () => {
   it("a non-number profileConfig.workflow.reject_threshold (malformed YAML) falls through to tier 2, not treated as tier 1", () => {
     const store = new MemoryStore(":memory:");
     try {

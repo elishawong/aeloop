@@ -3,18 +3,19 @@ import { MemoryStore } from "../store.js";
 import { SystemConfig } from "../config.js";
 import { StalenessEngine } from "../staleness.js";
 import { ContextInjector, CORE_MEMORY_TYPES } from "../injector.js";
+import { ContextBudgetExceededError, ContextBudgetManager } from "../budget.js";
 import { RecallError } from "../errors.js";
 
 const NOW = "2026-07-20T00:00:00.000Z";
 
 const openStores: MemoryStore[] = [];
-function setup(): { store: MemoryStore; injector: ContextInjector } {
+function setup(budgetManager?: ContextBudgetManager): { store: MemoryStore; injector: ContextInjector } {
   const store = new MemoryStore(":memory:");
   openStores.push(store);
   const config = new SystemConfig(store);
   config.set("default_stale_days", "30", NOW);
   const staleness = new StalenessEngine(config);
-  return { store, injector: new ContextInjector(store, staleness) };
+  return { store, injector: new ContextInjector(store, staleness, budgetManager) };
 }
 
 afterEach(() => {
@@ -185,5 +186,104 @@ describe("ContextInjector — RecallError propagates, is never swallowed into an
     (store as unknown as { db: import("better-sqlite3").Database }).db.exec("DROP TABLE memories_fts");
 
     expect(() => injector.inject("anything", new Date(NOW))).toThrow(RecallError);
+  });
+});
+
+describe("ContextInjector — no budgetManager configured (issue #36 slice 1 backward compatibility)", () => {
+  it("result.omitted is undefined (not an empty array) when no ContextBudgetManager was passed to the constructor", () => {
+    const { store, injector } = setup(); // no budgetManager
+    store.insertMemory({ type: "identity", title: "A", content: "a" }, NOW);
+
+    const result = injector.inject(undefined, new Date(NOW));
+
+    expect(result.omitted).toBeUndefined();
+  });
+
+  it("returns every non-rejected core memory unbounded, regardless of size, when unconfigured", () => {
+    const { store, injector } = setup();
+    const bigContent = "x".repeat(50_000); // would blow any realistic token budget
+    const memory = store.insertMemory({ type: "identity", title: "Huge", content: bigContent }, NOW);
+
+    const result = injector.inject(undefined, new Date(NOW));
+
+    expect(result.memories.map((m) => m.memory.id)).toContain(memory.id);
+  });
+});
+
+describe("ContextInjector — budget wiring (issue #36 slice 1)", () => {
+  it("omits a non-protected, low-priority memory that doesn't fit, and records why", () => {
+    const budgetManager = new ContextBudgetManager(20);
+    const { store, injector } = setup(budgetManager);
+    const kept = store.insertMemory({ type: "constraint", title: "Kept", content: "must stay" }, NOW);
+    // "idea" is not in CORE_MEMORY_TYPES (only identity/constraint/decision), so it must be
+    // recalled via `query` to reach ContextInjector's budget stage at all — otherwise it would
+    // never appear in `memories` regardless of budgeting, and this test would (falsely) pass for
+    // the wrong reason.
+    const dropped = store.insertMemory(
+      { type: "idea", title: "Dropped idea", content: "gigantic ".repeat(80) },
+      NOW,
+    );
+
+    const result = injector.inject("gigantic", new Date(NOW));
+
+    const ids = result.memories.map((m) => m.memory.id);
+    expect(ids).toContain(kept.id);
+    expect(ids).not.toContain(dropped.id);
+    expect(result.omitted).toEqual([
+      { id: dropped.id, type: "idea", title: "Dropped idea", reason: "token_budget_exceeded" },
+    ]);
+  });
+
+  it("never omits a protected constraint/requirement/decision memory when it fits", () => {
+    const budgetManager = new ContextBudgetManager(1000);
+    const { store, injector } = setup(budgetManager);
+    store.insertMemory({ type: "constraint", title: "C", content: "constraint content" }, NOW);
+    // "requirement" is not in CORE_MEMORY_TYPES, so it needs a matching `query` to be recalled
+    // in the first place — protection-from-budget-omission is orthogonal to core-recall.
+    store.insertMemory({ type: "requirement", title: "R", content: "requirement content" }, NOW);
+    store.insertMemory({ type: "decision", title: "D", content: "decision content" }, NOW);
+
+    const result = injector.inject("requirement", new Date(NOW));
+
+    expect(result.memories).toHaveLength(3);
+    expect(result.omitted).toEqual([]);
+  });
+
+  it("fails closed (throws ContextBudgetExceededError) rather than silently dropping a protected memory that cannot fit", () => {
+    const budgetManager = new ContextBudgetManager(2);
+    const { store, injector } = setup(budgetManager);
+    store.insertMemory(
+      { type: "constraint", title: "Too big to fit", content: "x".repeat(400) },
+      NOW,
+    );
+
+    expect(() => injector.inject(undefined, new Date(NOW))).toThrow(ContextBudgetExceededError);
+  });
+
+  it("still filters rejected memories before budgeting even sees them", () => {
+    const budgetManager = new ContextBudgetManager(10_000);
+    const { store, injector } = setup(budgetManager);
+    const rejected = store.insertMemory(
+      { type: "constraint", title: "Rejected constraint", content: "must not appear", confidenceState: "rejected" },
+      NOW,
+    );
+
+    const result = injector.inject(undefined, new Date(NOW));
+
+    expect(result.memories.map((m) => m.memory.id)).not.toContain(rejected.id);
+    expect(result.omitted?.map((o) => o.id)).not.toContain(rejected.id);
+  });
+
+  it("still tags stale/unconfirmed warnings on memories that survive budgeting", () => {
+    const budgetManager = new ContextBudgetManager(10_000);
+    const { store, injector } = setup(budgetManager);
+    const memory = store.insertMemory(
+      { type: "constraint", title: "Unreviewed", content: "not yet reviewed", confidenceState: "unconfirmed" },
+      NOW,
+    );
+
+    const result = injector.inject(undefined, new Date(NOW));
+
+    expect(result.memories.find((m) => m.memory.id === memory.id)?.warning).toBe("unconfirmed");
   });
 });
