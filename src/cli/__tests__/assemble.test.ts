@@ -21,7 +21,7 @@ import {
 } from "../assemble.js";
 import { UnsupportedProfileError } from "../errors.js";
 import { InvalidProviderConfigError } from "../../harness/errors.js";
-import { ProfileNotFoundError } from "../../profile/errors.js";
+import { ProfileNotFoundError, PersonaRootNotConfiguredError } from "../../profile/errors.js";
 import { MemoryStore } from "../../context/store.js";
 import { SystemConfig } from "../../context/config.js";
 import { ContextBudgetManager } from "../../context/budget.js";
@@ -50,6 +50,8 @@ workflow:
 
 let tmpDir = "";
 let openDeps: CliDeps | undefined;
+/** Extra temp dirs a single test creates beyond `tmpDir` (e.g. a separate AELOOP_PERSONAS_ROOT). */
+const extraTmpDirs: string[] = [];
 
 afterEach(() => {
   openDeps?.memoryStore.close();
@@ -57,6 +59,10 @@ afterEach(() => {
   openDeps = undefined;
   if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
   tmpDir = "";
+  while (extraTmpDirs.length > 0) {
+    const dir = extraTmpDirs.pop();
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 function makeProfilesRoot(profileName: string, configYaml: string = VALID_CONFIG_YAML): string {
@@ -185,6 +191,79 @@ roles:
     const deps = assembleProfileDeps("company", { AI_AGENT_PROFILE: "company", AELOOP_PROFILES_ROOT: profilesRoot });
     openDeps = deps;
     expect(deps.profileConfig.profile).toBe("company");
+  });
+});
+
+describe("assembleProfileDeps — external persona-root wiring end-to-end (issue #42)", () => {
+  it("composer reads personas from the external persona root when config.personas is set", () => {
+    const companyConfig = `
+profile: company
+personas: company
+
+providers:
+  company-litellm:
+    kind: direct-api
+    base_url: http://127.0.0.1:4000
+
+roles:
+  coder:
+    provider: company-litellm
+  tester:
+    provider: company-litellm
+`;
+    const profilesRoot = makeProfilesRoot("company", companyConfig);
+    const personasRoot = fs.mkdtempSync(path.join(os.tmpdir(), "aeloop-assemble-personas-"));
+    extraTmpDirs.push(personasRoot);
+    const externalPersonasDir = path.join(personasRoot, "company", "personas");
+    fs.mkdirSync(externalPersonasDir, { recursive: true });
+    fs.writeFileSync(path.join(externalPersonasDir, "coder.md"), "company coder persona", "utf-8");
+    fs.writeFileSync(path.join(externalPersonasDir, "tester.md"), "company tester persona", "utf-8");
+
+    const deps = assembleProfileDeps("company", {
+      AI_AGENT_PROFILE: "company",
+      AELOOP_PERSONAS_ROOT: personasRoot,
+    }, profilesRoot);
+    openDeps = deps;
+
+    const prompt = deps.composer.compose("coder", { memories: [] }, "do the thing");
+    expect(prompt).toContain("company coder persona");
+  });
+
+  it("composer keeps reading from <profileDir>/personas when config.personas is absent (backward compatibility)", () => {
+    const profilesRoot = makeProfilesRoot("subscription");
+    const personasDir = path.join(profilesRoot, "subscription", "personas");
+    fs.mkdirSync(personasDir, { recursive: true });
+    fs.writeFileSync(path.join(personasDir, "coder.md"), "legacy subscription coder persona", "utf-8");
+    fs.writeFileSync(path.join(personasDir, "tester.md"), "legacy subscription tester persona", "utf-8");
+
+    const deps = assembleSubscriptionDeps({ AI_AGENT_PROFILE: "subscription" }, profilesRoot);
+    openDeps = deps;
+
+    const prompt = deps.composer.compose("coder", { memories: [] }, "do the thing");
+    expect(prompt).toContain("legacy subscription coder persona");
+  });
+
+  it("throws PersonaRootNotConfiguredError (fail closed, no silent fallback) when personas is set but AELOOP_PERSONAS_ROOT is not", () => {
+    const companyConfig = `
+profile: company
+personas: company
+
+providers:
+  company-litellm:
+    kind: direct-api
+    base_url: http://127.0.0.1:4000
+
+roles:
+  coder:
+    provider: company-litellm
+  tester:
+    provider: company-litellm
+`;
+    const profilesRoot = makeProfilesRoot("company", companyConfig);
+
+    expect(() =>
+      assembleProfileDeps("company", { AI_AGENT_PROFILE: "company" }, profilesRoot),
+    ).toThrow(PersonaRootNotConfiguredError);
   });
 });
 

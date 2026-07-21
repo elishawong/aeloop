@@ -55,6 +55,7 @@
  */
 import path from "node:path";
 import { loadProfile, type ProfileConfig } from "../profile/loader.js";
+import { resolvePersonaRoot } from "../profile/personas-root.js";
 import { MemoryStore } from "../context/store.js";
 import { SystemConfig } from "../context/config.js";
 import { StalenessEngine } from "../context/staleness.js";
@@ -116,7 +117,12 @@ export function assembleProfileDeps(
   }
 
   const { profileDir, config } = result;
-  const personasDir = path.join(profileDir, "personas");
+  // Issue #42: `config.personas` (optional) points PromptComposer at an
+  // external persona-set root instead of `<profileDir>/personas` — see
+  // `../profile/personas-root.js` for the full contract and fail-closed
+  // error cases (unsafe/missing `AELOOP_PERSONAS_ROOT` never silently
+  // falls back to the legacy default once a profile opts in).
+  const personasDir = resolvePersonaRoot(profileDir, config, env);
   const memoryDbPath = path.join(profileDir, "memory.db");
   const workflowDbPath = path.join(profileDir, "workflow.db");
 

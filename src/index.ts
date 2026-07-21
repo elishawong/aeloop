@@ -14,6 +14,7 @@ export * from "./shared/types.js";
 export * from "./shared/safe-path.js";
 export * from "./profile/loader.js";
 export * from "./profile/errors.js";
+export * from "./profile/personas-root.js";
 export * from "./context/types.js";
 export * from "./context/errors.js";
 export * from "./context/store.js";

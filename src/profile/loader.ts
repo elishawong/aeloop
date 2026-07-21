@@ -57,6 +57,34 @@ export interface ProfileConfig {
     token_budget?: number;
     [key: string]: unknown;
   };
+  /**
+   * Optional pointer to an external persona-set root (issue #42): the
+   * name of a `<AELOOP_PERSONAS_ROOT>/<personas>/personas` directory to
+   * read coder/tester persona files from *instead of* the default
+   * `<profileDir>/personas`.
+   *
+   * Not related to Conductor's `brains/company/`/`brains/personal/`
+   * directories (see `../../brains/README.md`) — those hold Brain
+   * `manifest.yaml`/`system-prompt.md` artifacts consumed by Conductor.
+   * This field only ever points at a directory of role persona files
+   * (`coder.md`/`tester.md`), the same shape `<profileDir>/personas`
+   * already has.
+   *
+   * Absent by default and has no implicit default — same "opt-in, zero
+   * behavior change for existing profiles" posture as `context` above.
+   * When omitted, `resolvePersonaRoot()` (`./personas-root.js`) returns
+   * exactly today's `<profileDir>/personas` path; every existing profile
+   * (`profiles/subscription/config.yaml`) keeps working unchanged.
+   *
+   * Deliberately a bare string, not a nested mapping: it names *one*
+   * persona set per profile, the same one-to-one shape `profile:
+   * subscription` itself already uses one line above. Must resolve to a
+   * single, safe path segment — see `./personas-root.js`'s
+   * `resolvePersonaRoot()` for the validation (reuses
+   * `../shared/safe-path.js`, the same helper `profile`/role names are
+   * checked against) and fail-closed error cases.
+   */
+  personas?: string;
   [key: string]: unknown;
 }
 
