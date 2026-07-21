@@ -660,3 +660,39 @@ export async function resumeRun(
 export function getResumableRuns(deps: { audit: AuditStore }, status: "running" | "escalated"): WorkflowRun[] {
   return deps.audit.listRunsByStatus(status);
 }
+
+/**
+ * Read-only reconstruction of a paused run's current pending-gate payload,
+ * for a caller (A5's CLI, `src/cli/main.ts`'s `resume <runId>` command) that
+ * has no in-memory `RunHandle` to read it from — e.g. a fresh process
+ * resuming a run `startRun()`/`resumeRun()` returned a handle for in a
+ * *previous* process (A5 PRD §3 point 2 / §5). Does nothing
+ * `runStreamAndPersist`'s internal `computeRunProgress()` doesn't already do
+ * (a `compiled.getState(cfg)` read) — exposed here as a public,
+ * side-effect-free entry point instead of duplicated in `src/cli/`, keeping
+ * "only runner.ts constructs a compiled graph + reads/writes AuditStore"
+ * true for this layer too (A5 PRD §5's explicit constraint: this is the
+ * *only* file outside `src/cli/` that PRD touches).
+ *
+ * **Zero new writes** — this function never calls any
+ * `audit.insert*`/`updateRunProgress`; it only reads `AuditStore` (via
+ * `getRunById`) and the checkpoint (via `compiled.getState`), matching its
+ * "read-only" contract. A caller with a `runId` that doesn't exist at all
+ * gets `AuditReadError`, mirroring every other `runId`-taking function in
+ * this file (`resumeRun`'s own `getRunById` check, just above).
+ */
+export async function getPendingInterrupt(
+  deps: StartRunDeps,
+  runId: number,
+): Promise<{ runId: number; threadId: string; interrupt?: RunHandle["interrupt"]; done: boolean }> {
+  const run = deps.audit.getRunById(runId);
+  if (!run) {
+    throw new AuditReadError(`getPendingInterrupt: no workflow_runs row for runId ${runId}`);
+  }
+
+  const compiled = compileLoopGraph(buildLoopGraph({ router: deps.router, composer: deps.composer }), deps.checkpointer);
+  const cfg = { configurable: { thread_id: run.langgraphThreadId } };
+  const progress = await computeRunProgress(compiled, cfg);
+
+  return { runId, threadId: run.langgraphThreadId, interrupt: progress.interrupt, done: progress.done };
+}

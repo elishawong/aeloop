@@ -17,10 +17,11 @@ on aeloop.
 
 ## Status
 
-A0 through A4b are complete: all four engine layers (Prompt, Context,
-Harness, Loop) are implemented, plus the profile/overlay mechanism.
-**300 tests passing** across 34 test files; `pnpm lint` (`tsc --noEmit`) and
-`pnpm build` are both clean. Remaining milestones are **A5 (CLI/TUI)** and
+A0 through A5 are complete: all four engine layers (Prompt, Context,
+Harness, Loop) are implemented, plus the profile/overlay mechanism and a
+real, installable CLI (`aeloop start`/`resume`/`list`) driving the engine
+against the `subscription` profile. **368 tests passing**; `pnpm lint`
+(`tsc --noEmit`) and `pnpm build` are both clean. Remaining milestone is
 **A6 (dual-profile acceptance run)** — see [`docs/ROADMAP.md`](./docs/ROADMAP.md)
 for the full milestone-by-milestone breakdown.
 
@@ -31,6 +32,19 @@ pnpm install
 cp .env.example .env   # set AI_AGENT_PROFILE and, for the apikey profile, LITELLM_BASE_URL/LITELLM_TOKEN
 pnpm test
 pnpm build
+```
+
+Drive one Loop run through the real, interactive CLI (`subscription`
+profile only — see `docs/ROADMAP.md`'s A5 entry for the `apikey` profile's
+status):
+
+```sh
+node dist/cli/bin.js start "<task description>"
+# ...renders each gate's diff/issues, prompts for a decision (G1/G3
+# approve-or-reject, G2 approve-or-escalate, Escalation revise/
+# force-pass/abandon)...
+node dist/cli/bin.js list             # see paused/escalated runs
+node dist/cli/bin.js resume <runId>   # continue one, even in a new process
 ```
 
 ## Documentation

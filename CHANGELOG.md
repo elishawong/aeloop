@@ -7,6 +7,21 @@ project does not yet follow semantic versioning (see `version` in
 
 ## [Unreleased]
 
+- **2026-07-21** — A5 CLI/TUI: a real, installable `aeloop` command
+  (`start`/`resume`/`list`) driving the Loop engine end to end against the
+  `subscription` profile — chalk-colorized diff rendering (`diff-render.ts`)
+  and gate views (`gate-view.ts`, including a structurally distinct
+  Escalation banner), a `Prompter` abstraction (`InquirerPrompter` for real
+  terminal use, `FakePrompter` for tests) so the interactive loop
+  (`run-loop.ts`) is testable without a real TTY, real dependency-graph
+  assembly for the subscription profile (`assemble.ts`), argv parsing +
+  dispatch + a documented, permanent Ctrl+C-during-model-call limitation
+  (`main.ts`/`bin.ts`), and one small, additive `runner.ts` export
+  (`getPendingInterrupt()`) giving a fresh CLI process a read-only way to
+  reconstruct a paused run's pending gate for `aeloop resume`. Hard vertical
+  slice covers both the happy path and the threshold-escalation path
+  through real `main()` dispatch, real cli-bridge fixture subprocesses, and
+  a scripted `FakePrompter`. 368 tests passing.
 - **2026-07-21** — Loop orchestration, phase 2: threshold escalation hard
   branch (`escalation.ts`), audit persistence (`workflow_runs` /
   `structured_claims` / `approvals` tables in `audit-store.ts`), a
