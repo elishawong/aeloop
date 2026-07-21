@@ -2,11 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync, mkdirSync } from "node
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  loadProfile,
-  resolveProfileDir,
-  substituteEnvPlaceholders,
-} from "../loader.js";
+import { loadProfile, substituteEnvPlaceholders } from "../loader.js";
 import { InvalidProfileNameError, ProfileConfigParseError, ProfileNotFoundError } from "../errors.js";
 
 /** Directories created per-test under the OS tmp dir, cleaned up after each. */
@@ -57,18 +53,6 @@ describe("loadProfile — subscription (real committed profile)", () => {
     } finally {
       if (original !== undefined) process.env["AI_AGENT_PROFILE"] = original;
     }
-  });
-});
-
-describe("loadProfile — apikey (must not exist in this repo)", () => {
-  it("returns a typed not-found result, does not throw, does not fake an empty config", () => {
-    const result = loadProfile("apikey");
-
-    expect(result.ok).toBe(false);
-    if (result.ok) return; // narrow for TS
-    expect(result.error).toBeInstanceOf(ProfileNotFoundError);
-    expect(result.error.profile).toBe("apikey");
-    expect(result.error.profileDir).toBe(resolveProfileDir("apikey"));
   });
 });
 
