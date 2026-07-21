@@ -23,7 +23,7 @@ const FIXTURE_CONTRACT_ID = "company-demo-001";
 const FIXTURE_WORKFLOW_DEF_ID = "coder-tester-loop";
 
 const FIXTURE_EVENTS = [
-  { type: "run_started", runId: FIXTURE_RUN_ID, threadId: FIXTURE_THREAD_ID, ts: "2026-07-21T10:02:11.000Z", task: FIXTURE_TASK, profile: FIXTURE_WORKFLOW_DEF_ID, workflowDefId: FIXTURE_WORKFLOW_DEF_ID, rejectThreshold: 2 },
+  { type: "run_started", runId: FIXTURE_RUN_ID, threadId: FIXTURE_THREAD_ID, ts: "2026-07-21T10:02:11.000Z", task: FIXTURE_TASK, profile: "company", workflowDefId: FIXTURE_WORKFLOW_DEF_ID, rejectThreshold: 2 },
   { type: "node_started", runId: FIXTURE_RUN_ID, threadId: FIXTURE_THREAD_ID, ts: "2026-07-21T10:02:11.500Z", node: "draft", stepRef: "draft-1" },
   { type: "node_completed", runId: FIXTURE_RUN_ID, threadId: FIXTURE_THREAD_ID, ts: "2026-07-21T10:02:38.000Z", node: "draft", stepRef: "draft-1" },
   { type: "agent_completed", runId: FIXTURE_RUN_ID, threadId: FIXTURE_THREAD_ID, ts: "2026-07-21T10:02:38.000Z", node: "draft", actor: "coder", claimCount: 2 },
