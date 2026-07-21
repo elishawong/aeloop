@@ -34,19 +34,30 @@ import type { AvailabilityResult, InvokeRequest, InvokeResult, ModelAdapter } fr
  * `ProfileConfig["providers"][id]` (`src/profile/loader.ts`'s
  * `ProviderConfig`) after `${ENV}` substitution has already run. Kept as
  * its own local type (not importing `ProviderConfig` directly) because
- * `LiteLLMAdapter` only cares about these three fields, not `kind`/`cmd`
+ * `LiteLLMAdapter` only cares about these fields, not `kind`/`cmd`
  * (those are `harness/config.ts`'s dispatch concern, PRD §5).
+ *
+ * `api_style`:
+ * - "openai" (default): OpenAI-compatible `POST /chat/completions`
+ * - "anthropic": Anthropic Messages API `POST /v1/messages` (used by Claude Code)
  */
 export interface LiteLLMAdapterConfig {
   base_url?: string;
   api_key?: string;
   model?: string;
+  api_style?: "openai" | "anthropic";
 }
 
 /** Minimal shape this adapter reads out of an OpenAI-compatible chat/completions response. */
 interface ChatCompletionsResponse {
   model?: unknown;
   choices?: unknown;
+}
+
+/** Minimal shape this adapter reads out of an Anthropic-compatible messages response. */
+interface AnthropicMessagesResponse {
+  model?: unknown;
+  content?: unknown;
 }
 
 function describeCause(cause: unknown): string {
@@ -68,7 +79,7 @@ function normalizeBaseUrl(baseUrl: string): string {
  * doesn't match — the caller turns that into a typed `AdapterInvokeError`
  * rather than this helper throwing a shape-specific error of its own.
  */
-function extractContent(parsed: unknown): string | undefined {
+function extractOpenAIContent(parsed: unknown): string | undefined {
   if (typeof parsed !== "object" || parsed === null) return undefined;
   const { choices } = parsed as ChatCompletionsResponse;
   if (!Array.isArray(choices) || choices.length === 0) return undefined;
@@ -78,6 +89,33 @@ function extractContent(parsed: unknown): string | undefined {
   if (typeof message !== "object" || message === null) return undefined;
   const content = (message as { content?: unknown }).content;
   return typeof content === "string" ? content : undefined;
+}
+
+/**
+ * Pulls `content[i].text` out of a parsed Anthropic-compatible messages
+ * response body. Anthropic's response format:
+ * - `content: [{ type: "text", text: "..." }]` (array of content blocks)
+ * - With thinking enabled: `content: [{ type: "thinking", ... }, { type: "text", text: "..." }]`
+ *
+ * This function iterates through all content blocks and returns the first
+ * block where `type === "text"`, ignoring "thinking" type blocks.
+ */
+function extractAnthropicContent(parsed: unknown): string | undefined {
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const { content } = parsed as AnthropicMessagesResponse;
+  if (!Array.isArray(content) || content.length === 0) return undefined;
+
+  // Find the first block with type === "text".
+  // Note: some models (e.g. DeepSeek/Seed) may return "thinking" type blocks
+  // first, followed by the actual "text" block.
+  for (const block of content) {
+    if (typeof block !== "object" || block === null) continue;
+    const b = block as { type?: unknown; text?: unknown };
+    if (b.type === "text" && typeof b.text === "string") {
+      return b.text;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -112,17 +150,41 @@ export class LiteLLMAdapter implements ModelAdapter {
     const baseUrl = this.requireBaseUrl();
     const model = this.requireModel();
     const providerId = this.requireProviderId();
-    const url = `${normalizeBaseUrl(baseUrl)}/chat/completions`;
+    const apiStyle = this.config.api_style ?? "openai";
+    const normalizedBase = normalizeBaseUrl(baseUrl);
+
+    // Build URL and request body based on API style.
+    let url: string;
+    let requestBody: Record<string, unknown>;
+    let responseShapeError: string;
+
+    if (apiStyle === "anthropic") {
+      // Anthropic Messages API: POST /v1/messages
+      // - max_tokens is REQUIRED for Anthropic
+      // - messages: [{ role: "user", content: "..." }]
+      url = `${normalizedBase}/v1/messages`;
+      requestBody = {
+        model,
+        messages: [{ role: "user", content: req.prompt }],
+        max_tokens: 4096,
+      };
+      responseShapeError = "Anthropic messages shape (content[0].text)";
+    } else {
+      // OpenAI-compatible API: POST /chat/completions (default)
+      url = `${normalizedBase}/chat/completions`;
+      requestBody = {
+        model,
+        messages: [{ role: "user", content: req.prompt }],
+      };
+      responseShapeError = "chat/completions shape (choices[0].message.content)";
+    }
 
     let response: Response;
     try {
       response = await fetch(url, {
         method: "POST",
         headers: this.buildHeaders(),
-        body: JSON.stringify({
-          model,
-          messages: [{ role: "user", content: req.prompt }],
-        }),
+        body: JSON.stringify(requestBody),
       });
     } catch (cause) {
       throw new AdapterInvokeError(`LiteLLMAdapter "${this.id}" request to ${url} failed`, {
@@ -165,11 +227,15 @@ export class LiteLLMAdapter implements ModelAdapter {
       );
     }
 
-    const content = extractContent(parsed);
+    // Extract content based on API style.
+    const content =
+      apiStyle === "anthropic"
+        ? extractAnthropicContent(parsed)
+        : extractOpenAIContent(parsed);
+
     if (content === undefined) {
       throw new AdapterInvokeError(
-        `LiteLLMAdapter "${this.id}" response from ${url} did not match the expected ` +
-          `chat/completions shape (choices[0].message.content)`,
+        `LiteLLMAdapter "${this.id}" response from ${url} did not match the expected ${responseShapeError}`,
       );
     }
 
@@ -218,14 +284,28 @@ export class LiteLLMAdapter implements ModelAdapter {
   }
 
   /**
-   * Builds request headers. Omits `Authorization` entirely when `api_key`
-   * is unset rather than interpolating `undefined` into the header value
-   * (PRD §5 / §8.5#6 — never sends a `Bearer undefined` header).
+   * Builds request headers.
+   *
+   * - OpenAI style: `Authorization: Bearer <api_key>`
+   * - Anthropic style: `x-api-key: <api_key>` + `anthropic-version: 2023-06-01`
+   *
+   * Omits auth headers entirely when `api_key` is unset rather than
+   * interpolating `undefined` into the header value (PRD §5 / §8.5#6 —
+   * never sends a `Bearer undefined` header).
    */
   private buildHeaders(): Record<string, string> {
+    const apiStyle = this.config.api_style ?? "openai";
     const headers: Record<string, string> = { "Content-Type": "application/json" };
+
     if (this.config.api_key !== undefined && this.config.api_key !== "") {
-      headers["Authorization"] = `Bearer ${this.config.api_key}`;
+      if (apiStyle === "anthropic") {
+        // Anthropic style: x-api-key header + required version header.
+        headers["x-api-key"] = this.config.api_key;
+        headers["anthropic-version"] = "2023-06-01";
+      } else {
+        // OpenAI style: Authorization: Bearer header.
+        headers["Authorization"] = `Bearer ${this.config.api_key}`;
+      }
     }
     return headers;
   }
