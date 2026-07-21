@@ -22,3 +22,4 @@ export * from "./prompt/personas.js";
 export * from "./prompt/composer.js";
 export * from "./workflow/index.js";
 export * from "./conductor/index.js";
+export * from "./conductor-work/index.js";
