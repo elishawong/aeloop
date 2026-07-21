@@ -30,9 +30,9 @@ import type { CoderOutput, TesterOutput } from "../../prompt/schema.js";
 import type { GateLogEntry } from "../types.js";
 import { AuditStore } from "../audit-store.js";
 import { createSqliteCheckpointer } from "../checkpoint.js";
-import { ResumeDecisionDomainMismatchError, RunThreadMismatchError } from "../errors.js";
+import { AuditReadError, ResumeDecisionDomainMismatchError, RunThreadMismatchError } from "../errors.js";
 import { buildLoopGraph, compileLoopGraph } from "../graph.js";
-import { startRun, resumeRun, type StartRunDeps } from "../runner.js";
+import { startRun, resumeRun, getPendingInterrupt, type StartRunDeps } from "../runner.js";
 import { LOOP_NODES } from "../workflow-def.js";
 
 const NOW = "2026-07-21T00:00:00.000Z";
@@ -188,6 +188,15 @@ interface ClaimRow {
   provider_used: string;
 }
 
+interface StepMarkerRow {
+  id: number;
+  run_id: number;
+  step_ref: string;
+  node: string;
+  actor: string;
+  claim_count: number;
+}
+
 /** Raw read against the shared file via a second, independent connection — never `AuditStore`'s own (see file header). */
 function readApprovals(dbPath: string, runId: number): ApprovalRow[] {
   const db = new Database(dbPath, { readonly: true });
@@ -202,6 +211,36 @@ function readClaims(dbPath: string, runId: number): ClaimRow[] {
   const db = new Database(dbPath, { readonly: true });
   try {
     return db.prepare("SELECT * FROM structured_claims WHERE run_id = ? ORDER BY id").all(runId) as ClaimRow[];
+  } finally {
+    db.close();
+  }
+}
+
+function readStepMarkers(dbPath: string, runId: number): StepMarkerRow[] {
+  const db = new Database(dbPath, { readonly: true });
+  try {
+    return db.prepare("SELECT * FROM step_markers WHERE run_id = ? ORDER BY id").all(runId) as StepMarkerRow[];
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * `checkpoints`/`writes` are the LangGraph `SqliteSaver`'s own tables
+ * (`checkpoint.ts`'s header: shares one on-disk file with `AuditStore`,
+ * PRD §9.2 Decision 3) — reads the whole table unfiltered by `run_id`
+ * (neither table has that column; both are keyed by `thread_id`) since
+ * this file's tests only ever put one run's worth of checkpoint state in a
+ * given temp db, same "one fresh tmpDbPath() per test" isolation every
+ * other helper in this file already relies on.
+ */
+function readCheckpointTables(dbPath: string): { checkpoints: unknown[]; writes: unknown[] } {
+  const db = new Database(dbPath, { readonly: true });
+  try {
+    return {
+      checkpoints: db.prepare("SELECT * FROM checkpoints ORDER BY thread_id, checkpoint_id").all(),
+      writes: db.prepare("SELECT * FROM writes ORDER BY thread_id, checkpoint_id, idx").all(),
+    };
   } finally {
     db.close();
   }
@@ -1169,5 +1208,135 @@ describe("resumeRun — R2-6 approvals.decided_at is the gate's own recorded dec
     const approvals = readApprovals(dbPath, started.runId);
     const g1Approval = approvals.find((a) => a.gate_type === "G1_SEND_TO_TESTER");
     expect(g1Approval?.decided_at).toBe(gateEntry?.decidedAt);
+  });
+});
+
+/**
+ * A5 PRD §5 — `getPendingInterrupt()`'s own tests, following this file's
+ * existing FakeAdapter-backed patterns (no new test infra needed, per the
+ * PRD's own implementation sketch). Exercises the exact reason this
+ * function exists: a caller with no in-memory `RunHandle` (a fresh CLI
+ * process resuming a run started/advanced by a *previous* process) needs a
+ * read-only way to reconstruct the pending gate's payload.
+ */
+describe("getPendingInterrupt", () => {
+  it("reconstructs the pending gate payload for a run paused at G1, matching what startRun() itself returned", async () => {
+    const dbPath = tmpDbPath("pending-interrupt-g1.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+
+    const started = await startRun(deps, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 2,
+    });
+    expect(started.interrupt?.gate).toBe("G1_SEND_TO_TESTER");
+
+    const pending = await getPendingInterrupt(deps, started.runId);
+    expect(pending.runId).toBe(started.runId);
+    expect(pending.threadId).toBe(started.threadId);
+    expect(pending.done).toBe(false);
+    expect(pending.interrupt?.gate).toBe("G1_SEND_TO_TESTER");
+    expect(pending.interrupt?.payload).toEqual(started.interrupt?.payload);
+  });
+
+  it("works from an entirely fresh AuditStore/checkpointer pointed at the same on-disk file — no in-memory RunHandle required (the brand-new-process case this function exists for)", async () => {
+    const dbPath = tmpDbPath("pending-interrupt-fresh-process.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["reject"]);
+    audits.push(audit);
+
+    const started = await startRun(deps, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 5, // high enough that this reject routes to g2, not escalation.
+    });
+    const atG2 = await resumeRun(deps, started.runId, started.threadId, { decision: "approved" }, "elisha", started.stepCounters);
+    expect(atG2.interrupt?.gate).toBe("G2_SEND_TO_FIX");
+
+    // A completely independent deps object (its own registry/router/AuditStore/checkpointer),
+    // pointed at the same dbPath — simulating a brand-new CLI process that has nothing but a runId
+    // (and the dbPath convention) to go on, no in-memory RunHandle from the process that ran startRun.
+    const { deps: freshDeps, audit: freshAudit } = buildDeps(dbPath, ["reject"]);
+    audits.push(freshAudit);
+
+    const pending = await getPendingInterrupt(freshDeps, started.runId);
+    expect(pending.runId).toBe(started.runId);
+    expect(pending.threadId).toBe(started.threadId);
+    expect(pending.done).toBe(false);
+    expect(pending.interrupt?.gate).toBe("G2_SEND_TO_FIX");
+    expect(pending.interrupt?.payload.issues).toEqual(atG2.interrupt?.payload.issues);
+  });
+
+  it("done: true and no interrupt once the run has actually completed (applied)", async () => {
+    const dbPath = tmpDbPath("pending-interrupt-done.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+
+    const started = await startRun(deps, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 2,
+    });
+    const atG3 = await resumeRun(deps, started.runId, started.threadId, { decision: "approved" }, "elisha", started.stepCounters);
+    expect(atG3.interrupt?.gate).toBe("G3_FINAL_MERGE");
+    const final = await resumeRun(deps, started.runId, started.threadId, { decision: "approved" }, "elisha", atG3.stepCounters);
+    expect(final.done).toBe(true);
+
+    const pending = await getPendingInterrupt(deps, started.runId);
+    expect(pending.done).toBe(true);
+    expect(pending.interrupt).toBeUndefined();
+  });
+
+  it("throws AuditReadError for a runId that doesn't exist at all", async () => {
+    const dbPath = tmpDbPath("pending-interrupt-missing.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+
+    await expect(getPendingInterrupt(deps, 999999)).rejects.toBeInstanceOf(AuditReadError);
+  });
+
+  it("writes nothing — workflow_runs/approvals/structured_claims/step_markers AND the checkpointer's own checkpoints/writes tables are all unchanged before and after the call (the read-only contract)", async () => {
+    const dbPath = tmpDbPath("pending-interrupt-readonly.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+
+    const started = await startRun(deps, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 2,
+    });
+
+    const runBefore = audit.getRunById(started.runId);
+    const approvalsBefore = readApprovals(dbPath, started.runId);
+    const claimsBefore = readClaims(dbPath, started.runId);
+    // Zorro re-review "🟡" item 2 (test-report.md): the snapshot used to only cover
+    // workflow_runs/approvals/structured_claims — it missed step_markers (this file's own
+    // internal-bookkeeping table) AND the checkpointer's checkpoints/writes tables entirely, so a
+    // regression that made getPendingInterrupt() write to either would have sailed through this
+    // "read-only contract" test undetected.
+    const stepMarkersBefore = readStepMarkers(dbPath, started.runId);
+    const checkpointTablesBefore = readCheckpointTables(dbPath);
+
+    await getPendingInterrupt(deps, started.runId);
+
+    const runAfter = audit.getRunById(started.runId);
+    const approvalsAfter = readApprovals(dbPath, started.runId);
+    const claimsAfter = readClaims(dbPath, started.runId);
+    const stepMarkersAfter = readStepMarkers(dbPath, started.runId);
+    const checkpointTablesAfter = readCheckpointTables(dbPath);
+
+    expect(runAfter).toEqual(runBefore);
+    expect(approvalsAfter).toEqual(approvalsBefore);
+    expect(claimsAfter).toEqual(claimsBefore);
+    expect(stepMarkersAfter).toEqual(stepMarkersBefore);
+    expect(checkpointTablesAfter).toEqual(checkpointTablesBefore);
   });
 });

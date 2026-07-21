@@ -42,8 +42,23 @@
 // No branch in this file calls `process.exit()` — the whole script is one
 // `if/else` + `switch` with no early-exit calls, so setting `exitCode` and
 // falling through to the end is always safe.
+//
+// **A5 re-review addition (P1-4's "🟡" item 4, `docs/feature/a5-cli-tui/
+// test-report.md`)**: when `FAKE_CLAUDE_PROMPT_CAPTURE_FILE` is set, this
+// fixture appends the real `-p <prompt>` text it received to that file,
+// opt-in and additive only — every existing scenario/test that doesn't set
+// this env var behaves exactly as before. This exists so
+// `src/cli.e2e.test.ts` (B8) can assert the *content* PromptComposer/
+// ContextInjector actually assembled (e.g. a seeded memory) really reached
+// the coder subprocess's real argv, not just that some prompt was sent.
+import fs from "node:fs";
 
 const args = process.argv.slice(2);
+
+const promptCaptureFile = process.env.FAKE_CLAUDE_PROMPT_CAPTURE_FILE;
+if (promptCaptureFile && args[0] === "-p" && typeof args[1] === "string") {
+  fs.appendFileSync(promptCaptureFile, args[1] + "\n---FAKE_CLAUDE_PROMPT_BOUNDARY---\n");
+}
 
 function emit(event) {
   process.stdout.write(JSON.stringify(event) + "\n");

@@ -18,14 +18,28 @@
  *     configured in the calling environment, which can silently hang
  *     waiting for an approval that will never come non-interactively.
  *
- * `--allowedTools "Bash,Read,Grep,Glob"` is a fixed, read-only-equivalent
- * tool allowlist (mirrors codex's `--sandbox read-only` posture) — a
- * coder's product is a diff *string* (`CoderOutput.diff`), not direct file
- * mutation via the CLI itself (PRD §2 non-goals). **Honest limitation**
- * (PRD §5): this is claude's *permission* layer, not an OS-level sandbox
- * like codex's `--sandbox` — `Bash` being "allowed" doesn't mean it's
- * jailed to read-only actions, only that the model isn't blocked from
- * invoking it.
+ * **`--allowedTools "Bash,Read,Grep,Glob"` is NOT a read-only allowlist —
+ * correction (2026-07-21, Zorro + Codex `gpt-5.6-sol` independent
+ * re-review, `docs/feature/a5-cli-tui/test-report.md` P0-1, tracked at
+ * [elishawong/aeloop#31](https://github.com/elishawong/aeloop/issues/31),
+ * PRD §0 has the full account)**: an earlier version of this comment
+ * claimed this was "a fixed, read-only-equivalent tool allowlist (mirrors
+ * codex's `--sandbox read-only` posture)". That was factually wrong and has
+ * been struck. This class starts the coder with `--permission-mode
+ * bypassPermissions`, and `Bash` is not a read-only tool — `sed -i`, shell
+ * redirection, and `git apply` can all write to disk through it; `Read`/
+ * `Grep`/`Glob` being read-only doesn't make the *allowlist* read-only when
+ * `Bash` is also in it. Concretely: the coder role can already have written
+ * real changes to the target repository before a human ever sees an A5 G1
+ * gate's rendered diff and approves it — `applyNode()`'s empty-shell
+ * implementation (`graph.ts`, DESIGN §4's "Apply" state, downgraded per A4a
+ * PRD §0/§2) only guarantees the *engine* never applies `CoderOutput.diff`
+ * itself; it does nothing to stop the coder from having already mutated the
+ * filesystem directly via `Bash` during its own invocation. This is a
+ * known, currently-unfixed limitation of this adapter (tracked at
+ * aeloop#31) — the fix, when it lands, belongs in this file's
+ * permission/tool configuration, not in `applyNode()` or A5's `src/cli/`
+ * layer.
  */
 import { AdapterInvokeError } from "../errors.js";
 import { spawnWithTimeout } from "../cli-exec.js";
@@ -38,7 +52,7 @@ const DEFAULT_TIMEOUT_MS = 600_000;
 /** `checkAvailability()` is a lightweight `--version` probe, not a real invoke. */
 const AVAILABILITY_TIMEOUT_MS = 10_000;
 
-/** Read-only-equivalent tool allowlist (see file header). */
+/** Tool allowlist — includes `Bash`, so NOT read-only (see file header's P0-1 correction, aeloop#31). */
 const ALLOWED_TOOLS = "Bash,Read,Grep,Glob";
 
 export interface ClaudeCliAdapterConfig {

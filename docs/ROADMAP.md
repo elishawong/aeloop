@@ -2,7 +2,7 @@
 
 > 📌 **Single source of truth for aeloop's progress** — answers "where are we now / what's next." See per-batch implementation docs for details.
 > 🔗 Design authority: [docs/DESIGN.md](./DESIGN.md) (§8 Milestones A0-A6)
-> Last updated: 2026-07-21 (A4b build wrapped up, pending independent review)
+> Last updated: 2026-07-21 (A5 build wrapped up, pending independent review)
 
 ---
 
@@ -60,8 +60,17 @@
 - [x] Hard vertical slice (`src/loop.e2e.test.ts` adds a full threshold→escalation→`force_pass`→G3→apply chain scenario, plus a new `tester-reject` scenario in `fake-codex.fixture.mjs`) — B6
 - [x] Wrote back docs (this file/PROGRESS/CHANGELOG/root CLAUDE.md/ai-agent repo CHARTS/knowledge/aeloop.md + a wording fix in `docs/DESIGN.md` §1.5 ruflo) — B7 (this item); **276/276 tests green, pending independent review**
 
-### A5. CLI/TUI
-- [ ] Colorized diff + y/n approval + visual distinction for escalations
+### A5. CLI/TUI — B0-B9 all complete, see `docs/feature/a5-cli-tui/` for details
+- [x] `src/cli/errors.ts` (typed `UnsupportedProfileError`/`RunNotResumableError`) + `package.json` `bin`/`chalk`/`@inquirer/prompts` deps — B0
+- [x] `colors.ts` (chalk theming helpers, `escalationBanner()`) + `diff-render.ts` (best-effort line-prefix diff colorizer — `CoderOutput.diff` is a self-reported string, not a real `git diff`, so this deliberately isn't a unified-diff parser/validator) — B1
+- [x] `gate-view.ts` (pure `GatePayload -> string` per gate, Escalation wrapped in the structurally-distinct banner, not just a different color) — B2
+- [x] `prompter.ts` (`Prompter` interface, real `InquirerPrompter`, scripted `FakePrompter` — the seam that makes the interactive loop testable without a TTY, and what B8's hard vertical slice uses to drive a real run non-interactively) — B3
+- [x] `runner.ts` gains `getPendingInterrupt()` — the one Loop-layer change this PRD makes (read-only reconstruction of a paused run's pending-gate payload for a fresh CLI process with no in-memory `RunHandle`); 3 mutation-tested regressions (missing-run guard, wrong thread_id, always-done) — B4
+- [x] `assemble.ts` (`assembleSubscriptionDeps()` — real dependency-graph wiring for the subscription profile, `AI_AGENT_PROFILE=apikey` hard-guarded to `UnsupportedProfileError` before ever touching `profiles/apikey`; `resolveRejectThreshold()`'s 3-tier chain) — B5
+- [x] `run-loop.ts` (`runInteractiveLoop()` — shared start/resume orchestrator; G1/G3 `confirm()`, G2/Escalation `select()`, G2 never offers a third "rejected" option per `gates.ts`'s real `routeAfterG2` contract; 4 mutation-tested regressions on the gate-routing/rendering logic) — B6
+- [x] `main.ts` (`node:util.parseArgs` argv parsing, `start`/`resume`/`list` dispatch, every error caught and printed as `Name: message` — never a raw stack trace — SIGINT handler installed/removed per call) + `bin.ts` (real two-line production entry point) — B7
+- [x] Hard vertical slice (`src/cli.e2e.test.ts`): real `main()` dispatch + real subscription-profile dependency graph + real cli-bridge fixture subprocesses + scripted `FakePrompter`, both the happy path (G1→G3→apply) and the threshold-escalation path (reject-to-threshold→ESCALATION_ACK→force_pass→G3→apply) — B8
+- [x] Wrote back docs (this file/PROGRESS/CHANGELOG/README/ai-agent repo `CHARTS/knowledge/aeloop.md`) — B9 (this item); **368/368 tests green**, `pnpm build`/`pnpm lint` both clean, pending independent review
 
 ### A6. Dual profile run acceptance
 - [ ] Run subscription (claude+codex) and apikey (litellm) each through one real task end-to-end
