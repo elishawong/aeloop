@@ -2,7 +2,7 @@
 
 > 📌 **aeloop 的单一进度真相** —— 回答「现在到哪了 / 接下来做什么」。细节见各批实现文档。
 > 🔗 设计权威:[docs/DESIGN.md](./DESIGN.md)(§8 里程碑 A0-A6)
-> 最后更新:2026-07-20(A3 build 收官,待 Zorro `/verify`)
+> 最后更新:2026-07-21(A4a build 收官,待 Zorro `/verify`)
 
 ---
 
@@ -42,8 +42,18 @@
 - [x] 硬性垂直切片测试(cli-bridge 真接通:真实 MemoryStore/ContextInjector/PromptComposer/`buildAdapterRegistry`/ProviderRouter/真实 CodexCliAdapter 真 spawn/SchemaValidator/ToolExecVerifier,唯一替身是受控 fixture 子进程)—— B6(`12cba2d`)
 - [x] 文档回写(本文件/PROGRESS/CHANGELOG/根 CLAUDE.md)—— B7;**228/228 测试绿,Zorro 两轮对抗审 PASS(R1 FAIL→返工→R2 PASS)+ Codex 跨模型二签,待指挥官终批 merge**
 
-### A4. Loop
-- [ ] LangGraph 编排 + G1/G2/G3 + 阈值强制升级 + 审计表
+### A4a. Loop 编排(graph + coder/tester 节点 + G1/G2/G3 门 + happy-path 垂直切片)—— B0-B6 全部完成,详见 `docs/feature/a4a-loop/`
+- [x] `types.ts`/`errors.ts`/`workflow-def.ts`(`LoopState` Annotation.Root + `LOOP_NODES`/`GATE_TYPES` 单一命名来源)+ `nodes/coder.ts`/`nodes/tester.ts`(复用 A2 ProviderRouter/A1 PromptComposer/A2 SchemaValidator,零新增模型调用逻辑)—— B0-B1
+- [x] `gates.ts`(G1/G2/G3 门,`interrupt()`/`Command({resume})`,interrupt 前纯函数/interrupt 后才构造 GateLogEntry)—— B2
+- [x] `graph.ts`(`buildLoopGraph`/`compileLoopGraph`,`addConditionalEdges` 首次验证——spike 唯一未覆盖的 LangGraph 机制,一次性通过)—— B3
+- [x] `checkpoint.ts`(`SqliteSaver.fromConnString`)+ 同进程双阶段"非闭包状态"resume 测试(真实图 + 真实磁盘 checkpoint)—— B4
+- [x] 硬性垂直切片 `src/loop.e2e.test.ts`(真实 Context→Prompt→`buildAdapterRegistry`(cli-bridge fixture)→ProviderRouter→真实图→真实 SqliteSaver→G1/G3 interrupt+resume happy path→`applied:true`,角色绑定对齐真实 config.yaml:coder→claude-cli/tester→codex-cli)—— B5
+- [x] 文档回写(本文件/根 CLAUDE.md/CHANGELOG/ai-agent 仓 CHARTS/knowledge/aeloop.md)—— B6;**254/254 测试绿,待 Zorro `/verify`**
+
+### A4b. 阈值强升 + 审计表持久化(下一轮 PRD,同一 issue #13 后续批次)
+- [ ] `reject_count >= threshold` 硬分支 + `Escalation` 节点 + 人工决定 + `Cancel` 终态(DESIGN §4 状态机 A4a 故意留白的子树)
+- [ ] `workflow_runs`/`structured_claims`/`approvals` 三张审计表建表 + 写入(A4a 的 `gateLog` 是这张表的内存态影子,字段命名已贴近)
+- [ ] checkpoint 跨进程 resume 生产化(`langgraph_thread_id` 存进 `workflow_runs` 表)
 
 ### A5. CLI/TUI
 - [ ] 彩色 diff + y/n 批准 + 升级视觉区分

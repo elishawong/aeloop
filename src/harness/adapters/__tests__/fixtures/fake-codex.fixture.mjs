@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 // fake-codex.fixture.mjs — a controlled stand-in for the real `codex`
-// binary, used ONLY by codex-cli-adapter.test.ts (never spawned in
-// production, never a real `codex exec` call). A3 PRD §5/§6's "real but
-// controlled" test strategy: CodexCliAdapter really `spawn()`s this file
-// as a real child process and really parses its real stdout — the only
-// thing replaced is "the actual codex binary", mirroring how A2's
-// LiteLLMAdapter tests spin up a real local `node:http` server instead of
-// mocking `fetch`.
+// binary (never spawned in production, never a real `codex exec` call).
+// Originally used ONLY by codex-cli-adapter.test.ts; as of A4a it is also
+// spawned by src/loop.e2e.test.ts (the "tester-pass" scenario below, PRD
+// §5's B5 vertical slice — see the "A4a addition" note further down for
+// why). A3 PRD §5/§6's "real but controlled" test strategy: CodexCliAdapter
+// really `spawn()`s this file as a real child process and really parses its
+// real stdout — the only thing replaced is "the actual codex binary",
+// mirroring how A2's LiteLLMAdapter tests spin up a real local `node:http`
+// server instead of mocking `fetch`.
 //
 // Plain `.mjs`, not `.ts` — deliberately outside both `tsc` (tsconfig.json
 // only includes `src/**/*.ts`) and vitest's test discovery (`vitest.config.ts`
@@ -35,6 +37,17 @@
 // `claims-no-trace`'s CoderOutput-shaped final text, so it's the one
 // scenario that's simultaneously "schema-valid" and "trace non-empty"
 // (needed for B6's "pass" assertion; A3 PRD §5/§6's B6 task description).
+//
+// **A4a addition**: `tester-pass` (added for `src/loop.e2e.test.ts`'s B5
+// vertical slice, PRD §5's "如果没有完全匹配的,按 A3 B3/B4 已经建立的
+// 模式各自新增一个,不复制整份新文件"). Every prior scenario here emits
+// `CoderOutput`-shaped JSON (`{diff, claims[], confidence}`) because A3's
+// own tests only ever routed `codex-cli` to the `coder` role; A4a's
+// vertical slice binds `codex-cli` to the `tester` role instead (DESIGN
+// §7's real `profiles/subscription/config.yaml` binding), so it needs a
+// scenario whose final agent_message is `TesterOutput`-shaped
+// (`{verdict, issues[], claims[], confidence}`) instead — constructed, no
+// verbatim spike capture exists for a tester-shaped response either.
 //
 // **Zorro A3 round-1 minor Y4**: every branch sets `process.exitCode`
 // instead of calling `process.exit()` — `process.exit()` called
@@ -185,6 +198,33 @@ if (args[0] === "--version") {
       item: { id: "item_1", type: "command_execution", command, aggregated_output: "9 passed\n", exit_code: 0, status: "completed" },
     });
     emit({ type: "item.completed", item: { id: "item_2", type: "agent_message", text: claimedContent } });
+    emit({
+      type: "turn.completed",
+      usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 },
+    });
+    process.exitCode = 0;
+    break;
+  }
+
+  case "tester-pass": {
+    // Constructed (A4a addition, see file header) — a final agent_message
+    // whose text is TesterOutput-shaped JSON with `verdict: "pass"`, used
+    // by `src/loop.e2e.test.ts`'s B5 happy-path vertical slice (tester
+    // role bound to codex-cli, per the real config.yaml's DESIGN §7
+    // binding). No command_execution events — this scenario isn't
+    // exercising ToolExecVerifier, just proving the tester role's real
+    // cli-bridge round trip produces a schema-valid TesterOutput.
+    const testerContent = JSON.stringify({
+      verdict: "pass",
+      issues: [],
+      claims: [
+        { claimText: "the diff compiles and the described change is present", confidence: "verified", sourceRef: "diff review" },
+      ],
+      confidence: "verified",
+    });
+    emit({ type: "thread.started", thread_id: "fixture-tester-pass" });
+    emit({ type: "turn.started" });
+    emit({ type: "item.completed", item: { id: "item_0", type: "agent_message", text: testerContent } });
     emit({
       type: "turn.completed",
       usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 },
