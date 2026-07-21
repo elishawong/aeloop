@@ -20,9 +20,9 @@ aeloop = **模型无关、治理优先的 coder/tester 引擎**(四层嵌套 Pro
 | 包管理 | pnpm |
 | 部署 | CLI 工具(`pnpm add -g`),**非 server** |
 | env | `LITELLM_BASE_URL` / `LITELLM_TOKEN`(仅 apikey profile);无统一前缀 |
-> A0+A1(`src/prompt/` `src/context/` `src/profile/` `src/shared/`)已 merge 到 main(PR #3,139/139 测试绿),详见 `docs/feature/a0-a1-engine-scaffold-context-prompt/`。A2(`src/harness/` 的 ProviderRouter/AdapterRegistry/LiteLLMAdapter/SchemaValidator)已 merge 到 main(PR #7,171/171 测试绿,四轮 Zorro 对抗审 + Codex 跨模型二签 PASS),详见 `docs/feature/a2-harness-provider-router-litellm-adapter/`。A3(`src/harness/adapters/` 的 ClaudeCliAdapter/CodexCliAdapter + `tool-exec-verifier.ts` + `cli-exec.ts`)已完成、228/228 测试绿,**Zorro 两轮对抗审 PASS(R1 FAIL→返工→R2 PASS)+ Codex 跨模型二签,待指挥官终批 merge**,详见 `docs/feature/a3-cli-bridge/`。A4a(`src/loop/` 的 graph.ts/gates.ts/checkpoint.ts/nodes/{coder,tester}.ts + 硬性垂直切片 `src/loop.e2e.test.ts`,DESIGN §4 状态机去 Escalation 子树)build 完成、254/254 测试绿,**待 Zorro 审**,详见 `docs/feature/a4a-loop/`(A4b 阈值强升+审计表持久化留后续增量)。`better-sqlite3` 已装并实测(含 FTS5)。`@langchain/langgraph`/`@langchain/langgraph-checkpoint-sqlite`(A4a 实装,`1.4.8`/`1.0.3`)已装并实测(SqliteSaver 真实磁盘 checkpoint,见 spike-findings.md Q4)。`ajv` 经 A2(#6)评估**不用**(SchemaValidator 直接对 schema-registry 的 zod 对象 `safeParse`,避免双真源)—— 见 DESIGN §8 里程碑 A0-A6。
+> A0+A1(`src/prompt/` `src/context/` `src/profile/` `src/shared/`)已 merge 到 main(PR #3,139/139 测试绿),详见 `docs/feature/a0-a1-engine-scaffold-context-prompt/`。A2(`src/harness/` 的 ProviderRouter/AdapterRegistry/LiteLLMAdapter/SchemaValidator)已 merge 到 main(PR #7,171/171 测试绿,四轮 Zorro 对抗审 + Codex 跨模型二签 PASS),详见 `docs/feature/a2-harness-provider-router-litellm-adapter/`。A3(`src/harness/adapters/` 的 ClaudeCliAdapter/CodexCliAdapter + `tool-exec-verifier.ts` + `cli-exec.ts`)已完成、228/228 测试绿,**Zorro 两轮对抗审 PASS(R1 FAIL→返工→R2 PASS)+ Codex 跨模型二签,待指挥官终批 merge**,详见 `docs/feature/a3-cli-bridge/`。A4a(`src/loop/` 的 graph.ts/gates.ts/checkpoint.ts/nodes/{coder,tester}.ts + 硬性垂直切片 `src/loop.e2e.test.ts`,DESIGN §4 状态机去 Escalation 子树)build 完成、254/254 测试绿,详见 `docs/feature/a4a-loop/`。A4b(阈值强升 escalation + `escalation.ts`/`audit-store.ts`/`runner.ts` + 三张审计表落盘 + checkpoint 跨进程生产化)build 完成、276/276 测试绿,**待 Zorro 审**,详见 `docs/feature/a4b-loop/`。`better-sqlite3` 已装并实测(含 FTS5)。`@langchain/langgraph`/`@langchain/langgraph-checkpoint-sqlite`(A4a 实装,`1.4.8`/`1.0.3`)已装并实测(SqliteSaver 真实磁盘 checkpoint,见 spike-findings.md Q4;A4b 新用 `compiled.stream(..., {streamMode: "updates"})` 做逐节点审计归因,`docs/feature/a4b-loop/PRD.md` 未指定这层实现精度,build 阶段核实的真实 API 用法)。`ajv` 经 A2(#6)评估**不用**(SchemaValidator 直接对 schema-registry 的 zod 对象 `safeParse`,避免双真源)—— 见 DESIGN §8 里程碑 A0-A6。
 
-## 3. 目录结构(现状 · A0-A3 已建 prompt/context/profile/shared/harness(含 cli-bridge),A4a 已建 loop;cli 待 A5)
+## 3. 目录结构(现状 · A0-A3 已建 prompt/context/profile/shared/harness(含 cli-bridge),A4a+A4b 已建 loop;cli 待 A5)
 ```
 aeloop/
 ├── CLAUDE.md / README.md / CHANGELOG.md / .gitignore
@@ -30,10 +30,12 @@ aeloop/
 ├── .claude/skills/  (aigit / run)
 ├── src/  (prompt / context / profile / shared / harness 已建 —— A0-A3;harness 含 cli-bridge:
 │         adapters/{claude-cli,codex-cli}-adapter.ts + tool-exec-verifier.ts + cli-exec.ts,
-│         待 Zorro 审;loop/ 已建 —— A4a:graph.ts(buildLoopGraph/compileLoopGraph)+
-│         gates.ts(G1/G2/G3)+ checkpoint.ts(SqliteSaver)+ nodes/{coder,tester}.ts +
-│         types.ts/errors.ts/workflow-def.ts,+ 硬性垂直切片 src/loop.e2e.test.ts,
-│         待 Zorro 审;cli 待建 —— A5)
+│         待 Zorro 审;loop/ 已建 —— A4a 六节点(graph.ts/gates.ts/checkpoint.ts/
+│         nodes/{coder,tester}.ts/types.ts/errors.ts/workflow-def.ts)+ A4b 增量
+│         (escalation.ts:Escalation 门+HD 三选一路由、audit-store.ts:workflow_runs/
+│         structured_claims/approvals 三表落盘、runner.ts:startRun/resumeRun 编排层,
+│         接入 escalation/cancel 两节点)+ 硬性垂直切片 src/loop.e2e.test.ts(含阈值→
+│         escalation→force_pass→apply 场景),待 Zorro 审;cli 待建 —— A5)
 ├── workflows/  ← 不建(A4a PRD §5 明确降级:`coder-tester-loop.json` 这份 DESIGN §6 提到的文件
 │                 不创建,graph.ts 的图结构是手写代码 + `workflow-def.ts` 的 LOOP_NODES/GATE_TYPES
 │                 常量做单一命名来源,不是运行时从 JSON 动态生成;等真正出现第二个 workflow

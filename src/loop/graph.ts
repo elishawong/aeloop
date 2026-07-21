@@ -1,7 +1,12 @@
 /**
- * `buildLoopGraph()` / `compileLoopGraph()` — assembles the six A4a nodes
- * (draft/g1/review/g2/g3/apply) into DESIGN §4's state machine, minus the
- * Escalation subtree (PRD §0/§5 "graph.ts").
+ * `buildLoopGraph()` / `compileLoopGraph()` — assembles all eight A4b nodes
+ * (draft/g1/review/g2/g3/apply, plus A4b's `escalation`/`cancel`) into
+ * DESIGN §4's full state machine (PRD §0/§4.1/§5 "graph.ts"). A4a shipped
+ * the first six and deliberately left the Escalation subtree out; A4b
+ * completes it — see `buildLoopGraph()`'s own doc comment below for the
+ * full topology (Zorro Round-2 R2-7, `docs/feature/a4b-loop/test-report.md`:
+ * this header used to still say "六节点...minus the Escalation subtree",
+ * stale since A4b actually added `escalation`/`cancel` below).
  *
  * **This file is the PRD's declared technical risk core**: `addConditionalEdges`
  * is the one LangGraph mechanism none of spike-findings.md's 5 Qs exercised
@@ -23,6 +28,7 @@ import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { createDraftNode } from "./nodes/coder.js";
 import { createReviewNode } from "./nodes/tester.js";
 import { createG1Node, createG2Node, createG3Node, routeAfterG1, routeAfterG2, routeAfterG3, routeAfterReview } from "./gates.js";
+import { createEscalationNode, routeAfterEscalation } from "./escalation.js";
 import { LOOP_NODES } from "./workflow-def.js";
 import { LoopState, type LoopStateType } from "./types.js";
 import type { ProviderRouter } from "../harness/provider-router.js";
@@ -45,13 +51,27 @@ function applyNode(_state: LoopStateType): Partial<LoopStateType> {
 }
 
 /**
+ * `Cancel` — DESIGN §4's other terminal state (the Escalation subtree's
+ * "放弃" outcome), symmetric to `applyNode`: marks the run cancelled, no
+ * other side effect (A4b PRD §5 "graph.ts" / §2 non-goal). Not broken out
+ * into its own `nodes/cancel.ts` file, same reasoning as `applyNode`.
+ */
+function cancelNode(_state: LoopStateType): Partial<LoopStateType> {
+  return { cancelled: true };
+}
+
+/**
  * Unconnected-to-a-checkpointer graph builder — pure structure, matching
- * DESIGN §4 minus the Escalation subtree:
+ * DESIGN §4's full state machine (A4a shipped everything except the
+ * Escalation subtree; A4b, PRD §0/§4.1, completes it):
  *
  * `START -> draft -> g1 -{approved}-> review -{pass}-> g3 -{approved}-> apply -> END`
  *
- * with reject/rejected edges looping back to `draft`, and `review`'s
- * `"reject"` verdict routing through `g2` before returning to `draft`.
+ * with reject/rejected edges looping back to `draft`, `review`'s `"reject"`
+ * verdict routing through `g2` (below threshold) or straight to
+ * `escalation` (at/above threshold) before returning to `draft`, `g2`'s
+ * "主动升级" decision also reaching `escalation`, and `escalation`'s
+ * human three-way decision routing to `draft`/`g3`/`cancel`.
  *
  * **Deliberately not adding a plain `addEdge(LOOP_NODES.g1, LOOP_NODES.review)`
  * alongside the `addConditionalEdges(LOOP_NODES.g1, ...)` call below** — the
@@ -66,6 +86,8 @@ export function buildLoopGraph(deps: LoopGraphDeps) {
     .addNode(LOOP_NODES.g2, createG2Node())
     .addNode(LOOP_NODES.g3, createG3Node())
     .addNode(LOOP_NODES.apply, applyNode)
+    .addNode(LOOP_NODES.escalation, createEscalationNode())
+    .addNode(LOOP_NODES.cancel, cancelNode)
     .addEdge(START, LOOP_NODES.draft)
     .addEdge(LOOP_NODES.draft, LOOP_NODES.g1)
     .addConditionalEdges(LOOP_NODES.g1, routeAfterG1, {
@@ -75,15 +97,23 @@ export function buildLoopGraph(deps: LoopGraphDeps) {
     .addConditionalEdges(LOOP_NODES.review, routeAfterReview, {
       g3: LOOP_NODES.g3,
       g2: LOOP_NODES.g2,
+      escalation: LOOP_NODES.escalation,
     })
     .addConditionalEdges(LOOP_NODES.g2, routeAfterG2, {
       draft: LOOP_NODES.draft,
+      escalation: LOOP_NODES.escalation,
     })
     .addConditionalEdges(LOOP_NODES.g3, routeAfterG3, {
       apply: LOOP_NODES.apply,
       draft: LOOP_NODES.draft,
     })
-    .addEdge(LOOP_NODES.apply, END);
+    .addConditionalEdges(LOOP_NODES.escalation, routeAfterEscalation, {
+      draft: LOOP_NODES.draft,
+      g3: LOOP_NODES.g3,
+      cancel: LOOP_NODES.cancel,
+    })
+    .addEdge(LOOP_NODES.apply, END)
+    .addEdge(LOOP_NODES.cancel, END);
 }
 
 /**

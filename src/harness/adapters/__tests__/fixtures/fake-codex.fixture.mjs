@@ -233,6 +233,36 @@ if (args[0] === "--version") {
     break;
   }
 
+  case "tester-reject": {
+    // Constructed (A4b addition, docs/feature/a4b-loop/PRD.md §5's B6 —
+    // "连续返回 verdict: reject 的 tester fixture 场景") — a final
+    // agent_message whose text is TesterOutput-shaped JSON with `verdict:
+    // "reject"`, used by `src/loop.e2e.test.ts`'s threshold-escalation
+    // vertical slice. Emits the same reject verdict on every invocation
+    // (this scenario has no internal call-counting state — each `codex`
+    // invocation is a brand-new subprocess, same as every other scenario
+    // here) — the slice drives two real rounds through it (below
+    // `rejectThreshold: 2`, then at it) purely via the graph's own
+    // `reject_count` bookkeeping, not by varying what this fixture emits.
+    const testerContent = JSON.stringify({
+      verdict: "reject",
+      issues: ["the reversed string is missing the last character"],
+      claims: [
+        { claimText: "ran the described function against a sample input and it dropped a character", confidence: "verified", sourceRef: "manual trace" },
+      ],
+      confidence: "verified",
+    });
+    emit({ type: "thread.started", thread_id: "fixture-tester-reject" });
+    emit({ type: "turn.started" });
+    emit({ type: "item.completed", item: { id: "item_0", type: "agent_message", text: testerContent } });
+    emit({
+      type: "turn.completed",
+      usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 },
+    });
+    process.exitCode = 0;
+    break;
+  }
+
   case "error": {
     // Constructed non-zero-exit scenario (spike never captured a real
     // codex failure) — exercises AdapterInvokeError's non-zero-exit path.

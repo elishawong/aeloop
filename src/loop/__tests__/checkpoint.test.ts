@@ -93,6 +93,9 @@ function initialState(): LoopStateType {
     g3Decision: undefined,
     gateLog: [],
     applied: false,
+    rejectThreshold: 2,
+    escalationDecision: undefined,
+    cancelled: false,
   };
 }
 

@@ -38,6 +38,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { Command } from "@langchain/langgraph";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveProfileDir } from "./profile/loader.js";
 import type { ProfileConfig } from "./profile/loader.js";
@@ -50,6 +51,8 @@ import { buildAdapterRegistry } from "./harness/config.js";
 import { ProviderRouter } from "./harness/provider-router.js";
 import { buildLoopGraph, compileLoopGraph } from "./loop/graph.js";
 import { createSqliteCheckpointer } from "./loop/checkpoint.js";
+import { AuditStore } from "./loop/audit-store.js";
+import { startRun, resumeRun, type RunHandle } from "./loop/runner.js";
 import type { GateResumeValue, LoopNodeName, LoopStateType } from "./loop/types.js";
 
 const NOW = "2026-07-21T00:00:00.000Z";
@@ -69,10 +72,12 @@ function resumeCommand(resume: GateResumeValue) {
 }
 
 const openStores: MemoryStore[] = [];
+const openAudits: AuditStore[] = [];
 let tmpDir = "";
 
 afterEach(() => {
   while (openStores.length > 0) openStores.pop()?.close();
+  while (openAudits.length > 0) openAudits.pop()?.close();
   delete process.env[CLAUDE_SCENARIO_ENV];
   delete process.env[CODEX_SCENARIO_ENV];
   if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -154,6 +159,9 @@ describe("Context -> Prompt -> Harness (real cli-bridge fixtures) -> Loop (real 
       g3Decision: undefined,
       gateLog: [],
       applied: false,
+      rejectThreshold: 2,
+      escalationDecision: undefined,
+      cancelled: false,
     };
 
     // ---- 5. First invoke: real coder cli-bridge call, should stop at G1 ----
@@ -192,5 +200,123 @@ describe("Context -> Prompt -> Harness (real cli-bridge fixtures) -> Loop (real 
     expect(g1Entries[0]?.decision).toBe("approved");
     expect(g3Entries).toHaveLength(1);
     expect(g3Entries[0]?.decision).toBe("approved");
+  });
+
+  /**
+   * A4b's hardest requirement (docs/feature/a4b-loop/PRD.md §2/§8's
+   * "垂直切片必接通(含 escalation)"): the same real chain as the happy-path
+   * slice above, but driven through `runner.ts`'s `startRun()`/
+   * `resumeRun()` — not raw `compiled.invoke()`/`Command` — because
+   * `runner.ts` is the only layer that actually writes `AuditStore`'s
+   * three tables; bypassing it here would just be hand-rolling a second,
+   * redundant audit-writer instead of proving the real one. `tester-reject`
+   * (added to `fake-codex.fixture.mjs` by this PRD) rejects on every real
+   * `codex` invocation, so two real review rounds — first below
+   * `rejectThreshold: 2`, routed through G2's normal fix-forward path, then
+   * at it, routed to `escalation` instead — happen purely from the graph's
+   * own `reject_count` bookkeeping, not from varying what the fixture
+   * emits. `AuditStore` and the checkpointer share one on-disk file (PRD
+   * §9.2 决策3, exercised here with real cli-bridge adapters, not just
+   * `runner.test.ts`'s FakeAdapter).
+   */
+  it("a real run that hits rejectThreshold routes to escalation, force_pass reaches G3/apply, and the three audit tables hold the run's full decision history", async () => {
+    process.env[CLAUDE_SCENARIO_ENV] = "claims-no-trace";
+    process.env[CODEX_SCENARIO_ENV] = "tester-reject";
+
+    const task = "Add a function that reverses a string, and report on it.";
+
+    const store = new MemoryStore(":memory:");
+    openStores.push(store);
+    store.insertMemory(
+      { type: "decision", title: "Build tooling", content: "aeloop uses pnpm as its package manager.", confidenceState: "confirmed" },
+      NOW,
+    );
+    const config = new SystemConfig(store);
+    config.set("default_stale_days", "30", NOW);
+    const staleness = new StalenessEngine(config);
+    const injector = new ContextInjector(store, staleness);
+    const injectedContext = injector.inject(task, new Date(NOW));
+
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
+
+    const fixtureConfig: ProfileConfig = {
+      profile: "fixture",
+      providers: {
+        "claude-cli": { kind: "cli-bridge", cmd: "claude", bin: FAKE_CLAUDE_FIXTURE },
+        "codex-cli": { kind: "cli-bridge", cmd: "codex", bin: FAKE_CODEX_FIXTURE },
+      },
+      roles: {
+        coder: { provider: "claude-cli" },
+        tester: { provider: "codex-cli" },
+      },
+    };
+
+    const registry = buildAdapterRegistry(fixtureConfig);
+    const router = new ProviderRouter(fixtureConfig.roles, registry);
+
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aeloop-loop-e2e-escalation-"));
+    const dbPath = path.join(tmpDir, "loop-e2e-escalation.sqlite");
+    const checkpointer = createSqliteCheckpointer(dbPath);
+    const audit = new AuditStore(dbPath);
+    openAudits.push(audit);
+
+    const deps = { router, composer, audit, checkpointer };
+
+    // ---- Drive the run purely by reacting to whichever gate it's paused at — no hardcoded step count. ----
+    let handle: RunHandle = await startRun(deps, {
+      task,
+      profile: "fixture",
+      workflowDefId: "coder-tester-loop",
+      injectedContext,
+      rejectThreshold: 2,
+    });
+
+    let rounds = 0;
+    while (!handle.done) {
+      rounds += 1;
+      if (rounds > 10) throw new Error("test guard: too many rounds, the run never reached a terminal node");
+
+      const gate = handle.interrupt?.gate;
+      if (gate === undefined) throw new Error("test guard: handle not done but no interrupt present");
+
+      if (gate === "ESCALATION_ACK") {
+        handle = await resumeRun(deps, handle.runId, handle.threadId, { decision: "force_pass", reasoningText: "ship it despite the tester's finding" }, "test-harness", handle.stepCounters);
+      } else {
+        // G1/G2/G3 all get approved — the point of this slice is proving the threshold/escalation wiring, not exercising every rejection branch again (graph.test.ts/runner.test.ts already do).
+        handle = await resumeRun(deps, handle.runId, handle.threadId, { decision: "approved" }, "test-harness", handle.stepCounters);
+      }
+    }
+
+    // ---- Final on-disk state, read via the SAME AuditStore instance (production usage — no reason to re-open a second connection here, unlike cross-process-resume.test.ts which specifically needs to prove no shared memory). ----
+    const finalRun = audit.getRunById(handle.runId);
+    expect(finalRun).toMatchObject({ status: "completed", currentState: "apply", rejectCount: 2, rejectThreshold: 2 });
+
+    // ---- approvals: the ESCALATION_ACK row is really there, decision force_pass. ----
+    const approvalsDb = new Database(dbPath, { readonly: true });
+    const approvalRows = approvalsDb
+      .prepare("SELECT gate_type, decision, decided_by FROM approvals WHERE run_id = ? ORDER BY id")
+      .all(handle.runId) as Array<{ gate_type: string; decision: string; decided_by: string }>;
+    approvalsDb.close();
+
+    const escalationRow = approvalRows.find((row) => row.gate_type === "ESCALATION_ACK");
+    expect(escalationRow).toMatchObject({ decision: "force_pass", decided_by: "test-harness" });
+    // G1 x2 (one per draft round) + G2 x1 (the fix-forward approval below threshold) + ESCALATION_ACK x1 + G3 x1.
+    expect(approvalRows.filter((row) => row.gate_type === "G1_SEND_TO_TESTER")).toHaveLength(2);
+    expect(approvalRows.filter((row) => row.gate_type === "G2_SEND_TO_FIX")).toHaveLength(1);
+    expect(approvalRows.filter((row) => row.gate_type === "G3_FINAL_MERGE")).toHaveLength(1);
+
+    // ---- structured_claims: one row per claim the real coder/tester cli-bridge rounds actually produced. ----
+    const claimsDb = new Database(dbPath, { readonly: true });
+    const claimRows = claimsDb
+      .prepare("SELECT actor, step_ref FROM structured_claims WHERE run_id = ? ORDER BY id")
+      .all(handle.runId) as Array<{ actor: string; step_ref: string }>;
+    claimsDb.close();
+
+    const coderClaims = claimRows.filter((row) => row.actor === "coder");
+    const testerClaims = claimRows.filter((row) => row.actor === "tester");
+    expect(coderClaims).toHaveLength(2); // 2 real draft rounds (round 1, then round 2 after G2's fix-forward approval), 1 claim/round in the "claims-no-trace" fixture.
+    expect(testerClaims).toHaveLength(2); // 2 real review rounds, 1 claim/round in the "tester-reject" fixture.
+    expect(new Set(coderClaims.map((c) => c.step_ref))).toEqual(new Set(["draft#1", "draft#2"]));
+    expect(new Set(testerClaims.map((c) => c.step_ref))).toEqual(new Set(["review#1", "review#2"]));
   });
 });
