@@ -25,4 +25,5 @@ export * from "./prompt/delta.js";
 export * from "./workflow/index.js";
 export * from "./conductor/index.js";
 export * from "./conductor-work/index.js";
+export * from "./conductor-personal/index.js";
 export * from "./evidence/index.js";
