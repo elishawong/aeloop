@@ -7,15 +7,22 @@ import { ConductorWorkApp, companyBrainDirectory } from "./app.js";
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 export function run(argv: readonly string[], output: (line: string) => void = console.log): number {
-  const [command, contractPath] = argv;
+  const positionals = argv.filter((arg) => arg !== "--json");
+  const jsonOutput = argv.includes("--json");
+  const [command, contractPath] = positionals;
   if (command !== "plan" || !contractPath) {
-    output("Usage: conductor-work plan <contract.json>");
+    output("Usage: conductor-work plan <contract.json> [--json]");
     return 2;
   }
   try {
     const workflows = new WorkflowRegistry();
     workflows.register(coderTesterWorkflow);
     const app = new ConductorWorkApp({ brainDirectory: companyBrainDirectory(REPO_ROOT), workflows });
+    if (jsonOutput) {
+      const runPlan = app.planRun(path.resolve(contractPath));
+      output(JSON.stringify(runPlan));
+      return 0;
+    }
     const plan = app.plan(path.resolve(contractPath));
     output(`brain: ${plan.brain.id}@${plan.brain.version}`);
     output(`contract: ${plan.contract.contractId}`);

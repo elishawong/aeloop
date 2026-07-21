@@ -5,6 +5,7 @@ import { loadBrain, type LoadedBrain } from "./brain-loader.js";
 import { loadTaskContract } from "./contract-loader.js";
 import type { LoopEvent } from "../loop/events.js";
 import { EvidenceBundleBuilder, EvidenceEventProjector, type EvidenceBundle } from "../evidence/bundle.js";
+import type { RunPlan, TokenBudget } from "../conductor/run.js";
 
 export interface ConductorWorkConfig {
   readonly brainDirectory: string;
@@ -23,6 +24,12 @@ export class ConductorWorkApp {
   plan(contractPath: string, workflowId?: string): OrchestrationPlan {
     const contract = loadTaskContract(contractPath);
     return this.orchestrator.plan({ brain: this.brain.manifest, contract, workflowId });
+  }
+
+  /** Produce the versioned, auditable RunPlan (budget + capabilities + policy) for a runtime adapter. */
+  planRun(contractPath: string, workflowId?: string, budget?: Partial<TokenBudget>): RunPlan {
+    const contract = loadTaskContract(contractPath);
+    return this.orchestrator.planRun({ brain: this.brain.manifest, contract, workflowId, budget });
   }
 
   getBrain(): LoadedBrain {
