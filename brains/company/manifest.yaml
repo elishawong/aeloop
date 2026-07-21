@@ -1,0 +1,6 @@
+id: company-brain
+kind: company
+version: 1.0.0
+default_workflow_id: coder-tester-loop
+contract_schema_version: "1.0"
+
