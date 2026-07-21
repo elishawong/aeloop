@@ -82,6 +82,98 @@ describe("checkToolExecution", () => {
     expect(checkToolExecution(content, [fakeToolCallRecord()])).toBe("pass");
   });
 
+  it('v2: returns "pass" when a claim declares toolsUsed and every declared tool name is present in the trace', () => {
+    const content = contentWithClaims([
+      {
+        claimText: "read the file and ran the tests",
+        confidence: "verified",
+        verifiedBy: "tool_execution",
+        toolsUsed: ["Read", "Bash"],
+      },
+    ]);
+    const trace = [
+      fakeToolCallRecord({ toolName: "Read", sequenceIndex: 0 }),
+      fakeToolCallRecord({ toolName: "Bash", sequenceIndex: 1 }),
+    ];
+
+    expect(checkToolExecution(content, trace)).toBe("pass");
+  });
+
+  it('v2: returns "fail" when a claim declares toolsUsed but a declared tool name is missing from the trace, even though the trace is non-empty', () => {
+    const content = contentWithClaims([
+      {
+        claimText: "read the file and ran the tests",
+        confidence: "verified",
+        verifiedBy: "tool_execution",
+        toolsUsed: ["Read", "Bash"],
+      },
+    ]);
+    // Trace only has "Read" — "Bash" was declared but never actually ran.
+    const trace = [fakeToolCallRecord({ toolName: "Read", sequenceIndex: 0 })];
+
+    expect(checkToolExecution(content, trace)).toBe("fail");
+  });
+
+  it('v2: legacy claim with no toolsUsed still uses v1 existence-only behavior — "pass" on a non-empty trace', () => {
+    const content = contentWithClaims([
+      { claimText: "I definitely ran something", confidence: "verified", verifiedBy: "tool_execution" },
+    ]);
+    const trace = [fakeToolCallRecord({ toolName: "some_unrelated_tool" })];
+
+    expect(checkToolExecution(content, trace)).toBe("pass");
+  });
+
+  it('v2: legacy claim with no toolsUsed still uses v1 existence-only behavior — "fail" on an empty trace', () => {
+    const content = contentWithClaims([
+      { claimText: "I definitely ran something", confidence: "verified", verifiedBy: "tool_execution" },
+    ]);
+
+    expect(checkToolExecution(content, [])).toBe("fail");
+  });
+
+  it('v2: a single failing tool_execution claim among several fails the whole result, even if another one passes', () => {
+    const content = contentWithClaims([
+      {
+        claimText: "checked with Read",
+        confidence: "verified",
+        verifiedBy: "tool_execution",
+        toolsUsed: ["Read"],
+      },
+      {
+        claimText: "also checked with a tool that never ran",
+        confidence: "verified",
+        verifiedBy: "tool_execution",
+        toolsUsed: ["Grep"],
+      },
+    ]);
+    const trace = [fakeToolCallRecord({ toolName: "Read" })];
+
+    expect(checkToolExecution(content, trace)).toBe("fail");
+  });
+
+  it('v2 (Codex granularity honesty): a claim declaring toolsUsed: ["shell"] passes against a Codex-shaped trace where every record\'s toolName is "shell"', () => {
+    const content = contentWithClaims([
+      { claimText: "ran a shell command", confidence: "verified", verifiedBy: "tool_execution", toolsUsed: ["shell"] },
+    ]);
+    const trace = [fakeToolCallRecord({ toolName: "shell" })];
+
+    expect(checkToolExecution(content, trace)).toBe("pass");
+  });
+
+  it('v2 (Codex granularity honesty): a claim declaring a fine-grained tool name (e.g. "read_file") fails against a Codex-shaped trace, since Codex only ever reports "shell" — the verifier does not fabricate finer granularity than the trace has', () => {
+    const content = contentWithClaims([
+      {
+        claimText: "read a specific file",
+        confidence: "verified",
+        verifiedBy: "tool_execution",
+        toolsUsed: ["read_file"],
+      },
+    ]);
+    const trace = [fakeToolCallRecord({ toolName: "shell" })];
+
+    expect(checkToolExecution(content, trace)).toBe("fail");
+  });
+
   it("never throws on malformed claim entries inside an otherwise-valid claims array", () => {
     const content = JSON.stringify({
       diff: "x",

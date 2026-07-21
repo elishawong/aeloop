@@ -11,6 +11,23 @@
 import type { StartRunDeps, RunHandle, StartRunInput } from "../loop/runner.js";
 import type { TaskContract } from "../conductor/types.js";
 
+/** Coarse-grained risk classification used for governance/routing decisions. */
+export type WorkflowRiskClass = "low" | "medium" | "high";
+
+/**
+ * Minimal JSON-Schema-shaped description of a workflow's input or output
+ * contract. This intentionally does not pull in a full JSON Schema type
+ * (or a schema library) as a hard dependency of the workflow contract; it
+ * captures just enough structure for the registry to validate that a
+ * manifest declares a real, checkable shape rather than an empty stub.
+ */
+export interface WorkflowJsonSchema {
+  readonly type: "object" | "array" | "string" | "number" | "boolean" | "null";
+  readonly properties?: Readonly<Record<string, unknown>>;
+  readonly required?: readonly string[];
+  readonly [key: string]: unknown;
+}
+
 export interface WorkflowManifest {
   readonly id: string;
   readonly version: string;
@@ -19,6 +36,14 @@ export interface WorkflowManifest {
   readonly inputVersion: string;
   readonly outputVersion: string;
   readonly roles: readonly string[];
+  /** Non-empty list of capability tags this workflow declares (e.g. "code-generation"). */
+  readonly capabilities: readonly string[];
+  /** Governance risk classification; drives approval/routing policy upstream. */
+  readonly riskClass: WorkflowRiskClass;
+  /** JSON-Schema-shaped description of the shape accepted by `validateInput`. */
+  readonly inputSchema: WorkflowJsonSchema;
+  /** JSON-Schema-shaped description of the shape produced by a completed run. */
+  readonly outputSchema: WorkflowJsonSchema;
 }
 
 export interface WorkflowRunContext {

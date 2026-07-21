@@ -47,6 +47,19 @@ export const ClaimSchema = z.object({
   sourceRef: z.string().min(1).optional(),
   /** How the claim was checked, if it was. Optional for the same reason as `sourceRef`. */
   verifiedBy: VerifiedBy.optional(),
+  /**
+   * ToolExecVerifier v2 (A3 PRD, issue #11): the specific tool names a
+   * `verifiedBy: "tool_execution"` claim asserts were actually run to back
+   * it (e.g. `["Read", "Bash"]`) — a refinement of v1's schema-level
+   * "singleton-set existence check" limitation (see the note in
+   * `src/harness/tool-exec-verifier.ts`). Optional and independent of
+   * `verifiedBy`: a claim can declare `toolsUsed` without asserting
+   * `tool_execution` (harmless, `ToolExecVerifier` only reads it when
+   * `verifiedBy === "tool_execution"`), and — for backward compatibility —
+   * a `tool_execution` claim can still omit `toolsUsed` entirely, in which
+   * case `ToolExecVerifier` falls back to v1's existence-only check.
+   */
+  toolsUsed: z.array(z.string().min(1)).min(1).optional(),
 });
 export type Claim = z.infer<typeof ClaimSchema>;
 

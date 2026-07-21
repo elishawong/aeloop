@@ -1,4 +1,22 @@
-import type { WorkflowManifest, WorkflowPlugin } from "./types.js";
+import type { WorkflowJsonSchema, WorkflowManifest, WorkflowPlugin } from "./types.js";
+
+const JSON_SCHEMA_TYPES = new Set(["object", "array", "string", "number", "boolean", "null"]);
+
+function assertJsonSchema(value: unknown, path: string): asserts value is WorkflowJsonSchema {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`workflow manifest ${path} must be an object`);
+  }
+  const schema = value as Partial<WorkflowJsonSchema>;
+  if (typeof schema.type !== "string" || !JSON_SCHEMA_TYPES.has(schema.type)) {
+    throw new TypeError(`workflow manifest ${path}.type must be one of: ${[...JSON_SCHEMA_TYPES].join(", ")}`);
+  }
+  if (schema.properties !== undefined && (typeof schema.properties !== "object" || schema.properties === null || Array.isArray(schema.properties))) {
+    throw new TypeError(`workflow manifest ${path}.properties must be an object when present`);
+  }
+  if (schema.required !== undefined && (!Array.isArray(schema.required) || schema.required.some((item) => typeof item !== "string"))) {
+    throw new TypeError(`workflow manifest ${path}.required must be an array of strings when present`);
+  }
+}
 
 export class DuplicateWorkflowError extends Error {
   readonly code = "DUPLICATE_WORKFLOW" as const;
@@ -27,6 +45,18 @@ function assertManifest(manifest: WorkflowManifest): void {
   if (!Array.isArray(manifest.roles) || manifest.roles.some((role) => typeof role !== "string" || role.trim() === "")) {
     throw new TypeError("workflow manifest roles must be an array of non-empty strings");
   }
+  if (
+    !Array.isArray(manifest.capabilities) ||
+    manifest.capabilities.length === 0 ||
+    manifest.capabilities.some((capability) => typeof capability !== "string" || capability.trim() === "")
+  ) {
+    throw new TypeError("workflow manifest capabilities must be a non-empty array of non-empty strings");
+  }
+  if (manifest.riskClass !== "low" && manifest.riskClass !== "medium" && manifest.riskClass !== "high") {
+    throw new TypeError("workflow manifest riskClass must be low, medium, or high");
+  }
+  assertJsonSchema(manifest.inputSchema, "inputSchema");
+  assertJsonSchema(manifest.outputSchema, "outputSchema");
 }
 
 /** In-memory registry; persistence and remote plugin loading belong outside the engine. */
