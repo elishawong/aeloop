@@ -48,24 +48,24 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveProfileDir } from "./profile/loader.js";
-import type { ProfileConfig } from "./profile/loader.js";
-import { MemoryStore } from "./context/store.js";
-import { SystemConfig } from "./context/config.js";
-import { StalenessEngine } from "./context/staleness.js";
-import { ContextInjector } from "./context/injector.js";
-import { PromptComposer } from "./prompt/composer.js";
-import { CoderOutput } from "./prompt/schema.js";
-import { buildAdapterRegistry } from "./harness/config.js";
-import { ProviderRouter } from "./harness/provider-router.js";
-import { SchemaValidator } from "./harness/schema-validator.js";
-import { CodexCliAdapter } from "./harness/adapters/codex-cli-adapter.js";
+import { resolveProfileDir } from "../profile/loader.js";
+import type { ProfileConfig } from "../profile/loader.js";
+import { MemoryStore } from "../context/store.js";
+import { SystemConfig } from "../context/config.js";
+import { StalenessEngine } from "../context/staleness.js";
+import { ContextInjector } from "../context/injector.js";
+import { PromptComposer } from "../prompt/composer.js";
+import { CoderOutput } from "../prompt/schema.js";
+import { buildAdapterRegistry } from "../harness/config.js";
+import { ProviderRouter } from "../harness/provider-router.js";
+import { SchemaValidator } from "../harness/schema-validator.js";
+import { CodexCliAdapter } from "../harness/adapters/codex-cli-adapter.js";
 
 const NOW = "2026-07-20T00:00:00.000Z";
 const SUBSCRIPTION_PERSONAS_DIR = path.join(resolveProfileDir("subscription"), "personas");
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const FAKE_CODEX_FIXTURE = path.join(HERE, "harness", "adapters", "__tests__", "fixtures", "fake-codex.fixture.mjs");
+const FAKE_CODEX_FIXTURE = path.join(HERE, "..", "harness", "adapters", "__tests__", "fixtures", "fake-codex.fixture.mjs");
 const ENV_KEY = "FAKE_CODEX_SCENARIO";
 
 const openStores: MemoryStore[] = [];
