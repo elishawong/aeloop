@@ -115,7 +115,7 @@ flowchart LR
 
 **数据流一圈**:Loop 驱动 Coder 节点 → 向 Prompt 层要 prompt(PromptComposer 从 Context 拉记忆 + 拼人格 + schema)→ 经 Harness 选模型 A 发出、校验结构化输出(cli-bridge 还核 tool_execution)→ 回 Loop → G1 门 → 同一圈跑 Tester(模型 B)→ Loop 计打回/阈值/checkpoint → 下一步。
 
-**为什么这个嵌套对 aeloop 承重**:文章点破的核心——**"确定性校验 > 模型自评"**——正是治理优先的命门。它落在**外两层**:Harness 的 SchemaValidator/ToolExecVerifier(机制核实)+ Loop 的独立 Tester(模型 B 审模型 A)。**防幻觉不在 Prompt 层靠"求模型诚实",而在外两层用机制兜住。** 这就是 aeloop 与 ruflo 的分野:ruflo 重 Loop 执行编排、轻内层治理;aeloop 四层都为"可核实"服务。
+**为什么这个嵌套对 aeloop 承重**:文章点破的核心——**"确定性校验 > 模型自评"**——正是治理优先的命门。它落在**外两层**:Harness 的 SchemaValidator/ToolExecVerifier(机制核实)+ Loop 的独立 Tester(模型 B 审模型 A)。**防幻觉不在 Prompt 层靠"求模型诚实",而在外两层用机制兜住。** 这就是 aeloop 与 ruflo 的分野(2026-07-21 经真读 ruflo 代码核实,详见 ai-agent#127,订正此前"轻内层治理"的过度断言):ruflo **另有**成熟的编排治理——security/反注入反勾结、行为漂移降权、外部真相锚定、回归 witness——不是"轻治理",只是靶子是**防攻击 + 防漂移**,不是"证明编码 agent 没撒谎"。aeloop 的分野更精确地说是:重编排 + 治理偏安全/漂移/资源/外部锚定的 ruflo,**轻"可核实的编码闭环治理"**——缺 aeloop 主打的①确定性 tool_execution 核实(claim vs trace)②强制异模型对抗审③人工审批门+打回强升;aeloop 四层都为这条"可核实的编码闭环"服务。
 
 ## 1.6 aeloop 怎么套用这四层(层→代码映射)
 

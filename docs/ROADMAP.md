@@ -2,7 +2,7 @@
 
 > 📌 **aeloop 的单一进度真相** —— 回答「现在到哪了 / 接下来做什么」。细节见各批实现文档。
 > 🔗 设计权威:[docs/DESIGN.md](./DESIGN.md)(§8 里程碑 A0-A6)
-> 最后更新:2026-07-21(A4a build 收官,待 Zorro `/verify`)
+> 最后更新:2026-07-21(A4b build 收官,待 Zorro `/verify`)
 
 ---
 
@@ -48,12 +48,17 @@
 - [x] `graph.ts`(`buildLoopGraph`/`compileLoopGraph`,`addConditionalEdges` 首次验证——spike 唯一未覆盖的 LangGraph 机制,一次性通过)—— B3
 - [x] `checkpoint.ts`(`SqliteSaver.fromConnString`)+ 同进程双阶段"非闭包状态"resume 测试(真实图 + 真实磁盘 checkpoint)—— B4
 - [x] 硬性垂直切片 `src/loop.e2e.test.ts`(真实 Context→Prompt→`buildAdapterRegistry`(cli-bridge fixture)→ProviderRouter→真实图→真实 SqliteSaver→G1/G3 interrupt+resume happy path→`applied:true`,角色绑定对齐真实 config.yaml:coder→claude-cli/tester→codex-cli)—— B5
-- [x] 文档回写(本文件/根 CLAUDE.md/CHANGELOG/ai-agent 仓 CHARTS/knowledge/aeloop.md)—— B6;**254/254 测试绿,待 Zorro `/verify`**
+- [x] 文档回写(本文件/根 CLAUDE.md/CHANGELOG/ai-agent 仓 CHARTS/knowledge/aeloop.md)—— B6;254/254 测试绿,已 Zorro 审 + merge→main(PR #15,`c6589b7`)
 
-### A4b. 阈值强升 + 审计表持久化(下一轮 PRD,同一 issue #13 后续批次)
-- [ ] `reject_count >= threshold` 硬分支 + `Escalation` 节点 + 人工决定 + `Cancel` 终态(DESIGN §4 状态机 A4a 故意留白的子树)
-- [ ] `workflow_runs`/`structured_claims`/`approvals` 三张审计表建表 + 写入(A4a 的 `gateLog` 是这张表的内存态影子,字段命名已贴近)
-- [ ] checkpoint 跨进程 resume 生产化(`langgraph_thread_id` 存进 `workflow_runs` 表)
+### A4b. 阈值强升 escalation + 审计表持久化 + checkpoint 跨进程生产化(同一 issue #13 后续批次)—— B0-B7 全部完成,详见 `docs/feature/a4b-loop/`
+- [x] `types.ts`/`workflow-def.ts`/`errors.ts` 扩充(`rejectThreshold`/`escalationDecision`/`cancelled` 字段、`GateDecision` 加 `"escalate"`、新 `EscalationDecision`/`EscalationResumeValue` 类型、`LOOP_NODES` 加 `escalation`/`cancel`、`GATE_TYPES` 加 `ESCALATION_ACK`、新 `AuditReadError`)—— B0
+- [x] `escalation.ts`(`createEscalationNode()`/`routeAfterEscalation()`,DESIGN §4 `HD` 三选一 `revise`/`force_pass`/`abandon`,结构上平行于 `gates.ts` 的 `createGateNode` 而非复用它)+ `gates.ts` 两处路由改动(`routeAfterReview` 阈值分支、`routeAfterG2` "主动升级"分支)—— B1
+- [x] `graph.ts` 接入 `escalation`/`cancel` 两节点 + `review`/`g2`/`escalation` 条件边扩充 + `graph.test.ts` 追加 6 条 Escalation 子树分支覆盖(阈值边界/`force_pass`/`revise`/`abandon`/G2 主动升级/未识别决策 fail-loud)—— B2
+- [x] `audit-store.ts`(`AuditStore`,`workflow_runs`/`structured_claims`/`approvals` 三表建表+CRUD,`MemoryStore` 结构兄弟、不 import/包裹它)—— B3
+- [x] `runner.ts`(`startRun`/`resumeRun`,`compiled.stream(..., {streamMode:"updates"})` 逐节点归因审计写入,`stepCounters` 显式穿透 `RunHandle` 而非模块级可变态)—— B4
+- [x] checkpoint 跨进程生产化——两个真实独立 `node` 子进程(不同 pid),进程 B 只凭 `dbPath`+`runId` 查回 `langgraph_thread_id` 续跑到底(`docs/feature/a4b-loop/spike/` 等价的 `src/loop/__tests__/fixtures/cross-process-{start,resume}.mjs`,导入编译后 `dist/` 而非 `src/`)—— B5
+- [x] 硬性垂直切片(`src/loop.e2e.test.ts` 追加阈值→escalation→`force_pass`→G3→apply 全链路场景,新增 `fake-codex.fixture.mjs` 的 `tester-reject` 场景)—— B6
+- [x] 文档回写(本文件/PROGRESS/CHANGELOG/根 CLAUDE.md/ai-agent 仓 CHARTS/knowledge/aeloop.md + `docs/DESIGN.md` §1.5 ruflo 措辞订正)—— B7(本条);**276/276 测试绿,待 Zorro `/verify`**
 
 ### A5. CLI/TUI
 - [ ] 彩色 diff + y/n 批准 + 升级视觉区分

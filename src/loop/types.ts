@@ -30,8 +30,18 @@ export type LoopNodeName = (typeof LOOP_NODES)[keyof typeof LOOP_NODES] | "__sta
 /** DESIGN §5 `approvals.gate_type` A4a subset (PRD §5 types.ts). */
 export type GateType = (typeof GATE_TYPES)[keyof typeof GATE_TYPES];
 
-/** DESIGN §5 `approvals.decision` A4a subset — excludes `"override"`, which only makes sense once A4b's Escalation subtree exists (PRD §2 non-goal #2). */
-export type GateDecision = "approved" | "rejected";
+/**
+ * DESIGN §5 `approvals.decision` set. A4a shipped only `"approved" |
+ * "rejected"`; A4b (PRD §4.1) adds the third value `"escalate"` —
+ * `routeAfterG2`'s "主动升级→Esc" edge (DESIGN §4's `G2-- 主动升级 -->Esc`)
+ * is the only router that recognizes it. `routeAfterG1`/`routeAfterG3`
+ * never produce or expect it — receiving it would fall through to their
+ * existing `default: throw` branches, same as any other unrecognized
+ * value (A4b PRD §4.1's explicit note: this is not a new gap, it's the
+ * same "type system allows it, this specific gate doesn't" posture A4a
+ * already established for G2 rejecting `"rejected"`).
+ */
+export type GateDecision = "approved" | "rejected" | "escalate";
 
 /**
  * The payload a gate node hands to `interrupt()` — what the human/caller
@@ -51,6 +61,20 @@ export interface GatePayload {
 /** The shape of `Command({resume: ...})`'s `resume` value for a Loop gate (PRD §5 types.ts). */
 export interface GateResumeValue {
   decision: GateDecision;
+  reasoningText?: string;
+}
+
+/**
+ * DESIGN §4's `HD`("人工决定") node's three out-edges, verbatim
+ * (A4b PRD §4.1: "字面对应 DESIGN §4 状态图 HD 节点画出的三条出边...不是我
+ * 发明的第四套词汇"): `"revise"` → back to `Draft` ("改码/重述"),
+ * `"force_pass"` → `G3` ("强制通过"), `"abandon"` → `Cancel` ("放弃").
+ */
+export type EscalationDecision = "revise" | "force_pass" | "abandon";
+
+/** The shape of `Command({resume: ...})`'s `resume` value for the Escalation gate (PRD §4.1) — kept a separate type from `GateResumeValue` rather than widening `GateDecision`'s consumer, since the Escalation gate's decision domain (three-way) is disjoint from G1/G2/G3's (two-way `approved`/`rejected`, plus G2's `escalate`). */
+export interface EscalationResumeValue {
+  decision: EscalationDecision;
   reasoningText?: string;
 }
 
@@ -80,7 +104,14 @@ export interface GateResumeValue {
  */
 export interface GateLogEntry {
   gate: GateType;
-  decision: GateDecision;
+  /**
+   * G1/G2/G3 entries carry a `GateDecision`; `ESCALATION_ACK` entries
+   * carry an `EscalationDecision` (A4b PRD §4.1) — this union, not a
+   * narrower type, because `gateLog` is a single accumulating array shared
+   * by every gate node in the graph (types.ts's `LoopState.gateLog`
+   * reducer concatenates entries from all of them).
+   */
+  decision: GateDecision | EscalationDecision;
   reasoningText?: string;
   decidedAt: string;
 }
@@ -121,6 +152,19 @@ export const LoopState = Annotation.Root({
   /** Accumulates across the whole run — every gate decision appends, never overwrites (PRD §4). */
   gateLog: Annotation<GateLogEntry[]>({ reducer: (a, b) => a.concat(b), default: () => [] }),
   applied: Annotation<boolean>({ reducer: (_a, b) => b, default: () => false }),
+  /**
+   * This run's reject-count threshold, injected once outside the graph —
+   * same "external, unchanging for the whole run" status as
+   * `injectedContext` (A4b PRD §4.1). `runner.ts` is the layer responsible
+   * for computing the actual number handed in here (PRD §9.2 决策2's
+   * config.yaml → system_config → hardcoded-2 priority chain); the graph
+   * itself only ever reads it, never derives it.
+   */
+  rejectThreshold: Annotation<number>(),
+  /** The Escalation gate's human three-way decision — `undefined` until the run actually reaches that gate (A4b PRD §4.1). */
+  escalationDecision: Annotation<EscalationDecision | undefined>(),
+  /** `Cancel` node's terminal marker, symmetric to `applied` (A4b PRD §4.1). */
+  cancelled: Annotation<boolean>({ reducer: (_a, b) => b, default: () => false }),
 });
 
 /**

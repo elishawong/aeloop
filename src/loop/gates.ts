@@ -107,12 +107,19 @@ export function createG3Node(): (state: LoopStateType) => Partial<LoopStateType>
 
 /**
  * Routers below feed `graph.ts`'s `addConditionalEdges` calls. G1/G3's
- * `default: throw` branches are a defensive runtime backstop for a case
- * the type system has already ruled out (`GateDecision` only has two
- * values) — not silent, per PRD §5, but a plain `Error`, distinct from
- * `routeAfterG2`'s `UnhandledGateDecisionError`, which encodes a real,
- * documented A4a design decision (PRD §2 non-goal #2), not just an
- * unreachable-case guard.
+ * `default: throw` branches are a defensive runtime backstop, **not** a
+ * type-system-ruled-out case (Zorro Round-1 M3,
+ * `docs/feature/a4b-loop/test-report.md`: `GateDecision` has *three*
+ * values as of A4b — `"approved" | "rejected" | "escalate"` — this
+ * comment used to say "only two", which stopped being true the moment
+ * `"escalate"` was added). G1/G3 are simply never *supposed* to receive
+ * `"escalate"` (only `routeAfterG2`'s "主动升级→Esc" edge ever produces
+ * it) — the `default: throw` here is the same runtime backstop it always
+ * was, just for a value that's undocumented for these two gates rather
+ * than one TypeScript itself excludes. Not silent, per PRD §5, but a
+ * plain `Error`, distinct from `routeAfterG2`'s `UnhandledGateDecisionError`,
+ * which encodes a real, documented A4a design decision (PRD §2 non-goal
+ * #2), not just an unreachable-case guard.
  */
 export function routeAfterG1(state: LoopStateType): "review" | "draft" {
   switch (state.g1Decision) {
@@ -125,21 +132,35 @@ export function routeAfterG1(state: LoopStateType): "review" | "draft" {
   }
 }
 
-export function routeAfterReview(state: LoopStateType): "g3" | "g2" {
+/**
+ * A4b (PRD §5 "gates.ts") adds the threshold branch: a `"reject"` verdict
+ * routes to `"escalation"` once `state.rejectCount` has reached
+ * `state.rejectThreshold`, `"g2"` otherwise. This reads `rejectCount`
+ * *after* `nodes/tester.ts`'s `review` node has already incremented it for
+ * this round — LangGraph merges a node's `Partial<State>` return into state
+ * before evaluating that node's own conditional-edge router, so
+ * `routeAfterReview` never sees a stale, pre-increment value (PRD §9.2
+ * 决策6 spells out why this doesn't require touching `nodes/tester.ts`).
+ */
+export function routeAfterReview(state: LoopStateType): "g3" | "g2" | "escalation" {
   if (!state.testerOutput) {
     throw new Error("routeAfterReview called without a testerOutput in state");
   }
-  return state.testerOutput.verdict === "pass" ? "g3" : "g2";
+  if (state.testerOutput.verdict === "pass") return "g3";
+  return state.rejectCount >= state.rejectThreshold ? "escalation" : "g2";
 }
 
 /**
- * A4a's G2 has exactly one routing target: `"approved" -> "draft"`. Any
- * other decision (most notably `"rejected"`, which DESIGN's G2 gate draws
- * no edge for) throws `UnhandledGateDecisionError` — PRD §2 non-goal #2's
- * explicit, documented decision, not an oversight.
+ * A4a's G2 had exactly one routing target: `"approved" -> "draft"`. A4b
+ * (PRD §5 "gates.ts") adds a second, DESIGN §4's `G2-- 主动升级 -->Esc`
+ * edge: `"escalate" -> "escalation"`. Any other decision (most notably
+ * `"rejected"`, which DESIGN's G2 gate draws no edge for) still throws
+ * `UnhandledGateDecisionError` — PRD §2 non-goal #2's explicit, documented
+ * decision, unchanged by A4b.
  */
-export function routeAfterG2(state: LoopStateType): "draft" {
+export function routeAfterG2(state: LoopStateType): "draft" | "escalation" {
   if (state.g2Decision === "approved") return "draft";
+  if (state.g2Decision === "escalate") return "escalation";
   throw new UnhandledGateDecisionError(GATE_TYPES.G2_SEND_TO_FIX, state.g2Decision ?? "undefined");
 }
 

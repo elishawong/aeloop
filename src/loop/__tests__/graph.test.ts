@@ -47,7 +47,7 @@ import type { CoderOutput, TesterOutput } from "../../prompt/schema.js";
 import { UnhandledGateDecisionError } from "../errors.js";
 import { buildLoopGraph, compileLoopGraph, type LoopGraphDeps } from "../graph.js";
 import { LOOP_NODES } from "../workflow-def.js";
-import type { GateResumeValue, LoopNodeName, LoopStateType } from "../types.js";
+import type { EscalationResumeValue, GateResumeValue, LoopNodeName, LoopStateType } from "../types.js";
 
 const NOW = "2026-07-21T00:00:00.000Z";
 const SUBSCRIPTION_PERSONAS_DIR = path.join(resolveProfileDir("subscription"), "personas");
@@ -140,7 +140,12 @@ function resumeCommand(resume: GateResumeValue) {
   return new Command<GateResumeValue, Record<string, unknown>, RealGraphNode>({ resume });
 }
 
-function initialState(): LoopStateType {
+/** Same shape as `resumeCommand`, for the Escalation gate's three-way `EscalationResumeValue` (A4b PRD §5 "graph.test.ts"). */
+function escalationResumeCommand(resume: EscalationResumeValue) {
+  return new Command<EscalationResumeValue, Record<string, unknown>, RealGraphNode>({ resume });
+}
+
+function initialState(overrides: Partial<LoopStateType> = {}): LoopStateType {
   return {
     task: "real graph coverage: add a function",
     feedback: undefined,
@@ -155,6 +160,10 @@ function initialState(): LoopStateType {
     g3Decision: undefined,
     gateLog: [],
     applied: false,
+    rejectThreshold: 2,
+    escalationDecision: undefined,
+    cancelled: false,
+    ...overrides,
   };
 }
 
@@ -284,5 +293,223 @@ describe("buildLoopGraph()/compileLoopGraph() — every real addConditionalEdges
     expect(snapshot.next).toEqual([LOOP_NODES.g2]);
 
     await expect(compiled.invoke(resumeCommand({ decision: "rejected" }), cfg)).rejects.toBeInstanceOf(UnhandledGateDecisionError);
+  });
+});
+
+/**
+ * A4b's Escalation subtree (docs/feature/a4b-loop/PRD.md §5/§8) — every new
+ * `addConditionalEdges` branch `graph.ts` now declares, driven end-to-end
+ * through the real compiled graph, same FakeAdapter-backed pattern as the
+ * describe block above.
+ */
+describe("buildLoopGraph()/compileLoopGraph() — A4b Escalation subtree driven end-to-end", () => {
+  it("reject_count reaching rejectThreshold routes to escalation, not g2; below threshold still routes to g2 (both edges of the boundary)", async () => {
+    const { deps, tester } = buildDeps(["reject", "reject"]);
+    const compiled = compileLoopGraph(buildLoopGraph(deps), new MemorySaver());
+    const cfg = threadConfig("threshold-escalation-boundary");
+
+    await compiled.invoke(initialState({ rejectThreshold: 2 }), cfg);
+    // G1 approve -> review (1st real invoke, scripted "reject") -> rejectCount=1 < threshold(2) -> g2.
+    await compiled.invoke(resumeCommand({ decision: "approved" }), cfg);
+
+    let snapshot = await compiled.getState(cfg);
+    expect(snapshot.next).toEqual([LOOP_NODES.g2]);
+    expect(snapshot.values.rejectCount).toBe(1);
+
+    // G2 approve -> graph.ts's real G2 pathMap `draft: LOOP_NODES.draft` -> draft re-runs -> g1 interrupts again.
+    await compiled.invoke(resumeCommand({ decision: "approved" }), cfg);
+    snapshot = await compiled.getState(cfg);
+    expect(snapshot.next).toEqual([LOOP_NODES.g1]);
+
+    // G1 approve -> review (2nd real invoke, scripted "reject") -> rejectCount=2 >= threshold(2) -> escalation, not g2.
+    await compiled.invoke(resumeCommand({ decision: "approved" }), cfg);
+    snapshot = await compiled.getState(cfg);
+    expect(snapshot.next).toEqual([LOOP_NODES.escalation]);
+    expect(snapshot.values.rejectCount).toBe(2);
+    expect(tester.calls).toBe(2);
+  });
+
+  /**
+   * Zorro Round-1 B1 rework (`docs/feature/a4b-loop/test-report.md`): the
+   * boundary test above only ever drives `rejectCount` up to *exactly*
+   * `rejectThreshold` (2 == 2), which can't distinguish `gates.ts`'s real
+   * `routeAfterReview`'s `rejectCount >= rejectThreshold` from a mutant
+   * `rejectCount === rejectThreshold` — both agree at the boundary. Zorro's
+   * mutation run confirmed this: flipping `>=` to `===` left every existing
+   * test green. DESIGN §4 calls escalation-on-threshold "不可绕"
+   * (un-bypassable) specifically because `rejectCount` keeps climbing past
+   * `rejectThreshold` on a `revise` loop-back (a human can route out of
+   * escalation back to `draft`, tester can reject *again*) — `>=` must keep
+   * escalating every time, `===` would silently stop escalating and route
+   * back to `g2` instead the moment `rejectCount` exceeds `rejectThreshold`
+   * by even one. This test drives `rejectCount` to 3 against
+   * `rejectThreshold: 2` (via threshold-escalation -> Escalation 'revise' ->
+   * draft re-runs -> another tester reject) specifically to make `>=` and
+   * `===` disagree — the boundary test above can't do that, this one can.
+   */
+  it("rejectCount exceeding (not just reaching) rejectThreshold still routes to escalation, not g2 — DESIGN §4's 'un-bypassable' escalation, proven past the boundary", async () => {
+    const { deps, tester } = buildDeps(["reject", "reject", "reject"]);
+    const compiled = compileLoopGraph(buildLoopGraph(deps), new MemorySaver());
+    const cfg = threadConfig("threshold-escalation-beyond-boundary");
+
+    await compiled.invoke(initialState({ rejectThreshold: 2 }), cfg);
+    // G1 approve -> review (1st reject) -> rejectCount=1 < threshold(2) -> g2.
+    await compiled.invoke(resumeCommand({ decision: "approved" }), cfg);
+    let snapshot = await compiled.getState(cfg);
+    expect(snapshot.next).toEqual([LOOP_NODES.g2]);
+    expect(snapshot.values.rejectCount).toBe(1);
+
+    // G2 approve -> draft re-runs -> g1 interrupts again.
+    await compiled.invoke(resumeCommand({ decision: "approved" }), cfg);
+    // G1 approve -> review (2nd reject) -> rejectCount=2 >= threshold(2) -> escalation (both >= and === agree here).
+    await compiled.invoke(resumeCommand({ decision: "approved" }), cfg);
+    snapshot = await compiled.getState(cfg);
+    expect(snapshot.next).toEqual([LOOP_NODES.escalation]);
+    expect(snapshot.values.rejectCount).toBe(2);
+
+    // Escalation 'revise' -> draft re-runs (carrying feedback) -> g1 interrupts again.
+    await compiled.invoke(escalationResumeCommand({ decision: "revise", reasoningText: "please address the tester's findings" }), cfg);
+    snapshot = await compiled.getState(cfg);
+    expect(snapshot.next).toEqual([LOOP_NODES.g1]);
+    expect(snapshot.values.escalationDecision).toBe("revise");
+
+    // G1 approve -> review (3rd reject) -> rejectCount=3 > threshold(2). Real `>=`: 3 >= 2 -> escalation
+    // (still un-bypassable). Mutant `===`: 3 === 2 is false -> g2 (the exact bypass DESIGN §4 forbids).
+    await compiled.invoke(resumeCommand({ decision: "approved" }), cfg);
+    snapshot = await compiled.getState(cfg);
+    expect(snapshot.next).toEqual([LOOP_NODES.escalation]);
+    expect(snapshot.values.rejectCount).toBe(3);
+    expect(tester.calls).toBe(3);
+  });
+
+  /**
+   * Zorro Round-2 R2-1 (`docs/feature/a4b-loop/test-report.md`): every
+   * threshold test above this one exercises `rejectThreshold` values of 1
+   * or 2 — none drives `rejectCount` up while `rejectThreshold` is a real
+   * variable *greater than* 2. That leaves a mutation like `rejectCount >=
+   * Math.min(rejectThreshold, 2)` — which is only wrong once `rejectThreshold
+   * > 2` — completely undetected: for threshold 1/2, `Math.min(threshold, 2)`
+   * equals `threshold` itself, so the mutant agrees with the real
+   * `routeAfterReview` on every case those tests drive. Zorro hand-ran this
+   * exact mutation and confirmed all 23 pre-R2 threshold-related assertions
+   * stayed green. This test sets `rejectThreshold: 5` and drives
+   * `rejectCount` to 2 via two reject/g2-approve rounds — real `>=`: `2 >= 5`
+   * is false, routes to `g2` both times; the `Math.min(5, 2)` mutant would
+   * compute `2 >= 2` as true on the *second* reject and escalate early,
+   * which this test's final assertion (still `g2`, not `escalation`) directly
+   * catches.
+   */
+  it("rejectThreshold as a real variable above 2 is honored, not silently capped at 2 (rejectCount=2 against threshold=5 still routes to g2, not escalation)", async () => {
+    const { deps, tester } = buildDeps(["reject", "reject", "pass"]);
+    const compiled = compileLoopGraph(buildLoopGraph(deps), new MemorySaver());
+    const cfg = threadConfig("threshold-above-two-not-capped");
+
+    await compiled.invoke(initialState({ rejectThreshold: 5 }), cfg);
+    // G1 approve -> review (1st reject) -> rejectCount=1 < threshold(5) -> g2.
+    await compiled.invoke(resumeCommand({ decision: "approved" }), cfg);
+    let snapshot = await compiled.getState(cfg);
+    expect(snapshot.next).toEqual([LOOP_NODES.g2]);
+    expect(snapshot.values.rejectCount).toBe(1);
+
+    // G2 approve -> draft re-runs -> g1 interrupts again.
+    await compiled.invoke(resumeCommand({ decision: "approved" }), cfg);
+    // G1 approve -> review (2nd reject) -> rejectCount=2. Real `>=`: 2 >= 5 is false -> g2 (not escalation).
+    // Mutant `Math.min(threshold, 2)`: 2 >= min(5,2)=2 is true -> would wrongly escalate here.
+    await compiled.invoke(resumeCommand({ decision: "approved" }), cfg);
+    snapshot = await compiled.getState(cfg);
+    expect(snapshot.next).toEqual([LOOP_NODES.g2]);
+    expect(snapshot.values.rejectCount).toBe(2);
+    expect(tester.calls).toBe(2);
+  });
+
+  it("Escalation 'force_pass' routes straight to g3 (no re-running review/draft); subsequent G3 approve reaches apply", async () => {
+    const { deps, coder } = buildDeps(["reject"]);
+    const compiled = compileLoopGraph(buildLoopGraph(deps), new MemorySaver());
+    const cfg = threadConfig("escalation-force-pass");
+
+    await compiled.invoke(initialState({ rejectThreshold: 1 }), cfg);
+    // G1 approve -> review(reject) -> rejectCount=1 >= threshold(1) -> escalation.
+    await compiled.invoke(resumeCommand({ decision: "approved" }), cfg);
+
+    let snapshot = await compiled.getState(cfg);
+    expect(snapshot.next).toEqual([LOOP_NODES.escalation]);
+
+    await compiled.invoke(escalationResumeCommand({ decision: "force_pass", reasoningText: "ship it anyway" }), cfg);
+    snapshot = await compiled.getState(cfg);
+    expect(snapshot.next).toEqual([LOOP_NODES.g3]);
+    expect(snapshot.values.escalationDecision).toBe("force_pass");
+    expect(coder.calls).toBe(1); // draft never re-ran — force_pass skips straight to g3, not through draft again.
+
+    const final = await compiled.invoke(resumeCommand({ decision: "approved" }), cfg);
+    expect(final.applied).toBe(true);
+    expect(final.g3Decision).toBe("approved");
+  });
+
+  it("Escalation 'revise' routes to draft, which really re-runs (real coder adapter invoked again) carrying the tester's issues + human reasoning as feedback", async () => {
+    const { deps, coder } = buildDeps(["reject"]);
+    const compiled = compileLoopGraph(buildLoopGraph(deps), new MemorySaver());
+    const cfg = threadConfig("escalation-revise");
+
+    await compiled.invoke(initialState({ rejectThreshold: 1 }), cfg);
+    await compiled.invoke(resumeCommand({ decision: "approved" }), cfg); // -> review(reject) -> escalation
+    expect(coder.calls).toBe(1);
+
+    await compiled.invoke(escalationResumeCommand({ decision: "revise", reasoningText: "please address the tester's findings" }), cfg);
+    const snapshot = await compiled.getState(cfg);
+    expect(snapshot.next).toEqual([LOOP_NODES.g1]); // escalation -> draft (re-ran, in the same invoke) -> g1 interrupts.
+    expect(snapshot.values.escalationDecision).toBe("revise");
+    expect(coder.calls).toBe(2); // draft genuinely re-ran, not skipped/short-circuited.
+    expect(coder.receivedRequests[1]?.prompt).toContain("fake issue found by review");
+    expect(coder.receivedRequests[1]?.prompt).toContain("please address the tester's findings");
+  });
+
+  it("Escalation 'abandon' routes to cancel; final state has cancelled: true, applied stays false, graph reaches END", async () => {
+    const { deps } = buildDeps(["reject"]);
+    const compiled = compileLoopGraph(buildLoopGraph(deps), new MemorySaver());
+    const cfg = threadConfig("escalation-abandon");
+
+    await compiled.invoke(initialState({ rejectThreshold: 1 }), cfg);
+    await compiled.invoke(resumeCommand({ decision: "approved" }), cfg); // -> escalation
+
+    const final = await compiled.invoke(escalationResumeCommand({ decision: "abandon", reasoningText: "not worth pursuing" }), cfg);
+    expect(final.cancelled).toBe(true);
+    expect(final.applied).toBe(false);
+    expect(final.escalationDecision).toBe("abandon");
+
+    const snapshot = await compiled.getState(cfg);
+    expect(snapshot.next).toEqual([]); // cancel -> END, graph is done.
+  });
+
+  it("G2 receiving 'escalate' (DESIGN §4's 主动升级 edge) routes to escalation, not draft — distinct from G2's existing 'approved'->draft path", async () => {
+    const { deps } = buildDeps(["reject"]);
+    const compiled = compileLoopGraph(buildLoopGraph(deps), new MemorySaver());
+    const cfg = threadConfig("g2-escalate");
+
+    // Threshold high enough that the first reject still routes to g2, not straight to escalation via the threshold path — isolates this test to G2's own "主动升级" edge.
+    await compiled.invoke(initialState({ rejectThreshold: 5 }), cfg);
+    await compiled.invoke(resumeCommand({ decision: "approved" }), cfg); // -> review(reject) -> rejectCount=1 < 5 -> g2
+
+    let snapshot = await compiled.getState(cfg);
+    expect(snapshot.next).toEqual([LOOP_NODES.g2]);
+
+    await compiled.invoke(resumeCommand({ decision: "escalate", reasoningText: "tester found something serious" }), cfg);
+    snapshot = await compiled.getState(cfg);
+    expect(snapshot.next).toEqual([LOOP_NODES.escalation]);
+    expect(snapshot.values.g2Decision).toBe("escalate");
+  });
+
+  it("Escalation receiving an unrecognized decision throws through the real graph, not a silent/wrong route (mirrors G1/G3's default-throw backstop)", async () => {
+    const { deps } = buildDeps(["reject"]);
+    const compiled = compileLoopGraph(buildLoopGraph(deps), new MemorySaver());
+    const cfg = threadConfig("escalation-unhandled-decision");
+
+    await compiled.invoke(initialState({ rejectThreshold: 1 }), cfg);
+    await compiled.invoke(resumeCommand({ decision: "approved" }), cfg); // -> escalation
+
+    const snapshot = await compiled.getState(cfg);
+    expect(snapshot.next).toEqual([LOOP_NODES.escalation]);
+
+    const bogus = { decision: "bogus" } as unknown as EscalationResumeValue;
+    await expect(compiled.invoke(escalationResumeCommand(bogus), cfg)).rejects.toThrow(/routeAfterEscalation/);
   });
 });

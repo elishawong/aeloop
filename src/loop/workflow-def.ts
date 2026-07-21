@@ -26,7 +26,7 @@
  * all.
  */
 
-/** The six real nodes of the A4a coder/tester loop graph (DESIGN §4, minus the Escalation subtree — PRD §0). */
+/** The eight real nodes of the coder/tester loop graph (DESIGN §4) — A4a shipped the first six; A4b (PRD §4.1) adds `escalation`/`cancel`, the Escalation subtree A4a deliberately left out (PRD §0). */
 export const LOOP_NODES = {
   draft: "draft",
   g1: "g1",
@@ -34,17 +34,20 @@ export const LOOP_NODES = {
   g2: "g2",
   g3: "g3",
   apply: "apply",
+  escalation: "escalation",
+  cancel: "cancel",
 } as const;
 
 /**
- * DESIGN §5 `approvals.gate_type` enum's A4a subset — does not include
- * `"ESCALATION_ACK"`, which only exists once A4b's Escalation node does
- * (PRD §5 types.ts).
+ * DESIGN §5 `approvals.gate_type` enum, now complete — A4a shipped the
+ * first three; A4b (PRD §4.1) adds `"ESCALATION_ACK"`, the Escalation
+ * node's gate type.
  */
 export const GATE_TYPES = {
   G1_SEND_TO_TESTER: "G1_SEND_TO_TESTER",
   G2_SEND_TO_FIX: "G2_SEND_TO_FIX",
   G3_FINAL_MERGE: "G3_FINAL_MERGE",
+  ESCALATION_ACK: "ESCALATION_ACK",
 } as const;
 
 /**
@@ -64,9 +67,11 @@ export const CODER_TESTER_LOOP_DEFINITION = {
     { from: "__start__", to: LOOP_NODES.draft },
     { from: LOOP_NODES.draft, to: LOOP_NODES.g1 },
     { from: LOOP_NODES.g1, to: [LOOP_NODES.review, LOOP_NODES.draft], conditional: true },
-    { from: LOOP_NODES.review, to: [LOOP_NODES.g3, LOOP_NODES.g2], conditional: true },
-    { from: LOOP_NODES.g2, to: [LOOP_NODES.draft], conditional: true },
+    { from: LOOP_NODES.review, to: [LOOP_NODES.g3, LOOP_NODES.g2, LOOP_NODES.escalation], conditional: true },
+    { from: LOOP_NODES.g2, to: [LOOP_NODES.draft, LOOP_NODES.escalation], conditional: true },
     { from: LOOP_NODES.g3, to: [LOOP_NODES.apply, LOOP_NODES.draft], conditional: true },
+    { from: LOOP_NODES.escalation, to: [LOOP_NODES.draft, LOOP_NODES.g3, LOOP_NODES.cancel], conditional: true },
     { from: LOOP_NODES.apply, to: "__end__" },
+    { from: LOOP_NODES.cancel, to: "__end__" },
   ],
 } as const;
