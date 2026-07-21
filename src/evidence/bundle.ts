@@ -144,6 +144,19 @@ export class EvidenceBundleBuilder {
   }
 }
 
+/** Read-only adapter from engine events to a product-facing EvidenceBundle. */
+export class EvidenceEventProjector {
+  constructor(private readonly builder: EvidenceBundleBuilder) {}
+
+  accept(event: LoopEvent): void {
+    this.builder.recordEvent(event);
+  }
+
+  snapshot(): EvidenceBundle {
+    return this.builder.build();
+  }
+}
+
 export class TokenBudgetLedger {
   private usedInputTokens = 0;
   private usedOutputTokens = 0;

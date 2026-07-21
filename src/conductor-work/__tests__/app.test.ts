@@ -43,4 +43,19 @@ describe("ConductorWorkApp", () => {
     expect(plan.brain.id).toBe("company-brain");
     expect(plan.workflow.id).toBe("coder-tester-loop");
   });
+
+  it("projects loop events into a read-only company evidence bundle", () => {
+    const fixture = makeFixture();
+    const workflows = new WorkflowRegistry();
+    workflows.register(coderTesterWorkflow);
+    const app = new ConductorWorkApp({ brainDirectory: fixture.root, workflows });
+    const bundle = app.projectEvents([
+      { type: "run_started", runId: 1, threadId: "t-1", ts: "2026-07-21T00:00:00.000Z", task: "demo", profile: "company", workflowDefId: "coder-tester-loop", rejectThreshold: 2 },
+      { type: "run_completed", runId: 1, threadId: "t-1", ts: "2026-07-21T00:00:01.000Z", currentState: "completed" },
+    ], fixture.contractPath);
+    expect(bundle.status).toBe("completed");
+    expect(bundle.contractId).toBe("contract-001");
+    expect(bundle.eventTypes).toEqual(["run_started", "run_completed"]);
+    expect(bundle.unprovenItems).toEqual(["REQ-001"]);
+  });
 });

@@ -3,6 +3,8 @@ import { Orchestrator, type OrchestrationPlan } from "../conductor/orchestrator.
 import type { WorkflowRegistry } from "../workflow/registry.js";
 import { loadBrain, type LoadedBrain } from "./brain-loader.js";
 import { loadTaskContract } from "./contract-loader.js";
+import type { LoopEvent } from "../loop/events.js";
+import { EvidenceBundleBuilder, EvidenceEventProjector, type EvidenceBundle } from "../evidence/bundle.js";
 
 export interface ConductorWorkConfig {
   readonly brainDirectory: string;
@@ -25,6 +27,18 @@ export class ConductorWorkApp {
 
   getBrain(): LoadedBrain {
     return this.brain;
+  }
+
+  /** Project read-only engine events into a company-safe EvidenceBundle. */
+  projectEvents(events: Iterable<LoopEvent>, contractPath?: string): EvidenceBundle {
+    const contract = contractPath ? loadTaskContract(contractPath) : undefined;
+    const builder = new EvidenceBundleBuilder({
+      contractId: contract?.contractId,
+      requirementIds: contract?.requirements.map((requirement) => requirement.id),
+    });
+    const projector = new EvidenceEventProjector(builder);
+    for (const event of events) projector.accept(event);
+    return projector.snapshot();
   }
 }
 
