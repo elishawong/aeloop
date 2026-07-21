@@ -16,10 +16,12 @@
  * transaction-rollback test already established, not a new store method
  * invented just for this file's tests.
  */
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { Command, CompiledStateGraph } from "@langchain/langgraph";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveProfileDir } from "../../profile/loader.js";
 import { PromptComposer } from "../../prompt/composer.js";
@@ -27,10 +29,11 @@ import { AdapterRegistry } from "../../harness/adapter-registry.js";
 import { ProviderRouter } from "../../harness/provider-router.js";
 import type { AvailabilityResult, InvokeRequest, InvokeResult, ModelAdapter } from "../../harness/types.js";
 import type { CoderOutput, TesterOutput } from "../../prompt/schema.js";
-import type { GateLogEntry } from "../types.js";
+import type { GateLogEntry, LoopStateType } from "../types.js";
 import { AuditStore } from "../audit-store.js";
 import { createSqliteCheckpointer } from "../checkpoint.js";
 import { AuditReadError, ResumeDecisionDomainMismatchError, RunThreadMismatchError } from "../errors.js";
+import { LoopEventEmitter, type LoopEvent } from "../events.js";
 import { buildLoopGraph, compileLoopGraph } from "../graph.js";
 import { startRun, resumeRun, getPendingInterrupt, type StartRunDeps } from "../runner.js";
 import { LOOP_NODES } from "../workflow-def.js";
@@ -225,15 +228,6 @@ function readStepMarkers(dbPath: string, runId: number): StepMarkerRow[] {
   }
 }
 
-/**
- * `checkpoints`/`writes` are the LangGraph `SqliteSaver`'s own tables
- * (`checkpoint.ts`'s header: shares one on-disk file with `AuditStore`,
- * PRD §9.2 Decision 3) — reads the whole table unfiltered by `run_id`
- * (neither table has that column; both are keyed by `thread_id`) since
- * this file's tests only ever put one run's worth of checkpoint state in a
- * given temp db, same "one fresh tmpDbPath() per test" isolation every
- * other helper in this file already relies on.
- */
 function readCheckpointTables(dbPath: string): { checkpoints: unknown[]; writes: unknown[] } {
   const db = new Database(dbPath, { readonly: true });
   try {
@@ -1212,6 +1206,584 @@ describe("resumeRun — R2-6 approvals.decided_at is the gate's own recorded dec
 });
 
 /**
+ * Issue #29 (`docs/feature/events-observability/PRD.md` rev. 2, B2) — the
+ * `LoopEvent`/`LoopEventEmitter` instrumentation wired into `runStreamAndPersist`/
+ * `startRun`/`resumeRun`. `LoopEventEmitter`'s own isolation contract (sync
+ * throw / async rejection) is unit-tested in isolation in `events.test.ts`;
+ * this describe block additionally proves that contract holds when the
+ * emitter is actually driving a real compiled graph, not just a bare
+ * emitter — plus the event-sequence/ordering and `updateRunProgress`
+ * call-cadence acceptance criteria PRD §8 lists explicitly.
+ */
+function collectEvents(): { events: LoopEvent[]; emitter: LoopEventEmitter } {
+  const events: LoopEvent[] = [];
+  const emitter = new LoopEventEmitter();
+  emitter.on((e) => {
+    events.push(e);
+  });
+  return { events, emitter };
+}
+
+/** Mirrors `startRun()`'s own internal `initial: LoopStateType` construction (runner.ts) — used only by the manual, `runner.ts`-bypassing "updates"-only drive in the `updateRunProgress` cadence test below, which needs to feed a compiled graph directly. */
+function initialLoopState(task: string, rejectThreshold: number): LoopStateType {
+  return {
+    task,
+    feedback: undefined,
+    injectedContext: { memories: [] },
+    coderOutput: undefined,
+    coderResult: undefined,
+    testerOutput: undefined,
+    testerResult: undefined,
+    rejectCount: 0,
+    g1Decision: undefined,
+    g2Decision: undefined,
+    g3Decision: undefined,
+    gateLog: [],
+    applied: false,
+    rejectThreshold,
+    escalationDecision: undefined,
+    cancelled: false,
+  };
+}
+
+describe("issue #29 — LoopEvent instrumentation (streamMode: [\"updates\",\"tasks\"])", () => {
+  it("startRun's first call (draft -> g1 interrupt): run_started fires first, then node_started(draft) precedes node_completed(draft)/agent_completed(draft), then node_started(g1) precedes gate_requested(g1) — exact order, spike-verified 2-node-call interleaving", async () => {
+    const dbPath = tmpDbPath("events-startrun-order.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+    const { events, emitter } = collectEvents();
+
+    const handle = await startRun(
+      { ...deps, events: emitter },
+      { task: "add a function", profile: "subscription", workflowDefId: "coder-tester-loop", injectedContext: { memories: [] }, rejectThreshold: 2 },
+    );
+
+    expect(handle.interrupt?.gate).toBe("G1_SEND_TO_TESTER");
+    expect(events.map((e) => e.type)).toEqual([
+      "run_started",
+      "node_started",
+      "node_completed",
+      "agent_completed",
+      "node_started",
+      "gate_requested",
+    ]);
+    // The two node_started entries name the two nodes this call actually visited, in visitation order.
+    const nodeStarted = events.filter((e) => e.type === "node_started");
+    expect(nodeStarted.map((e) => (e as { node: string }).node)).toEqual(["draft", "g1"]);
+    // node_started(draft)'s stepRef preview matches node_completed(draft)'s real, allocated stepRef (PRD §9.4).
+    const draftStarted = events.find((e) => e.type === "node_started" && (e as { node: string }).node === "draft");
+    const draftCompleted = events.find((e) => e.type === "node_completed" && (e as { node: string }).node === "draft");
+    expect((draftStarted as { stepRef?: string }).stepRef).toBe("draft#1");
+    expect((draftCompleted as { stepRef?: string }).stepRef).toBe("draft#1");
+    // run_started's own payload matches the caller's real input.
+    const runStarted = events[0];
+    expect(runStarted).toMatchObject({ type: "run_started", runId: handle.runId, threadId: handle.threadId, task: "add a function", profile: "subscription", rejectThreshold: 2 });
+  });
+
+  it("a full G1-approve -> review(pass) -> G3-approve -> apply run: for every node visited, node_started(X) appears before node_completed(X)/agent_completed(X)/gate_decided(X)/gate_requested(X), ending in node_started(apply)+node_completed(apply)+run_completed", async () => {
+    const dbPath = tmpDbPath("events-full-pass.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+    const { events, emitter } = collectEvents();
+    const depsWithEvents = { ...deps, events: emitter };
+
+    const started = await startRun(depsWithEvents, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 2,
+    });
+    const afterG1 = await resumeRun(depsWithEvents, started.runId, started.threadId, { decision: "approved" }, "elisha", started.stepCounters);
+    expect(afterG1.interrupt?.gate).toBe("G3_FINAL_MERGE"); // tester verdict "pass" -> straight to g3, no g2.
+    const afterG3 = await resumeRun(depsWithEvents, started.runId, started.threadId, { decision: "approved" }, "elisha", afterG1.stepCounters);
+    expect(afterG3.done).toBe(true);
+
+    function indexOfFirst(pred: (e: LoopEvent) => boolean): number {
+      const i = events.findIndex(pred);
+      expect(i).toBeGreaterThanOrEqual(0);
+      return i;
+    }
+    function nodeStartedIndex(node: string): number {
+      return indexOfFirst((e) => e.type === "node_started" && (e as { node: string }).node === node);
+    }
+
+    // draft/review: node_started precedes both node_completed and agent_completed for that node.
+    for (const node of ["draft", "review"] as const) {
+      const started_i = nodeStartedIndex(node);
+      const completed_i = indexOfFirst((e) => e.type === "node_completed" && (e as { node: string }).node === node);
+      const agentCompleted_i = indexOfFirst((e) => e.type === "agent_completed" && (e as { node: string }).node === node);
+      expect(started_i).toBeLessThan(completed_i);
+      expect(started_i).toBeLessThan(agentCompleted_i);
+    }
+
+    // g1/g3: node_started precedes *that gate's own* gate_decided (both gates get a real decision in
+    // this all-approve path) — matched by GateType, not just "the first gate_decided seen overall".
+    const NODE_TO_GATE_TYPE: Record<string, string> = { g1: "G1_SEND_TO_TESTER", g3: "G3_FINAL_MERGE" };
+    for (const gate of ["g1", "g3"] as const) {
+      const started_i = nodeStartedIndex(gate);
+      const decided_i = indexOfFirst((e) => e.type === "gate_decided" && (e as { gate: string }).gate === NODE_TO_GATE_TYPE[gate]);
+      expect(started_i).toBeLessThan(decided_i);
+    }
+
+    // Zorro B1: gate_requested must fire *exactly once* per gate the run actually paused at (g1, g3),
+    // and only *after* that gate's own node_started — a premature/duplicate emission (LangGraph
+    // run-ahead making getState() see a later gate's interrupt while still processing an earlier
+    // chunk) is exactly the bug this asserts against.
+    for (const gate of ["g1", "g3"] as const) {
+      const gateType = NODE_TO_GATE_TYPE[gate];
+      const requestedEvents = events.filter((e) => e.type === "gate_requested" && (e as { gate: string }).gate === gateType);
+      expect(requestedEvents).toHaveLength(1);
+      const started_i = nodeStartedIndex(gate);
+      const requested_i = events.indexOf(requestedEvents[0]!);
+      expect(started_i).toBeLessThan(requested_i);
+    }
+
+    // apply: node_started precedes node_completed, and the run ends with run_completed, not run_cancelled.
+    const applyStarted_i = nodeStartedIndex("apply");
+    const applyCompleted_i = indexOfFirst((e) => e.type === "node_completed" && (e as { node: string }).node === "apply");
+    expect(applyStarted_i).toBeLessThan(applyCompleted_i);
+    expect(events.at(-1)?.type).toBe("run_completed");
+    expect(events.some((e) => e.type === "run_cancelled")).toBe(false);
+
+    // Every node this run actually visited got a node_started — none silently skipped. g1/g3 each
+    // appear twice: once when the resumed call's rerun-from-the-top body reaches (and re-pauses at,
+    // or this time resolves) its own interrupt() (spike-findings.md Q3: resume reruns the whole node
+    // body, this "tasks" create-shaped event fires for that rerun same as any other node execution).
+    const startedNodes = events.filter((e) => e.type === "node_started").map((e) => (e as { node: string }).node);
+    expect(startedNodes).toEqual(["draft", "g1", "g1", "review", "g3", "g3", "apply"]);
+  });
+
+  it("a reject-to-threshold path emits tester_rejected on every reject, and escalation_triggered exactly once, only on the round that actually reaches the threshold (not before)", async () => {
+    const dbPath = tmpDbPath("events-threshold.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["reject", "reject"]);
+    audits.push(audit);
+    const { events, emitter } = collectEvents();
+    const depsWithEvents = { ...deps, events: emitter };
+
+    const started = await startRun(depsWithEvents, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 2, // first reject (rejectCount 1) is below threshold -> g2; second reject (rejectCount 2) reaches it -> escalation.
+    });
+    const afterG1 = await resumeRun(depsWithEvents, started.runId, started.threadId, { decision: "approved" }, "elisha", started.stepCounters);
+    // First reject: routes to g2 (below threshold) — tester_rejected fires, escalation_triggered does not yet.
+    expect(afterG1.interrupt?.gate).toBe("G2_SEND_TO_FIX");
+    const firstRejectIdx = events.findIndex((e) => e.type === "tester_rejected");
+    expect(firstRejectIdx).toBeGreaterThanOrEqual(0);
+    expect(events.some((e) => e.type === "escalation_triggered")).toBe(false);
+
+    // G2 approve routes back to draft (routeAfterG2), which then re-visits g1 before review runs a
+    // second time — draft -> g1 is an unconditional edge, there is no direct draft -> review shortcut.
+    const afterG2 = await resumeRun(depsWithEvents, started.runId, started.threadId, { decision: "approved" }, "elisha", afterG1.stepCounters);
+    expect(afterG2.interrupt?.gate).toBe("G1_SEND_TO_TESTER");
+
+    const afterG1Again = await resumeRun(depsWithEvents, started.runId, started.threadId, { decision: "approved" }, "elisha", afterG2.stepCounters);
+    // Second reject: rejectCount now 2, reaches threshold -> escalation.
+    expect(afterG1Again.interrupt?.gate).toBe("ESCALATION_ACK");
+
+    const rejectedEvents = events.filter((e) => e.type === "tester_rejected");
+    const escalationEvents = events.filter((e) => e.type === "escalation_triggered");
+    expect(rejectedEvents).toHaveLength(2);
+    expect(escalationEvents).toHaveLength(1);
+    expect((rejectedEvents[0] as { rejectCount: number }).rejectCount).toBe(1);
+    expect((rejectedEvents[1] as { rejectCount: number }).rejectCount).toBe(2);
+    expect((escalationEvents[0] as { rejectCount: number }).rejectCount).toBe(2);
+    // escalation_triggered comes strictly after the *second* tester_rejected, not the first.
+    const secondRejectIdx = events.indexOf(rejectedEvents[1]!);
+    const escalationIdx = events.indexOf(escalationEvents[0]!);
+    expect(escalationIdx).toBeGreaterThan(secondRejectIdx);
+
+    // Zorro B1: gate_requested(ESCALATION_ACK) fires exactly once (not once per computeRunProgress()
+    // call along the way to reaching it), and only after node_started(escalation).
+    const escalationRequested = events.filter((e) => e.type === "gate_requested" && (e as { gate: string }).gate === "ESCALATION_ACK");
+    expect(escalationRequested).toHaveLength(1);
+    const escalationStarted_i = events.findIndex((e) => e.type === "node_started" && (e as { node: string }).node === "escalation");
+    expect(escalationStarted_i).toBeGreaterThanOrEqual(0);
+    expect(escalationStarted_i).toBeLessThan(events.indexOf(escalationRequested[0]!));
+
+    // Gate-node node_completed coverage along this path (g1 approved, g2 approved) — each real gate
+    // decision this run made also produced a plain node_completed for that gate, not just gate_decided.
+    const g1Completed = events.filter((e) => e.type === "node_completed" && (e as { node: string }).node === "g1");
+    const g2Completed = events.filter((e) => e.type === "node_completed" && (e as { node: string }).node === "g2");
+    expect(g1Completed.length).toBeGreaterThanOrEqual(1);
+    expect(g2Completed).toHaveLength(1);
+
+    // gate_requested exact-count discipline holds for every gate this run actually paused at, not
+    // just escalation — g2 paused exactly once too (the first reject, below threshold).
+    const g2Requested = events.filter((e) => e.type === "gate_requested" && (e as { gate: string }).gate === "G2_SEND_TO_FIX");
+    expect(g2Requested).toHaveLength(1);
+  });
+
+  it("an Escalation 'abandon' decision ends the run at cancel: node_started(cancel) precedes node_completed(cancel), and the run emits run_cancelled, not run_completed", async () => {
+    const dbPath = tmpDbPath("events-abandon.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["reject"]);
+    audits.push(audit);
+    const { events, emitter } = collectEvents();
+    const depsWithEvents = { ...deps, events: emitter };
+
+    const started = await startRun(depsWithEvents, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 1, // first reject already reaches threshold -> escalation.
+    });
+    const toEscalation = await resumeRun(depsWithEvents, started.runId, started.threadId, { decision: "approved" }, "elisha", started.stepCounters);
+    expect(toEscalation.interrupt?.gate).toBe("ESCALATION_ACK");
+
+    const final = await resumeRun(depsWithEvents, started.runId, started.threadId, { decision: "abandon" }, "elisha", toEscalation.stepCounters);
+    expect(final.done).toBe(true);
+
+    const cancelStarted_i = events.findIndex((e) => e.type === "node_started" && (e as { node: string }).node === "cancel");
+    const cancelCompleted_i = events.findIndex((e) => e.type === "node_completed" && (e as { node: string }).node === "cancel");
+    expect(cancelStarted_i).toBeGreaterThanOrEqual(0);
+    expect(cancelStarted_i).toBeLessThan(cancelCompleted_i);
+    expect(events.at(-1)?.type).toBe("run_cancelled");
+    expect(events.some((e) => e.type === "run_completed")).toBe(false);
+
+    const run = audit.getRunById(started.runId);
+    expect(run?.status).toBe("cancelled");
+    expect(run?.currentState).toBe("cancel");
+  });
+
+  it("a listener that throws synchronously does not crash a real run, and the run's audit rows land exactly as they would with no listener at all (PRD §9.3 isolation, proven end-to-end, not just against a bare emitter)", async () => {
+    const dbPath = tmpDbPath("events-listener-throws.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+    const reportSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const emitter = new LoopEventEmitter();
+    let goodListenerCallCount = 0;
+    emitter.on(() => {
+      throw new Error("a badly-written listener always throws");
+    });
+    emitter.on(() => {
+      goodListenerCallCount += 1;
+    });
+
+    const handle = await startRun(
+      { ...deps, events: emitter },
+      { task: "add a function", profile: "subscription", workflowDefId: "coder-tester-loop", injectedContext: { memories: [] }, rejectThreshold: 2 },
+    );
+
+    expect(handle.interrupt?.gate).toBe("G1_SEND_TO_TESTER");
+    expect(goodListenerCallCount).toBeGreaterThan(0); // the well-behaved listener kept receiving events despite the other one throwing every time.
+    expect(reportSpy.mock.calls.length).toBe(goodListenerCallCount); // one reported error per emitted event, none silently dropped, none crashed the loop.
+
+    // Same audit outcome as the non-instrumented "startRun" describe block's equivalent test above —
+    // a throwing listener didn't corrupt or skip any persistence.
+    const run = audit.getRunById(handle.runId);
+    expect(run).toMatchObject({ status: "running", currentState: "g1" });
+    const claims = readClaims(dbPath, handle.runId);
+    expect(claims).toHaveLength(2);
+
+    reportSpy.mockRestore();
+  });
+
+  it("adding streamMode 'tasks' alongside 'updates' does not change how many times audit.updateRunProgress is called, compared to driving the identical scripted sequence with 'updates' alone (PRD §9.6)", async () => {
+    // "Would-be-old" count: drive an equivalent scripted run directly against a compiled graph using
+    // ONLY streamMode "updates" (bypassing runner.ts entirely) — this is exactly what runStreamAndPersist's
+    // updateRunProgress call count would have been before "tasks" mode was added.
+    const dbPathManual = tmpDbPath("cadence-manual.sqlite");
+    const { deps: manualDeps, audit: manualAudit } = buildDeps(dbPathManual, ["pass"]);
+    audits.push(manualAudit);
+    const manualThreadId = randomUUID();
+    const manualCompiled = compileLoopGraph(buildLoopGraph({ router: manualDeps.router, composer: manualDeps.composer }), manualDeps.checkpointer);
+    const manualCfg = { configurable: { thread_id: manualThreadId } };
+
+    let manualUpdatesChunkCount = 0;
+    const manualStream1 = await manualCompiled.stream(initialLoopState("add a function", 2), { ...manualCfg, streamMode: "updates" as const });
+    for await (const _chunk of manualStream1) manualUpdatesChunkCount += 1;
+    const manualStream2 = await manualCompiled.stream(new Command({ resume: { decision: "approved" } }), { ...manualCfg, streamMode: "updates" as const });
+    for await (const _chunk of manualStream2) manualUpdatesChunkCount += 1;
+    const manualStream3 = await manualCompiled.stream(new Command({ resume: { decision: "approved" } }), { ...manualCfg, streamMode: "updates" as const });
+    for await (const _chunk of manualStream3) manualUpdatesChunkCount += 1;
+
+    // Real implementation: the same scripted sequence driven through the real startRun/resumeRun,
+    // which now use streamMode: ["updates","tasks"] internally.
+    const dbPathReal = tmpDbPath("cadence-real.sqlite");
+    const { deps: realDeps, audit: realAudit } = buildDeps(dbPathReal, ["pass"]);
+    audits.push(realAudit);
+    const updateRunProgressSpy = vi.spyOn(realAudit, "updateRunProgress");
+
+    const started = await startRun(realDeps, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 2,
+    });
+    const afterG1 = await resumeRun(realDeps, started.runId, started.threadId, { decision: "approved" }, "elisha", started.stepCounters);
+    const afterG3 = await resumeRun(realDeps, started.runId, started.threadId, { decision: "approved" }, "elisha", afterG1.stepCounters);
+    expect(afterG3.done).toBe(true);
+
+    expect(updateRunProgressSpy).toHaveBeenCalledTimes(manualUpdatesChunkCount);
+    expect(manualUpdatesChunkCount).toBeGreaterThan(0); // sanity: the comparison itself is non-trivial (not 0 vs 0).
+  });
+});
+
+/**
+ * Issue #29 (`docs/feature/events-observability/PRD.md` rev. 2, B3) —
+ * `run_failed`, emitted from a new try/catch wrapper around
+ * `runStreamAndPersistCore()` (see that wrapper's own doc comment in
+ * runner.ts). Reuses the exact same "tester adapter unavailable" fixture
+ * technique the pre-existing "resumeRun — R6-B2" describe block above
+ * already established, so this is a genuine regression check against that
+ * describe block's own invariant (workflow_runs stays in sync with the
+ * checkpoint even when a later node throws mid-call) — not just a fresh
+ * assertion in isolation.
+ */
+describe("issue #29 — run_failed", () => {
+  it("a forced adapter throw mid-runStreamAndPersistCore still propagates the exact same error unchanged, emits exactly one run_failed event (with a reason derived from that error) before the throw reaches the caller, and leaves whatever audit rows already landed before the throw untouched (R6-B2 invariant, re-verified with the try/catch in place)", async () => {
+    const dbPath = tmpDbPath("run-failed.sqlite");
+    const { deps, audit, tester } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+    const { events, emitter } = collectEvents();
+    const depsWithEvents = { ...deps, events: emitter };
+
+    const started = await startRun(depsWithEvents, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 2,
+    });
+    expect(started.interrupt?.gate).toBe("G1_SEND_TO_TESTER");
+    const eventsBeforeFailure = events.length;
+
+    // Same real-adapter-failure technique as the pre-existing R6-B2 test above.
+    const thrownError = new Error("tester adapter unavailable");
+    vi.spyOn(tester, "invoke").mockRejectedValueOnce(thrownError);
+
+    await expect(
+      resumeRun(depsWithEvents, started.runId, started.threadId, { decision: "approved" }, "elisha", started.stepCounters),
+    ).rejects.toBe(thrownError); // the exact same Error instance, not a wrapped/rethrown copy or a different type.
+
+    // Exactly one new run_failed event, carrying this error's message, and it's the last event this
+    // call produced (emitted immediately before the rethrow — nothing after it).
+    const newEvents = events.slice(eventsBeforeFailure);
+    const failedEvents = newEvents.filter((e) => e.type === "run_failed");
+    expect(failedEvents).toHaveLength(1);
+    expect(failedEvents[0]).toMatchObject({ type: "run_failed", runId: started.runId, threadId: started.threadId, reason: "tester adapter unavailable" });
+    expect(newEvents.at(-1)?.type).toBe("run_failed");
+
+    // R6-B2 invariant, re-verified: the G1 approval that *did* land before the tester adapter threw is
+    // untouched, and workflow_runs matches the checkpoint's real position (review), not stuck at g1.
+    const approvals = readApprovals(dbPath, started.runId);
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]).toMatchObject({ gate_type: "G1_SEND_TO_TESTER", decision: "approved" });
+    const run = audit.getRunById(started.runId);
+    expect(run).toMatchObject({ status: "running", currentState: LOOP_NODES.review });
+  });
+
+  it("a thrown value whose own toString() throws still results in run_failed firing (with a safe placeholder reason), and the exact original thrown value is still rethrown unchanged — String(error) must never itself throw and silently swallow the real failure (Zorro B3)", async () => {
+    const dbPath = tmpDbPath("run-failed-unstringifiable.sqlite");
+    const { deps, audit, tester } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+    const { events, emitter } = collectEvents();
+    const depsWithEvents = { ...deps, events: emitter };
+
+    const started = await startRun(depsWithEvents, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 2,
+    });
+    const eventsBeforeFailure = events.length;
+
+    class UnstringifiableThrownValue {
+      toString(): string {
+        throw new Error("this value's own toString() always throws");
+      }
+    }
+    const thrownValue = new UnstringifiableThrownValue();
+    vi.spyOn(tester, "invoke").mockImplementationOnce(() => Promise.reject(thrownValue));
+
+    await expect(
+      resumeRun(depsWithEvents, started.runId, started.threadId, { decision: "approved" }, "elisha", started.stepCounters),
+    ).rejects.toBe(thrownValue); // the exact original value — not lost/replaced by a String()-conversion failure inside the catch block.
+
+    const newEvents = events.slice(eventsBeforeFailure);
+    const failedEvents = newEvents.filter((e) => e.type === "run_failed");
+    expect(failedEvents).toHaveLength(1);
+    expect((failedEvents[0] as { reason: string }).reason).toBe("<error could not be converted to a string>");
+  });
+
+  it("an Error whose own .message getter throws still results in run_failed firing (with a safe placeholder reason), and the exact original error is still rethrown unchanged — safeErrorReason's `error instanceof Error ? error.message : ...` branch must be inside its own try, not just the String(error) fallback branch (Zorro R2)", async () => {
+    const dbPath = tmpDbPath("run-failed-message-getter-throws.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+    const { events, emitter } = collectEvents();
+    const depsWithEvents = { ...deps, events: emitter };
+
+    const started = await startRun(depsWithEvents, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 2,
+    });
+    const eventsBeforeFailure = events.length;
+
+    // A real `Error` instance (`instanceof Error` is true, so the `instanceof` check itself doesn't
+    // throw and doesn't fall into the String(error) branch) whose own `.message` accessor throws.
+    // Thrown from `audit.updateRunProgress` — a real call inside `runStreamAndPersistCore`'s own loop
+    // body, not routed through a graph-node adapter — deliberately *not* the tester-adapter-throws
+    // technique the other run_failed tests use: LangGraph's own `PregelRunner._commit()` was found
+    // (while writing this test) to access `.message` on a node's thrown error *internally*, before it
+    // ever reaches this file's own code — a real, separate LangGraph-internal fragility, not something
+    // `safeErrorReason()` can or should paper over. Throwing from `audit.updateRunProgress` instead
+    // reaches this file's own `catch` block directly, actually isolating what this test is meant to
+    // check: `safeErrorReason()`'s own contract, not LangGraph's.
+    const thrownError = Object.create(Error.prototype) as Error;
+    Object.defineProperty(thrownError, "message", {
+      get(): string {
+        throw new Error("this error's own .message getter always throws");
+      },
+    });
+    vi.spyOn(audit, "updateRunProgress").mockImplementationOnce(() => {
+      throw thrownError;
+    });
+
+    await expect(
+      resumeRun(depsWithEvents, started.runId, started.threadId, { decision: "approved" }, "elisha", started.stepCounters),
+    ).rejects.toBe(thrownError); // the exact original error instance — not lost/replaced by a .message-access failure inside the catch block.
+
+    const newEvents = events.slice(eventsBeforeFailure);
+    const failedEvents = newEvents.filter((e) => e.type === "run_failed");
+    expect(failedEvents).toHaveLength(1);
+    expect((failedEvents[0] as { reason: string }).reason).toBe("<error could not be converted to a string>");
+  });
+
+  it("run_failed does NOT fire for resumeRun's pre-flight validation throws (RunThreadMismatchError) — those are a rejected request with zero writes, not a failed execution step (PRD §9.5)", async () => {
+    const dbPath = tmpDbPath("run-failed-scope.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+    const { events, emitter } = collectEvents();
+    const depsWithEvents = { ...deps, events: emitter };
+
+    const runA = await startRun(depsWithEvents, {
+      task: "task A",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 2,
+    });
+    const runB = await startRun(depsWithEvents, {
+      task: "task B",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 2,
+    });
+    expect(runA.threadId).not.toBe(runB.threadId);
+
+    const eventsBeforeMismatch = events.length;
+    // Mismatched pair: run A's runId, run B's threadId — same shape as the pre-existing
+    // "resumeRun — B2 threadId/runId binding" describe block's own test above.
+    await expect(
+      resumeRun(depsWithEvents, runA.runId, runB.threadId, { decision: "approved" }, "elisha", runA.stepCounters),
+    ).rejects.toBeInstanceOf(RunThreadMismatchError);
+
+    expect(events.slice(eventsBeforeMismatch).some((e) => e.type === "run_failed")).toBe(false);
+  });
+});
+
+/**
+ * Issue #29 (Zorro R2 fix, R3 test-approach correction) —
+ * `runStreamAndPersistCore`'s zero-chunk fallback branch (`if
+ * (!latestProgress)`) must sync `workflow_runs` without re-emitting
+ * `gate_requested`/`run_completed`/`run_cancelled`. This branch is
+ * unreachable through `startRun()`/`resumeRun()`'s own public surface
+ * (every gate's resume-decision domain guard rejects a resume against an
+ * already-terminal/already-past-that-gate run before `runStreamAndPersist`
+ * is ever reached, and every decision that *does* pass makes the paused
+ * node rerun and yield at least one real chunk) — so reaching it for a test
+ * needs to force `compiled.stream()` itself to yield zero chunks for one
+ * specific call, without giving up an internal export to do it (R3: a
+ * prior round of this fix briefly exported `runStreamAndPersist` for this
+ * exact purpose — reverted, see that function's own doc comment for why
+ * that export was itself a real risk, not just an unused escape hatch).
+ *
+ * **The spy injection point**: `compileLoopGraph()`/`buildLoopGraph()`
+ * build a `CompiledStateGraph` instance (`graph.ts`), which extends
+ * `CompiledGraph`, which extends `Pregel` (`@langchain/langgraph`,
+ * `dist/graph/state.js`/`dist/graph/graph.js`) — neither `CompiledStateGraph`
+ * nor `CompiledGraph` define their own `.stream()`; every real instance
+ * inherits it from `Pregel.prototype.stream` (`dist/pregel/index.js`).
+ * `Pregel` itself, however, is **not** part of this package's actual
+ * runtime export list (verified: `grep -n "^export {" dist/index.js` — it
+ * appears in the `.d.ts` type surface but not the real `.js` module's own
+ * `export {...}` statement, so `import { Pregel } from "@langchain/langgraph"`
+ * type-checks but is `undefined` at runtime). `CompiledStateGraph` *is* a
+ * real runtime export, so this spies on `CompiledStateGraph.prototype`
+ * instead: `vi.spyOn` defines a new **own** `stream` property directly on
+ * `CompiledStateGraph.prototype` (shadowing the inherited one from
+ * `Pregel.prototype`, which is left completely untouched) — every compiled
+ * graph instance `runner.ts` builds internally is a real `CompiledStateGraph`
+ * instance, so its own `.stream()` calls resolve to this shadowing spy
+ * first, with no reference to the specific `compiled` instance
+ * `runner.ts` builds internally required.
+ */
+describe("issue #29 — zero-chunk fallback branch does not re-emit gate_requested/run_completed/run_cancelled", () => {
+  it("a resumeRun() call whose compiled.stream() is forced (via a one-shot CompiledStateGraph.prototype.stream spy) to yield zero chunks hits the zero-chunk fallback while the run is still paused at G1, and does not re-emit gate_requested for that still-pending gate", async () => {
+    const dbPath = tmpDbPath("zero-chunk-fallback-spy.sqlite");
+    const { deps, audit } = buildDeps(dbPath, ["pass"]);
+    audits.push(audit);
+    const { events, emitter } = collectEvents();
+    const depsWithEvents = { ...deps, events: emitter };
+
+    const started = await startRun(depsWithEvents, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 2,
+    });
+    expect(started.interrupt?.gate).toBe("G1_SEND_TO_TESTER");
+    expect(events.some((e) => e.type === "gate_requested")).toBe(true); // sanity: it really did fire once already, in startRun().
+    const eventsBeforeZeroChunkCall = events.length;
+
+    // Force the *next* compiled.stream() call — the one resumeRun() below makes internally — to yield
+    // zero chunks, without ever touching the real checkpoint (the resume Command is never actually
+    // processed), so the run stays exactly where it was: paused at G1.
+    // The real return type is `Promise<IterableReadableStream<...>>` — a specific class runner.ts
+    // never actually depends on anything beyond `for await...of` (`Symbol.asyncIterator`)
+    // compatibility for. A plain empty async generator satisfies that at runtime; the `as never` cast
+    // is only to satisfy `CompiledStateGraph.prototype.stream`'s own precise return type, which this deliberate
+    // one-shot substitution isn't trying to honor.
+    const emptyStream = (async function* () {})() as unknown as Awaited<ReturnType<typeof CompiledStateGraph.prototype.stream>>;
+    const streamSpy = vi.spyOn(CompiledStateGraph.prototype, "stream").mockImplementationOnce(async () => emptyStream);
+
+    try {
+      const resumed = await resumeRun(depsWithEvents, started.runId, started.threadId, { decision: "approved" }, "elisha", started.stepCounters);
+
+      // Locks the injection point itself: exactly one call, from this one resumeRun() invocation —
+      // not zero (the spy silently not firing, which would make the rest of this test vacuous) and not
+      // more than one (which would mean some other code path also touched .stream() unexpectedly).
+      expect(streamSpy).toHaveBeenCalledTimes(1);
+
+      // Nothing advanced — the mocked stream() never processed the resume Command at all.
+      expect(resumed.interrupt?.gate).toBe("G1_SEND_TO_TESTER");
+      expect(resumed.done).toBe(false);
+
+      // The bug this test locks: the zero-chunk fallback branch must not re-emit gate_requested for a
+      // gate that was already reported pending by the earlier startRun() call.
+      const newEvents = events.slice(eventsBeforeZeroChunkCall);
+      expect(newEvents.some((e) => e.type === "gate_requested")).toBe(false);
+      expect(newEvents.some((e) => e.type === "run_completed")).toBe(false);
+      expect(newEvents.some((e) => e.type === "run_cancelled")).toBe(false);
+    } finally {
+      streamSpy.mockRestore(); // CompiledStateGraph.prototype is shared module state — every other test in this file needs the real .stream() back.
+    }
+  });
+});
+
+/**
  * A5 PRD §5 — `getPendingInterrupt()`'s own tests, following this file's
  * existing FakeAdapter-backed patterns (no new test infra needed, per the
  * PRD's own implementation sketch). Exercises the exact reason this
@@ -1252,14 +1824,11 @@ describe("getPendingInterrupt", () => {
       profile: "subscription",
       workflowDefId: "coder-tester-loop",
       injectedContext: { memories: [] },
-      rejectThreshold: 5, // high enough that this reject routes to g2, not escalation.
+      rejectThreshold: 5,
     });
     const atG2 = await resumeRun(deps, started.runId, started.threadId, { decision: "approved" }, "elisha", started.stepCounters);
     expect(atG2.interrupt?.gate).toBe("G2_SEND_TO_FIX");
 
-    // A completely independent deps object (its own registry/router/AuditStore/checkpointer),
-    // pointed at the same dbPath — simulating a brand-new CLI process that has nothing but a runId
-    // (and the dbPath convention) to go on, no in-memory RunHandle from the process that ran startRun.
     const { deps: freshDeps, audit: freshAudit } = buildDeps(dbPath, ["reject"]);
     audits.push(freshAudit);
 
@@ -1317,11 +1886,6 @@ describe("getPendingInterrupt", () => {
     const runBefore = audit.getRunById(started.runId);
     const approvalsBefore = readApprovals(dbPath, started.runId);
     const claimsBefore = readClaims(dbPath, started.runId);
-    // Zorro re-review "🟡" item 2 (test-report.md): the snapshot used to only cover
-    // workflow_runs/approvals/structured_claims — it missed step_markers (this file's own
-    // internal-bookkeeping table) AND the checkpointer's checkpoints/writes tables entirely, so a
-    // regression that made getPendingInterrupt() write to either would have sailed through this
-    // "read-only contract" test undetected.
     const stepMarkersBefore = readStepMarkers(dbPath, started.runId);
     const checkpointTablesBefore = readCheckpointTables(dbPath);
 

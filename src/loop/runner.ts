@@ -77,6 +77,7 @@ import { Command } from "@langchain/langgraph";
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { AuditStore, type WorkflowRun, type WorkflowRunProgressPatch, type WorkflowRunStatus } from "./audit-store.js";
 import { AuditReadError, ResumeDecisionDomainMismatchError, RunThreadMismatchError } from "./errors.js";
+import { LoopEventEmitter, type RealLoopNodeName } from "./events.js";
 import { buildLoopGraph, compileLoopGraph } from "./graph.js";
 import { LOOP_NODES } from "./workflow-def.js";
 import type {
@@ -101,6 +102,17 @@ export interface StartRunDeps {
   composer: PromptComposer;
   audit: AuditStore;
   checkpointer: BaseCheckpointSaver;
+  /**
+   * Optional subscriber to this run's `LoopEvent` stream (issue #29,
+   * `docs/feature/events-observability/PRD.md` §9.1 decision 1). Deliberately
+   * **optional**, not required — ~64 pre-existing `startRun`/`resumeRun` call
+   * sites across this codebase's own test suite construct `StartRunDeps`
+   * with no `events` field, and this keeps every one of them compiling and
+   * passing unmodified. When absent, `startRun()`/`resumeRun()` fall back to
+   * a fresh, unlistened `new LoopEventEmitter()` — costs nothing (nobody's
+   * subscribed, so `emit()` just iterates an empty listener set).
+   */
+  events?: LoopEventEmitter;
 }
 
 export interface StartRunInput {
@@ -128,6 +140,22 @@ export interface RunHandle {
 }
 
 const GATE_NODE_NAMES: readonly string[] = [LOOP_NODES.g1, LOOP_NODES.g2, LOOP_NODES.g3, LOOP_NODES.escalation];
+
+/**
+ * Every real node name this graph can produce a `"tasks"`-mode create-shaped
+ * chunk for (Zorro hardening) — `Object.values(LOOP_NODES)` is the single
+ * source of truth `workflow-def.ts` already establishes, not independently
+ * re-derived here. Backs `isRealLoopNodeName()` below: a `payload.name` this
+ * set doesn't recognize (e.g. some internal LangGraph bookkeeping task name
+ * this codebase has never seen and doesn't expect) is skipped rather than
+ * blindly cast to `RealLoopNodeName` and emitted as a `node_started` event
+ * naming a node that doesn't exist in this graph.
+ */
+const REAL_LOOP_NODE_NAMES: ReadonlySet<string> = new Set(Object.values(LOOP_NODES));
+
+function isRealLoopNodeName(name: string): name is RealLoopNodeName {
+  return REAL_LOOP_NODE_NAMES.has(name);
+}
 
 /**
  * Review Round-5 R6-B1 rework (`docs/feature/a4b-loop/test-report.md`): R5-B1
@@ -190,6 +218,21 @@ function nextStepRef(counters: Record<string, number>, node: string): string {
   const next = (counters[node] ?? 0) + 1;
   counters[node] = next;
   return `${node}#${next}`;
+}
+
+/**
+ * A **read-only preview** of what `nextStepRef()` will allocate for `node`'s
+ * next round — used only for `node_started`'s `stepRef` (PRD §9.4), which
+ * fires *before* that round's real `nextStepRef()` call happens. Does
+ * **not** mutate `counters`. Provably identical to the value `nextStepRef()`
+ * allocates once that same round actually completes, because this graph's
+ * execution is strictly sequential per node — no two visits to the same
+ * node name are ever in flight concurrently within one
+ * `runStreamAndPersist()` call, so nothing else can touch `counters[node]`
+ * between this preview and the real allocation.
+ */
+function previewStepRef(counters: Record<string, number>, node: string): string {
+  return `${node}#${(counters[node] ?? 0) + 1}`;
 }
 
 const STEP_REF_PATTERN = /^(.+)#(\d+)$/;
@@ -265,6 +308,51 @@ async function computeRunProgress(
 }
 
 /**
+ * Emits whichever of `gate_requested`/`run_completed`/`run_cancelled` (if
+ * any) a `computeRunProgress()` result implies (issue #29 PRD §4.2 rows 5/9/
+ * 10). Factored out as its own function for readability/naming, not
+ * because it's shared across multiple call sites — Zorro R2/R3: this is
+ * called from exactly **one** place in `runStreamAndPersistCore()` (the
+ * in-loop `mode === "updates"` iteration, gated on
+ * `interruptSeenThisChunk`/`terminalNodeSeenThisChunk` — see that call
+ * site's own comment). The zero-chunk fallback branch (`if
+ * (!latestProgress)`) deliberately does **not** call this (R2 fix) — it
+ * only syncs `computeRunProgress`/`updateRunProgress`, since re-emitting
+ * from that branch could report a gate/terminal-state that an *earlier*
+ * call already reported, breaking the "exactly once per gate/terminal-state
+ * across the whole run" contract those three event types promise. Mirrors
+ * `computeRunProgress()`'s own mutually-exclusive `interrupt` vs `done`
+ * branches (types.ts/runner.ts: a call site is never both paused *and*
+ * done), so at most one event fires per call to this function.
+ */
+function emitProgressEvents(
+  emitter: LoopEventEmitter,
+  runId: number,
+  threadId: string,
+  progress: { patch: WorkflowRunProgressPatch; interrupt?: RunHandle["interrupt"]; done: boolean },
+): void {
+  if (progress.interrupt) {
+    emitter.emit({
+      type: "gate_requested",
+      runId,
+      threadId,
+      ts: nowIso(),
+      gate: progress.interrupt.gate,
+      payload: progress.interrupt.payload,
+    });
+    return;
+  }
+  if (progress.done) {
+    const currentState = progress.patch.currentState ?? "";
+    if (progress.patch.status === "completed") {
+      emitter.emit({ type: "run_completed", runId, threadId, ts: nowIso(), currentState });
+    } else if (progress.patch.status === "cancelled") {
+      emitter.emit({ type: "run_cancelled", runId, threadId, ts: nowIso(), currentState });
+    }
+  }
+}
+
+/**
  * Shared body of `startRun()`/`resumeRun()`: drive one `compiled.stream()`
  * call to its next pause/completion, persisting every new claim/approval
  * row as its owning node's chunk arrives, then read the graph's resulting
@@ -306,6 +394,77 @@ async function computeRunProgress(
  */
 type ResumeCommand = InstanceType<typeof Command<GateResumeValue | EscalationResumeValue, Record<string, unknown>, RealGraphNode>>;
 
+/**
+ * A `reason` string for `run_failed`. **Zorro R2**: the first cut of this
+ * function (`if (error instanceof Error) return error.message;` *outside*
+ * any `try`, only the `String(error)` fallback branch wrapped) claimed in
+ * this very doc comment to "never throw itself" — false: a real `Error`
+ * instance whose own `.message` accessor throws (a getter that throws, or a
+ * `Proxy` wrapping one) would make `error.message` throw right here, still
+ * outside any `try`, reproducing the exact "the original `error` gets lost"
+ * failure mode this function exists to prevent (verified: a dedicated test
+ * using `Object.create(Error.prototype)` + a throwing `message` getter
+ * failed against that version, confirming the gap was real, not
+ * theoretical). Both the `instanceof` check *and* the `.message` access are
+ * now inside the same `try` as the `String(error)` fallback, so **every**
+ * branch of this function is covered — it now actually is exception-free no
+ * matter how badly-behaved `error` is, matching what this comment claims.
+ */
+function safeErrorReason(error: unknown): string {
+  try {
+    return error instanceof Error ? String(error.message) : String(error);
+  } catch {
+    return "<error could not be converted to a string>";
+  }
+}
+
+/**
+ * Issue #29 PRD §4.2 row 11 (`run_failed`) / §9.7: a thin wrapper around
+ * `runStreamAndPersistCore()` (the function this doc comment used to sit
+ * directly on, unchanged below) that exists **only** to emit `run_failed`
+ * on any throw, then rethrow the exact same `error` value unchanged —
+ * preserving this file's pre-existing "propagates straight out of this
+ * function" contract verbatim (the R6-B2 doc comment on
+ * `runStreamAndPersistCore` below, and its own test, both still describe
+ * real, current behavior). Implemented as a wrapper around the untouched
+ * original function body, rather than a `try` inserted into the middle of
+ * it, so that not one line of the existing, already-reviewed
+ * chunk-processing logic needed to be re-indented or otherwise touched to
+ * add this — lower diff risk for a change this file's own history (R5/R6
+ * rounds) shows is easy to get subtly wrong.
+ *
+ * **`try { emit(...) } finally { throw error; }`, not a plain sequential
+ * `emit(...); throw error;`** (Zorro's fix): if `emitter.emit()` itself were
+ * ever to throw for some reason `LoopEventEmitter`'s own isolation didn't
+ * anticipate, a bare sequential `throw error` right after it would never be
+ * reached — that new, unrelated exception would propagate instead, silently
+ * replacing the real failure this function is supposed to surface. A `throw`
+ * inside a `finally` block runs unconditionally (whether or not the `try`
+ * itself threw) and — per JS semantics — *supersedes* whatever the `try`
+ * block was doing, so `error` (the original failure) is what this function
+ * always rethrows, no matter what happens while emitting `run_failed`.
+ *
+ * **Not exported** (Zorro R3): an earlier round of this fix briefly
+ * exported this function so its zero-chunk fallback branch (unreachable
+ * through `startRun()`/`resumeRun()`'s own public surface) could be tested
+ * directly. That export was itself a real risk, not just an unused escape
+ * hatch — this function has **none** of `resumeRun()`'s own guards
+ * (`RunThreadMismatchError`'s runId↔threadId binding check, R5-B1/R6-B1's
+ * per-gate resume-decision domain checks all live in `resumeRun()`, called
+ * *before* this function, never inside it) — exporting it handed any
+ * caller a primitive that bypasses three rounds of hardening against
+ * exactly the kind of runId/threadId mismatch those guards exist to catch,
+ * a `// test-only` doc comment notwithstanding (a compiled `.d.ts` doesn't
+ * carry doc comments as an enforcement boundary). The zero-chunk branch is
+ * now tested via the public API + a `CompiledStateGraph.prototype.stream`
+ * spy instead (`runner.test.ts`) — no internal export needed. (Spying on
+ * `CompiledStateGraph.prototype`, not `Pregel.prototype` which actually
+ * defines `.stream()`: `Pregel` is a `.d.ts`-only type surface of
+ * `@langchain/langgraph`, not a real runtime export of that package's own
+ * `dist/index.js` — `CompiledStateGraph` is, so the test shadows `.stream()`
+ * there instead; see `runner.test.ts`'s own comment on that spy for the
+ * full explanation.)
+ */
 async function runStreamAndPersist(
   compiled: ReturnType<typeof compileLoopGraph>,
   input: LoopStateType | ResumeCommand,
@@ -314,8 +473,37 @@ async function runStreamAndPersist(
   runId: number,
   decidedBy: string | undefined,
   stepCountersIn: Record<string, number>,
+  emitter: LoopEventEmitter,
+): Promise<{ interrupt?: RunHandle["interrupt"]; done: boolean; stepCounters: Record<string, number> }> {
+  try {
+    return await runStreamAndPersistCore(compiled, input, cfg, audit, runId, decidedBy, stepCountersIn, emitter);
+  } catch (error) {
+    try {
+      emitter.emit({
+        type: "run_failed",
+        runId,
+        threadId: cfg.configurable.thread_id,
+        ts: nowIso(),
+        reason: safeErrorReason(error),
+      });
+    } finally {
+      throw error;
+    }
+  }
+}
+
+async function runStreamAndPersistCore(
+  compiled: ReturnType<typeof compileLoopGraph>,
+  input: LoopStateType | ResumeCommand,
+  cfg: { configurable: { thread_id: string } },
+  audit: AuditStore,
+  runId: number,
+  decidedBy: string | undefined,
+  stepCountersIn: Record<string, number>,
+  emitter: LoopEventEmitter,
 ): Promise<{ interrupt?: RunHandle["interrupt"]; done: boolean; stepCounters: Record<string, number> }> {
   const stepCounters = { ...stepCountersIn };
+  const threadId = cfg.configurable.thread_id;
 
   // Baseline for `diffRef` sourcing on approval rows written *this* call —
   // a gate's own decision-completion chunk carries no diff, only the
@@ -327,7 +515,18 @@ async function runStreamAndPersist(
   const prior = await compiled.getState(cfg);
   let latestCoderOutput = prior.values.coderOutput;
 
-  const stream = await compiled.stream(input, { ...cfg, streamMode: "updates" as const });
+  // Issue #29 PRD §4.1 (spike-verified,
+  // `docs/feature/events-observability/spike-node-start.md`): `"tasks"` is
+  // added alongside the pre-existing `"updates"` mode solely to source
+  // `node_started` — a real pre-execution signal LangGraph's own
+  // `PregelLoop.tick()` emits before `PregelRunner.tick()` ever invokes a
+  // node body (zero change to any node body required, `gates.ts`/
+  // `nodes/*.ts` zero-I/O-purity invariant untouched). Every existing
+  // `"updates"`-mode payload shape/handling below is byte-for-byte
+  // unchanged from before this mode was added — it just now lives behind
+  // an explicit `mode === "updates"` dispatch instead of being the only
+  // thing this stream ever yielded.
+  const stream = await compiled.stream(input, { ...cfg, streamMode: ["updates", "tasks"] as const });
 
   // R6-B2: the last `computeRunProgress()` result actually written to
   // `workflow_runs` this call — populated inside the loop below (once per
@@ -335,14 +534,67 @@ async function runStreamAndPersist(
   // return value and the last DB write it produced always agree.
   let latestProgress: { interrupt?: RunHandle["interrupt"]; done: boolean } | undefined;
 
-  for await (const chunk of stream) {
-    for (const [nodeName, rawUpdate] of Object.entries(chunk)) {
-      if (nodeName === "__interrupt__") continue; // position after pausing is read via getState() below, not this key.
+  for await (const [mode, payload] of stream) {
+    if (mode === "tasks") {
+      // Issue #29 PRD §4.1/§5: only the create-shaped payload ("input" in
+      // payload) is used — it's the one LangGraph emits *before*
+      // `PregelRunner.tick()` invokes the node body (spike-verified). The
+      // result-shaped payload ("result" in payload) is ignored: "updates"
+      // mode below already covers node completion with equal-or-richer data.
+      if ("input" in payload && isRealLoopNodeName(payload.name)) {
+        const node = payload.name;
+        const stepRef =
+          node === LOOP_NODES.apply || node === LOOP_NODES.cancel ? undefined : previewStepRef(stepCounters, node);
+        emitter.emit({ type: "node_started", runId, threadId, ts: nowIso(), node, stepRef });
+      }
+      // No computeRunProgress()/updateRunProgress() here — PRD §9.6: gating
+      // that call to "updates" iterations only keeps its call cadence
+      // identical to before "tasks" mode was added (regression-tested by
+      // runner.test.ts's updateRunProgress call-count assertion).
+      continue;
+    }
+
+    // mode === "updates": `payload` is byte-for-byte the same shape this
+    // function consumed as its bare `chunk` before "tasks" mode was added
+    // (spike-verified) — everything below is unchanged persistence logic,
+    // just re-nested one level under this dispatch, plus new emit() calls
+    // dropped alongside the existing audit writes (PRD §9.2 decision 2:
+    // additive, not a replacement).
+    //
+    // Zorro B1 fix: `computeRunProgress()`/`getState()` below reflects
+    // whatever the graph's *actual current* position is at the moment it's
+    // called — not necessarily "the position implied by the chunk this
+    // iteration just processed". LangGraph runs ahead of this consumer's
+    // own iteration pace (the same "tasks" CREATE/RESULT interleaving the
+    // spike documented for `node_started`'s honest timing caveat applies
+    // here too), so a `getState()` call issued while processing an *earlier*
+    // chunk (e.g. `g1`'s own decision chunk) can already reflect a *later*
+    // gate's interrupt (e.g. `g3`, several nodes ahead) having *already*
+    // paused internally — `gate_requested`/`run_completed`/`run_cancelled`
+    // must NOT be derived from every `computeRunProgress()` call as a
+    // result (that reproduced both a premature emission — before that
+    // gate's own `node_started` — and a duplicate one, once per chunk this
+    // call happened to still see the same already-reached interrupt).
+    // `interruptSeenThisChunk`/`terminalNodeSeenThisChunk` bind the
+    // event emission to the one chunk that's *actually, causally* the
+    // interrupt/terminal signal — `computeRunProgress()`/
+    // `updateRunProgress()` themselves still run unconditionally every
+    // "updates" iteration, unchanged (R6-B2's own invariant + PRD §9.6's
+    // write-cadence guarantee both depend on that never changing).
+    let interruptSeenThisChunk = false;
+    let terminalNodeSeenThisChunk: "apply" | "cancel" | undefined;
+
+    for (const [nodeName, rawUpdate] of Object.entries(payload)) {
+      if (nodeName === "__interrupt__") {
+        interruptSeenThisChunk = true;
+        continue; // position after pausing is read via getState() below, not this key.
+      }
       const update = rawUpdate as Partial<LoopStateType>;
 
       if (nodeName === LOOP_NODES.draft) {
         if (update.coderOutput !== undefined) latestCoderOutput = update.coderOutput;
         const stepRef = nextStepRef(stepCounters, LOOP_NODES.draft);
+        emitter.emit({ type: "node_completed", runId, threadId, ts: nowIso(), node: LOOP_NODES.draft, stepRef });
         if (update.coderOutput && update.coderResult) {
           const coderOutput = update.coderOutput;
           const coderResult = update.coderResult;
@@ -376,9 +628,19 @@ async function runStreamAndPersist(
               });
             }
           });
+          emitter.emit({
+            type: "agent_completed",
+            runId,
+            threadId,
+            ts: nowIso(),
+            node: LOOP_NODES.draft,
+            actor: "coder",
+            claimCount: coderOutput.claims.length,
+          });
         }
       } else if (nodeName === LOOP_NODES.review) {
         const stepRef = nextStepRef(stepCounters, LOOP_NODES.review);
+        emitter.emit({ type: "node_completed", runId, threadId, ts: nowIso(), node: LOOP_NODES.review, stepRef });
         if (update.testerOutput && update.testerResult) {
           const testerOutput = update.testerOutput;
           const testerResult = update.testerResult;
@@ -401,6 +663,28 @@ async function runStreamAndPersist(
               });
             }
           });
+          emitter.emit({
+            type: "agent_completed",
+            runId,
+            threadId,
+            ts: nowIso(),
+            node: LOOP_NODES.review,
+            actor: "tester",
+            claimCount: testerOutput.claims.length,
+          });
+          // Issue #29 PRD §4.2 rows 7/8 — same guard/data this branch
+          // already has in scope, no new read needed. `update.rejectCount`
+          // is always present on a real `review`-node partial update
+          // (nodes/tester.ts always returns it, reject or pass), the `??`
+          // fallback only guards a caller that bypassed that at runtime.
+          if (testerOutput.verdict === "reject") {
+            const rejectCount = update.rejectCount ?? prior.values.rejectCount;
+            const rejectThreshold = prior.values.rejectThreshold;
+            emitter.emit({ type: "tester_rejected", runId, threadId, ts: nowIso(), rejectCount, rejectThreshold });
+            if (rejectCount >= rejectThreshold) {
+              emitter.emit({ type: "escalation_triggered", runId, threadId, ts: nowIso(), rejectCount });
+            }
+          }
         }
       } else if (GATE_NODE_NAMES.includes(nodeName)) {
         const entries = update.gateLog ?? [];
@@ -430,10 +714,16 @@ async function runStreamAndPersist(
         // for this chunk is one transaction, not N independent autocommits.
         // `decidedBy!`: the guard above already threw if this weren't a
         // string while entries is non-empty (the only case this closure
-        // actually runs the loop body).
+        // actually runs the loop body). `gateStepRefs` mirrors `entries`
+        // index-for-index so the post-commit emit loop below can reuse the
+        // exact same `stepRef` each `approvals` row was written with,
+        // instead of re-deriving/re-allocating a second one (PRD §4.2 row
+        // 3's "same value agent_completed/gate_decided use for that round").
+        const gateStepRefs: string[] = [];
         audit.runInTransaction(() => {
           for (const entry of entries) {
             const stepRef = nextStepRef(stepCounters, nodeName);
+            gateStepRefs.push(stepRef);
             audit.insertApproval({
               runId,
               gateType: entry.gate,
@@ -446,11 +736,50 @@ async function runStreamAndPersist(
             });
           }
         });
+        // Emitted *after* the transaction commits, not inside its closure
+        // (PRD §9.3) — a listener's side effect should never run
+        // interleaved with an open SQLite transaction it has no
+        // relationship to.
+        entries.forEach((entry, i) => {
+          const stepRef = gateStepRefs[i];
+          emitter.emit({
+            type: "node_completed",
+            runId,
+            threadId,
+            ts: nowIso(),
+            node: nodeName as RealLoopNodeName,
+            stepRef,
+          });
+          emitter.emit({
+            type: "gate_decided",
+            runId,
+            threadId,
+            ts: nowIso(),
+            gate: entry.gate,
+            decision: entry.decision,
+            decidedBy: decidedBy!,
+          });
+        });
+      } else if (nodeName === LOOP_NODES.apply || nodeName === LOOP_NODES.cancel) {
+        // Issue #29 PRD §4.2 row 3 — these two terminal nodes had no
+        // per-chunk handling at all before this event system (nothing to
+        // persist for them beyond what `computeRunProgress()` below already
+        // computes); `node_completed` is the only new thing this branch
+        // does. No `stepRef` — `apply`/`cancel` have no counter concept
+        // anywhere else in this codebase (PRD §9.4).
+        emitter.emit({
+          type: "node_completed",
+          runId,
+          threadId,
+          ts: nowIso(),
+          node: nodeName as RealLoopNodeName,
+          stepRef: undefined,
+        });
+        // Zorro B1 fix: this chunk is the causal terminal-node signal —
+        // `run_completed`/`run_cancelled` below is bound to it, not to every
+        // `computeRunProgress()` call this function happens to make.
+        terminalNodeSeenThisChunk = nodeName;
       }
-      // draft/review chunks with no coderOutput/testerOutput, or apply/cancel
-      // chunks: nothing extra to persist per-chunk — this chunk's resulting
-      // position/status is still synced below, just via computeRunProgress()
-      // rather than any node-specific write.
     }
 
     // Review Round-5 R6-B2 (see this function's doc comment): sync
@@ -459,10 +788,21 @@ async function runStreamAndPersist(
     // drains — so a later node throwing before it can yield its own chunk
     // (a plain adapter failure, no illegal input or concurrency needed)
     // leaves `workflow_runs` matching the last chunk that *did* land,
-    // instead of stuck wherever it was before this call started.
+    // instead of stuck wherever it was before this call started. Unchanged
+    // by the Zorro B1 fix below — `computeRunProgress()`/`updateRunProgress()`
+    // still run on every "updates" iteration, exactly as before.
     const progress = await computeRunProgress(compiled, cfg);
     audit.updateRunProgress(runId, progress.patch);
     latestProgress = { interrupt: progress.interrupt, done: progress.done };
+    // Zorro B1 fix: only emit gate_requested/run_completed/run_cancelled when
+    // *this* chunk was actually the interrupt/terminal-node signal — not on
+    // every processed chunk (see the long comment above `interruptSeenThisChunk`'s
+    // declaration for why "computeRunProgress() says so" alone isn't safe to
+    // act on here, unlike `updateRunProgress()`'s own write, which is fine to
+    // repeat/overwrite idempotently on every chunk).
+    if (interruptSeenThisChunk || terminalNodeSeenThisChunk) {
+      emitProgressEvents(emitter, runId, threadId, progress);
+    }
   }
 
   if (!latestProgress) {
@@ -471,6 +811,21 @@ async function runStreamAndPersist(
     // read so the caller's returned `interrupt`/`done` reflect reality
     // (mirrors this function's pre-R6-B2 behavior of always calling
     // updateRunProgress exactly once, just now via the shared helper).
+    //
+    // Zorro R2: deliberately does **not** call `emitProgressEvents()` here.
+    // A zero-chunk call means nothing advanced *this* call, but whatever
+    // `computeRunProgress()` reports is wherever the run *already was*
+    // before this call started — which, if that's a paused gate or a
+    // terminal state, was already reported by whichever *earlier* call
+    // first reached it. Re-emitting here would violate "exactly once per
+    // gate/terminal-state across the whole run," not just within this one
+    // call. There is currently no valid public-API path that reaches this
+    // branch while already paused/terminal (every gate's resume-decision
+    // domain guard + every valid resume produces at least one chunk), so
+    // this isn't observably reachable today — but nothing about this
+    // function's own structure *proves* that, so this branch stays
+    // correct-by-construction (sync progress only, never re-emit) rather
+    // than relying on "nothing currently calls it that way."
     const progress = await computeRunProgress(compiled, cfg);
     audit.updateRunProgress(runId, progress.patch);
     latestProgress = { interrupt: progress.interrupt, done: progress.done };
@@ -501,6 +856,24 @@ export async function startRun(deps: StartRunDeps, input: StartRunInput): Promis
     langgraphThreadId: threadId,
   });
 
+  // Issue #29 PRD §9.1 decision 1: `deps.events` is optional, defaulted to a
+  // fresh, unlistened emitter when absent — costs nothing (nobody's
+  // subscribed). `run_started` is the one event this file emits outside
+  // `runStreamAndPersist()` — it fires exactly once, right after the
+  // `workflow_runs` row exists (so `runId` is known) and before the graph is
+  // ever driven, so it's always the first event a subscriber sees for this run.
+  const emitter = deps.events ?? new LoopEventEmitter();
+  emitter.emit({
+    type: "run_started",
+    runId: run.id,
+    threadId,
+    ts: nowIso(),
+    task: input.task,
+    profile: input.profile,
+    workflowDefId: input.workflowDefId,
+    rejectThreshold: input.rejectThreshold,
+  });
+
   const compiled = compileLoopGraph(buildLoopGraph({ router: deps.router, composer: deps.composer }), deps.checkpointer);
   const cfg = { configurable: { thread_id: threadId } };
 
@@ -523,7 +896,7 @@ export async function startRun(deps: StartRunDeps, input: StartRunInput): Promis
     cancelled: false,
   };
 
-  const result = await runStreamAndPersist(compiled, initial, cfg, deps.audit, run.id, undefined, {});
+  const result = await runStreamAndPersist(compiled, initial, cfg, deps.audit, run.id, undefined, {}, emitter);
   return { runId: run.id, threadId, interrupt: result.interrupt, done: result.done, stepCounters: result.stepCounters };
 }
 
@@ -646,7 +1019,17 @@ export async function resumeRun(
   const dbStepCounters = rebuildStepCounters(deps.audit, runId);
   const effectiveStepCounters = mergeStepCounters(dbStepCounters, stepCounters);
 
-  const result = await runStreamAndPersist(compiled, command, cfg, deps.audit, runId, decidedBy, effectiveStepCounters);
+  // Issue #29 PRD §9.1 decision 1 — same optional-events posture as
+  // `startRun()`; no `run_started` here (a resume isn't a new run). Note
+  // this deliberately sits *after* every pre-flight validation guard above
+  // (the `decidedBy` type check / `RunThreadMismatchError` /
+  // `ResumeDecisionDomainMismatchError`) — none of those represent an
+  // in-flight execution failure worth a `run_failed` event (PRD §9.5), so
+  // there is nothing event-related to emit for them; the emitter is only
+  // needed once this function is actually about to touch the graph.
+  const emitter = deps.events ?? new LoopEventEmitter();
+
+  const result = await runStreamAndPersist(compiled, command, cfg, deps.audit, runId, decidedBy, effectiveStepCounters, emitter);
   return { runId, threadId, interrupt: result.interrupt, done: result.done, stepCounters: result.stepCounters };
 }
 
