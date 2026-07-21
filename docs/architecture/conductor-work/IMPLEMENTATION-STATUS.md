@@ -35,6 +35,9 @@ engine only requires the profile to satisfy the existing `config.yaml`
 contract. No company credentials, PRDs, repository content, or memory database
 belongs in this repository.
 
+Set `AELOOP_PROFILES_ROOT` to the private profile root when the configuration
+must live outside the public checkout.
+
 Run the credential-free architecture demo with:
 
 ```bash

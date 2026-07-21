@@ -102,7 +102,11 @@ export function assembleProfileDeps(
     throw new UnsupportedProfileError(requestedProfile);
   }
 
-  const result = loadProfile(requestedProfile, profilesRoot);
+  // Deployments can mount private profiles outside the source checkout (for
+  // example a company `apikey` profile) without copying credentials into the
+  // public repository. Tests and embedders may still pass an explicit root.
+  const resolvedProfilesRoot = profilesRoot ?? env["AELOOP_PROFILES_ROOT"];
+  const result = loadProfile(requestedProfile, resolvedProfilesRoot);
   if (!result.ok) {
     throw result.error;
   }

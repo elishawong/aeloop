@@ -163,6 +163,22 @@ roles:
     expect(deps.router.route("coder")).toMatchObject({ id: "company-litellm", kind: "direct-api" });
     expect(deps.router.route("tester")).toMatchObject({ id: "company-litellm", kind: "direct-api" });
   });
+
+  it("loads a private profile root from AELOOP_PROFILES_ROOT when no explicit root is passed", () => {
+    const profilesRoot = makeProfilesRoot("company", `
+profile: company
+providers:
+  company-litellm:
+    kind: direct-api
+    base_url: http://127.0.0.1:4000
+roles:
+  coder: { provider: company-litellm }
+  tester: { provider: company-litellm }
+`);
+    const deps = assembleProfileDeps("company", { AI_AGENT_PROFILE: "company", AELOOP_PROFILES_ROOT: profilesRoot });
+    openDeps = deps;
+    expect(deps.profileConfig.profile).toBe("company");
+  });
 });
 
 describe("resolveRejectThreshold", () => {
