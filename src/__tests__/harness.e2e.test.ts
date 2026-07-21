@@ -26,17 +26,17 @@
  */
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveProfileDir } from "./profile/loader.js";
-import { MemoryStore } from "./context/store.js";
-import { SystemConfig } from "./context/config.js";
-import { StalenessEngine } from "./context/staleness.js";
-import { ContextInjector } from "./context/injector.js";
-import { PromptComposer } from "./prompt/composer.js";
-import { CoderOutput } from "./prompt/schema.js";
-import { AdapterRegistry } from "./harness/adapter-registry.js";
-import { ProviderRouter } from "./harness/provider-router.js";
-import { SchemaValidator } from "./harness/schema-validator.js";
-import type { AvailabilityResult, InvokeRequest, InvokeResult, ModelAdapter } from "./harness/types.js";
+import { resolveProfileDir } from "../profile/loader.js";
+import { MemoryStore } from "../context/store.js";
+import { SystemConfig } from "../context/config.js";
+import { StalenessEngine } from "../context/staleness.js";
+import { ContextInjector } from "../context/injector.js";
+import { PromptComposer } from "../prompt/composer.js";
+import { CoderOutput } from "../prompt/schema.js";
+import { AdapterRegistry } from "../harness/adapter-registry.js";
+import { ProviderRouter } from "../harness/provider-router.js";
+import { SchemaValidator } from "../harness/schema-validator.js";
+import type { AvailabilityResult, InvokeRequest, InvokeResult, ModelAdapter } from "../harness/types.js";
 
 const NOW = "2026-07-20T00:00:00.000Z";
 const SUBSCRIPTION_PERSONAS_DIR = path.join(resolveProfileDir("subscription"), "personas");

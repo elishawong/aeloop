@@ -29,12 +29,12 @@
  */
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveProfileDir } from "./profile/loader.js";
-import { MemoryStore } from "./context/store.js";
-import { SystemConfig } from "./context/config.js";
-import { StalenessEngine } from "./context/staleness.js";
-import { ContextInjector } from "./context/injector.js";
-import { PromptComposer } from "./prompt/composer.js";
+import { resolveProfileDir } from "../profile/loader.js";
+import { MemoryStore } from "../context/store.js";
+import { SystemConfig } from "../context/config.js";
+import { StalenessEngine } from "../context/staleness.js";
+import { ContextInjector } from "../context/injector.js";
+import { PromptComposer } from "../prompt/composer.js";
 
 const NOW = "2026-07-20T00:00:00.000Z";
 const SUBSCRIPTION_PERSONAS_DIR = path.join(resolveProfileDir("subscription"), "personas");
@@ -151,7 +151,7 @@ describe("Context -> Prompt vertical slice (real MemoryStore -> real ContextInje
     // gets rejected through the service) too, not only the insert-time
     // shortcut used in the first test. Also runs `inject()` against a real
     // hyphenated task string rather than `inject(undefined)`.
-    const { ConfirmationService } = await import("./context/confirmation.js");
+    const { ConfirmationService } = await import("../context/confirmation.js");
 
     const task = "Review the retry-backoff change before merging.";
     const store = new MemoryStore(":memory:");
