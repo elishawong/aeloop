@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Conductor Work Demo</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header><div><small>CONDUCTOR WORK</small><h1>Company AI Workbench</h1></div><span class="pill">COMPANY BRAIN</span></header>
+    <main>
+      <section class="summary">
+        <article><small>任务目标</small><h2>Implement the approved change</h2><p>PRD snapshot: <code>prd-2026-07-21-a13f</code></p></article>
+        <article><small>运行状态</small><strong id="status">WAITING FOR G1</strong><p>coder-tester-loop · v1.0.0</p></article>
+        <article><small>Token Budget</small><strong>7,820 / 20,000</strong><div class="bar"><i></i></div><p>cache hit 61% · retry 1</p></article>
+      </section>
+      <section class="layout">
+        <div>
+          <article class="panel"><div class="heading"><div><small>WORKFLOW</small><h2>Coder → Tester → Human Gate</h2></div><span class="pill blue">LIVE EVENTS</span></div><div id="timeline"></div></article>
+          <article class="panel"><div class="heading"><div><small>REQUIREMENT COVERAGE</small><h2>范围与证据</h2></div><b>2 / 3 proven</b></div><table><thead><tr><th>ID</th><th>Requirement</th><th>Evidence</th><th>Status</th></tr></thead><tbody id="requirements"></tbody></table></article>
+          <article class="panel"><div class="heading"><div><small>EVIDENCE BUNDLE</small><h2>可验证产物</h2></div><button id="refresh">Refresh</button></div><div class="evidence" id="evidence"></div></article>
+        </div>
+        <aside>
+          <article class="panel gate"><small>HUMAN GATE</small><h2>G1 · Send to Tester?</h2><p>Coder 已生成候选变更，等待人工确认后才会发送给独立 Tester。</p><pre>- old behavior\n+ approved behavior</pre><div class="actions"><button class="approve" data-decision="approved">Approve</button><button class="reject" data-decision="rejected">Reject</button></div><p id="note">模型不能代替人工 Gate。</p></article>
+          <article class="panel"><small>POLICY</small><h2>安全边界</h2><ul><li>✓ PRD scope frozen</li><li>✓ Reviewer read-only</li><li>✓ Git writes disabled</li><li>✓ Dependencies allowlisted</li><li>✓ Network restricted</li></ul></article>
+          <article class="panel"><small>TOKEN EFFICIENCY</small><h2>本轮节省在哪里</h2><p class="saving">Context compression <b>−34%</b></p><p class="saving">Prompt cache <b>−61%</b></p><p class="saving">Delta-only retry <b>−18%</b></p></article>
+        </aside>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
