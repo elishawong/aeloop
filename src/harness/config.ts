@@ -26,6 +26,22 @@ function extractModel(providerConfig: ProviderConfig): string | undefined {
   return typeof model === "string" ? model : undefined;
 }
 
+/**
+ * Extracts `api_style` from provider config, used by `LiteLLMAdapter` to
+ * choose between OpenAI-compatible `/chat/completions` and
+ * Anthropic-compatible `/v1/messages` endpoints.
+ *
+ * - "openai" (default): OpenAI-compatible API
+ * - "anthropic": Anthropic Messages API (used by Claude Code)
+ */
+function extractApiStyle(providerConfig: ProviderConfig): "openai" | "anthropic" | undefined {
+  const apiStyle = providerConfig["api_style"];
+  if (apiStyle === "openai" || apiStyle === "anthropic") {
+    return apiStyle;
+  }
+  return undefined;
+}
+
 function describeType(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "an array";
@@ -149,6 +165,7 @@ export function buildAdapterRegistry(config: ProfileConfig): AdapterRegistry {
             base_url: providerConfig.base_url,
             api_key: providerConfig.api_key,
             model: extractModel(providerConfig),
+            api_style: extractApiStyle(providerConfig),
           }),
         );
         break;
