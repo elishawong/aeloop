@@ -386,6 +386,8 @@ aeloop/                              # elishawong/aeloop (private)
 
 **Profile boundary**: `profiles/subscription/` is acceptable inside the private repo; `profiles/apikey/` **only lives in the company's internal git**, this repo's `.gitignore` explicitly blocks it to prevent accidental inclusion.
 
+**External persona-set roots** (issue #42, `src/profile/personas-root.ts`): a `config.yaml` may set an optional `personas: <name>` field to point `PromptComposer` at role persona files outside the profile's own directory — `<AELOOP_PERSONAS_ROOT>/<name>/personas` instead of the default `<profileDir>/personas`. This lets a deployment keep `profiles/apikey/config.yaml` in the profile tree while its actual `coder.md`/`tester.md` persona files live in a separate, non-public location. This is unrelated to Conductor's `brains/company/`/`brains/personal/` directories (see `brains/README.md`) — those hold Brain `manifest.yaml`/`system-prompt.md` artifacts consumed by Conductor, not by Aeloop's PromptComposer; `personas` never reads from or points at them. `personas` is optional and has no implicit default — a profile that omits it keeps exactly today's `<profileDir>/personas` behavior. `<name>` must be a single safe path segment (reuses `shared/safe-path.ts`, the same containment/symlink-escape checks `profile`/role names already go through); an unsafe name, a missing `AELOOP_PERSONAS_ROOT`, or a nonexistent root directory all fail closed with a typed error rather than silently falling back to the legacy path.
+
 ---
 
 ## 7. Adapter layer design (dual adapters, first-class) `[aeloop-new]`
