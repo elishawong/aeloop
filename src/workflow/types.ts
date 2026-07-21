@@ -9,6 +9,7 @@
  */
 
 import type { StartRunDeps, RunHandle, StartRunInput } from "../loop/runner.js";
+import type { TaskContract } from "../conductor/types.js";
 
 export interface WorkflowManifest {
   readonly id: string;
@@ -44,5 +45,7 @@ export interface WorkflowPlugin<TInput = unknown, TResume = unknown> {
 }
 
 /** The input shape of the built-in coder/tester workflow. */
-export type CoderTesterWorkflowInput = StartRunInput;
-
+export type CoderTesterWorkflowInput = StartRunInput & {
+  /** Optional for backward compatibility; supplied by a Brain for governed runs. */
+  readonly contract?: TaskContract;
+};

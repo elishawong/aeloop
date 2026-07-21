@@ -1,7 +1,8 @@
 import { assertValidTaskContract } from "./contract.js";
 import type { BrainManifest, TaskContract } from "./types.js";
 import { WorkflowRegistry } from "../workflow/registry.js";
-import type { WorkflowManifest } from "../workflow/types.js";
+import type { RunHandle } from "../loop/runner.js";
+import type { WorkflowDependencies, WorkflowManifest } from "../workflow/types.js";
 
 export interface OrchestrationRequest {
   readonly brain: BrainManifest;
@@ -39,5 +40,16 @@ export class Orchestrator {
     }
     const workflow = this.workflows.get(request.workflowId ?? request.brain.defaultWorkflowId);
     return { brain: request.brain, contract: request.contract, workflow: workflow.manifest };
+  }
+
+  /** Validate the brain contract, validate workflow input, then start the selected workflow. */
+  start<TInput, TResume>(
+    request: OrchestrationRequest,
+    input: TInput,
+    deps: WorkflowDependencies,
+  ): Promise<RunHandle> {
+    const plan = this.plan(request);
+    const workflow = this.workflows.get<TInput, TResume>(plan.workflow.id);
+    return workflow.start(workflow.validateInput(input), deps);
   }
 }

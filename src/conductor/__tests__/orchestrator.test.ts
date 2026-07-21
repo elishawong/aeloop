@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BrainWorkflowMismatchError, Orchestrator } from "../orchestrator.js";
 import { coderTesterWorkflow } from "../../workflow/coder-tester.js";
+import { renderTaskContract } from "../../workflow/coder-tester.js";
 import { WorkflowRegistry } from "../../workflow/registry.js";
 import type { BrainManifest, TaskContract } from "../types.js";
 
@@ -33,6 +34,13 @@ const contract: TaskContract = {
 };
 
 describe("Orchestrator", () => {
+  it("renders the contract into deterministic execution context", () => {
+    const rendered = renderTaskContract("user task", contract);
+    expect(rendered).toContain("Contract ID: contract-001");
+    expect(rendered).toContain("REQ-001: The requested behavior is implemented");
+    expect(rendered).toContain("Git writes allowed: no");
+  });
+
   it("selects the brain's default registered workflow after contract validation", () => {
     const registry = new WorkflowRegistry();
     registry.register(coderTesterWorkflow);
