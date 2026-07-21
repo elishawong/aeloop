@@ -39,7 +39,7 @@ import os from "node:os";
 import { parseArgs } from "node:util";
 import type { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import { danger, warn } from "./colors.js";
-import { assembleSubscriptionDeps, resolveRejectThreshold, type CliDeps } from "./assemble.js";
+import { assembleProfileDeps, assembleSubscriptionDeps, resolveRejectThreshold, type CliDeps } from "./assemble.js";
 import { RunNotResumableError } from "./errors.js";
 import { InquirerPrompter, type Prompter } from "./prompter.js";
 import { describeCwdMismatch, getRunOrigin, recordRunOrigin } from "./run-origin.js";
@@ -90,7 +90,14 @@ async function withDeps<T>(overrides: MainOverrides, fn: (deps: CliDeps) => Prom
   // Always the real process.env — see MainOverrides's doc comment above for why `env` is not a
   // seam here (P1-3): letting a caller lie about which profile is active would defeat
   // assembleSubscriptionDeps()'s "no bypass path" guarantee.
-  const deps = assembleSubscriptionDeps(process.env, overrides.profilesRoot);
+  const profileName = process.env["AI_AGENT_PROFILE"] ?? "subscription";
+  // Keep the subscription wrapper for compatibility with the A5 CLI contract;
+  // every other profile uses the same neutral assembly path. This is the
+  // switch that lets a company checkout provide its own `apikey` profile
+  // without copying the engine or adding a company-specific runner.
+  const deps = profileName === "subscription"
+    ? assembleSubscriptionDeps(process.env, overrides.profilesRoot)
+    : assembleProfileDeps(profileName, process.env, overrides.profilesRoot);
   try {
     return await fn(deps);
   } finally {
@@ -115,7 +122,7 @@ async function runStart(task: string, overrides: MainOverrides): Promise<void> {
 
     const handle = await startRun(deps, {
       task,
-      profile: "subscription",
+      profile: deps.profileConfig.profile,
       workflowDefId: "coder-tester-loop",
       injectedContext,
       rejectThreshold,
@@ -217,10 +224,10 @@ async function runList(overrides: MainOverrides): Promise<void> {
  * repo's `README.md` "Getting started" section both already describe this
  * exact usage as the documented entry point.
  */
-const HELP_TEXT = `aeloop — model-agnostic, governance-first coder/tester engine (subscription profile only, this CLI release)
+const HELP_TEXT = `aeloop — model-agnostic, governance-first workflow engine
 
 Usage:
-  aeloop start "<task description>"   Start a new run against the subscription profile
+  aeloop start "<task description>"   Start a new run against AI_AGENT_PROFILE (default: subscription)
   aeloop resume <runId>               Resume a paused/escalated run — safe from a brand-new process
   aeloop list                         List resumable (running/escalated) runs
   aeloop --help, -h                   Show this help
