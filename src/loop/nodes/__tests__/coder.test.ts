@@ -121,6 +121,34 @@ describe("createDraftNode", () => {
     expect(prompt).toContain(state.task);
   });
 
+  it("with feedback (fix-forward round, issue #45 regression): the composed prompt contains the full-output requirement, the tester's findings, and the original task/contract", async () => {
+    const adapter = new FakeAdapter([() => validResult(VALID_CODER_OUTPUT)]);
+    const router = buildRouter(adapter);
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
+    const node = createDraftNode({ router, composer });
+
+    const originalTask =
+      "Add a function that reverses a string.\n\n---\n\n# Task Contract\nContract ID: c-1\nObjective: reverse strings safely";
+    const testerFindings = "issue: reverse(\"\") throws instead of returning \"\"; issue: no unicode support";
+    const state = buildState({ task: originalTask, feedback: testerFindings });
+    await node(state);
+
+    const prompt = adapter.receivedRequests[0]?.prompt ?? "";
+
+    // (a) explicit full-output requirement language.
+    expect(prompt).toContain("complete CoderOutput JSON object");
+    expect(prompt).toContain("no prose wrapper");
+    expect(prompt).toContain("`diff` field must be non-empty");
+    expect(prompt).toContain("complete fix");
+    expect(prompt).toContain("`claims` and `confidence`");
+
+    // (b) the tester's findings that triggered this retry.
+    expect(prompt).toContain(testerFindings);
+
+    // (c) the original Contract/task.
+    expect(prompt).toContain(originalTask);
+  });
+
   it("clears state.feedback in its return value once consumed", async () => {
     const adapter = new FakeAdapter([() => validResult(VALID_CODER_OUTPUT)]);
     const router = buildRouter(adapter);
@@ -141,5 +169,27 @@ describe("createDraftNode", () => {
 
     await expect(node(buildState())).rejects.toBeInstanceOf(SchemaValidationError);
     expect(adapter.receivedRequests).toHaveLength(2);
+  });
+
+  it("with no schemaMaxAttempts configured, still fails after exactly 2 attempts (default, issue #45 follow-up)", async () => {
+    const adapter = new FakeAdapter([invalidResult, invalidResult, () => validResult(VALID_CODER_OUTPUT)]);
+    const router = buildRouter(adapter);
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
+    const node = createDraftNode({ router, composer });
+
+    await expect(node(buildState())).rejects.toBeInstanceOf(SchemaValidationError);
+    expect(adapter.receivedRequests).toHaveLength(2);
+  });
+
+  it("schemaMaxAttempts: 3 is threaded through to SchemaValidator — a third attempt that succeeds is accepted, not rejected at 2", async () => {
+    const adapter = new FakeAdapter([invalidResult, invalidResult, () => validResult(VALID_CODER_OUTPUT)]);
+    const router = buildRouter(adapter);
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
+    const node = createDraftNode({ router, composer, schemaMaxAttempts: 3 });
+
+    const update = await node(buildState());
+
+    expect(update.coderOutput).toEqual(VALID_CODER_OUTPUT);
+    expect(adapter.receivedRequests).toHaveLength(3);
   });
 });

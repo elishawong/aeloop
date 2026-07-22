@@ -124,4 +124,22 @@ describe("createReviewNode", () => {
     await expect(node(buildState({ coderOutput: undefined }))).rejects.toThrow(/coderOutput/);
     expect(adapter.receivedRequests).toHaveLength(0);
   });
+
+  it("schemaMaxAttempts: 3 is threaded through to SchemaValidator — a third attempt that succeeds is accepted, not rejected at 2 (issue #45 follow-up)", async () => {
+    const passOutput: TesterOutput = { verdict: "pass", issues: [], claims: [], confidence: "verified" };
+    let call = 0;
+    const adapter = new FakeAdapter(() => {
+      call += 1;
+      if (call < 3) return { content: "not valid json {{{", provider: "fake-tester", model: "fake-model-v1" };
+      return resultOf(passOutput);
+    });
+    const router = buildRouter(adapter);
+    const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
+    const node = createReviewNode({ router, composer, schemaMaxAttempts: 3 });
+
+    const update = await node(buildState());
+
+    expect(update.testerOutput).toEqual(passOutput);
+    expect(adapter.receivedRequests).toHaveLength(3);
+  });
 });

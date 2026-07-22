@@ -113,6 +113,19 @@ export interface StartRunDeps {
    * subscribed, so `emit()` just iterates an empty listener set).
    */
   events?: LoopEventEmitter;
+  /**
+   * Optional (issue #45 follow-up): forwarded to `buildLoopGraph()`'s own
+   * `LoopGraphDeps.schemaMaxAttempts` at every call site below
+   * (`startRun`/`resumeRun`/`getPendingInterrupt`) — same "optional,
+   * defaults to `SchemaValidator`'s own hardcoded fallback when absent, zero
+   * behavior change for the ~64 pre-existing call sites that don't set it"
+   * posture as `events` just above. Completely independent of
+   * `StartRunInput.rejectThreshold` below (tester-rejection escalation
+   * count, not a schema-validation attempt count) — see
+   * `cli/assemble.ts`'s `resolveSchemaMaxAttempts()` for the fuller
+   * separation note.
+   */
+  schemaMaxAttempts?: number;
 }
 
 export interface StartRunInput {
@@ -902,7 +915,7 @@ export async function startRun(deps: StartRunDeps, input: StartRunInput): Promis
       : {}),
   });
 
-  const compiled = compileLoopGraph(buildLoopGraph({ router: deps.router, composer: deps.composer }), deps.checkpointer);
+  const compiled = compileLoopGraph(buildLoopGraph({ router: deps.router, composer: deps.composer, schemaMaxAttempts: deps.schemaMaxAttempts }), deps.checkpointer);
   const cfg = { configurable: { thread_id: threadId } };
 
   const initial: LoopStateType = {
@@ -1037,7 +1050,7 @@ export async function resumeRun(
     throw new ResumeDecisionDomainMismatchError(runId, run.currentState, resume.decision);
   }
 
-  const compiled = compileLoopGraph(buildLoopGraph({ router: deps.router, composer: deps.composer }), deps.checkpointer);
+  const compiled = compileLoopGraph(buildLoopGraph({ router: deps.router, composer: deps.composer, schemaMaxAttempts: deps.schemaMaxAttempts }), deps.checkpointer);
   const cfg = { configurable: { thread_id: threadId } };
   const command = new Command<GateResumeValue | EscalationResumeValue, Record<string, unknown>, RealGraphNode>({ resume });
 
@@ -1101,7 +1114,7 @@ export async function getPendingInterrupt(
     throw new AuditReadError(`getPendingInterrupt: no workflow_runs row for runId ${runId}`);
   }
 
-  const compiled = compileLoopGraph(buildLoopGraph({ router: deps.router, composer: deps.composer }), deps.checkpointer);
+  const compiled = compileLoopGraph(buildLoopGraph({ router: deps.router, composer: deps.composer, schemaMaxAttempts: deps.schemaMaxAttempts }), deps.checkpointer);
   const cfg = { configurable: { thread_id: run.langgraphThreadId } };
   const progress = await computeRunProgress(compiled, cfg);
 

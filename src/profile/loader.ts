@@ -85,6 +85,32 @@ export interface ProfileConfig {
    * checked against) and fail-closed error cases.
    */
   personas?: string;
+  /**
+   * Optional Harness-layer knobs (issue #45 follow-up: making the schema
+   * validation attempt count configurable instead of hardcoded).
+   *
+   * `schema_max_attempts` is the total number of model attempts (first
+   * attempt + retries, not just the retry count) `SchemaValidator`
+   * (`../harness/schema-validator.js`) allows before giving up and throwing
+   * `SchemaValidationError`. Optional, no implicit default is applied
+   * *here* — `cli/assemble.ts`'s `resolveSchemaMaxAttempts()` is what
+   * actually resolves the effective value (fail-closed to
+   * `DEFAULT_SCHEMA_MAX_ATTEMPTS` = 2 for anything missing/malformed), same
+   * "loader stays shallow, the layer that consumes the value validates it"
+   * split `assertValidProviderConfig()` already establishes for
+   * `providers[id]` above.
+   *
+   * Deliberately **separate** from `workflow.reject_threshold` above: that
+   * field controls how many tester *rejections* trigger escalation to a
+   * human (DESIGN §4's Escalation subtree); `harness.schema_max_attempts`
+   * controls how many total model *attempts* `SchemaValidator` allows for
+   * schema validation of a single coder/tester response. Independent knobs
+   * — neither reads nor derives from the other.
+   */
+  harness?: {
+    schema_max_attempts?: number;
+    [key: string]: unknown;
+  };
   [key: string]: unknown;
 }
 
