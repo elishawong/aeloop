@@ -71,6 +71,33 @@ workflow:
 
 ---
 
+## 1.5 正式跑前先自查(preflight,强烈建议)
+
+公司电脑跑真模型的机会有限、每次失败要拍照来回排查。正式跑之前先跑这一条,把「配错一个字就白跑一次」的坑挡在前面——**它只读 config、不打模型、不碰仓库、不打印 key**:
+
+```bash
+AI_AGENT_PROFILE=apikey AELOOP_PROFILES_ROOT=~/.aeloop-company \
+  node scripts/a6-preflight.mjs --check-net
+```
+
+它会用**和引擎完全一致的规则**核这些(preflight 报错 = 真跑也会出问题,不制造假警报):
+- 目录布局:`AELOOP_PROFILES_ROOT` 是不是指到了 `apikey/` 本身(头号坑,会直接告诉你改成父目录)。
+- `config.yaml` 能不能解析、`profile`/`providers`/`roles` 形状对不对(这些真跑时会抛 `ProfileConfigParseError`)。
+- 每个 provider 的 `kind`(拼错的 `direct-apu` 会被拦)、`base_url`、`api_key`(空/占位符)、`model`。
+- **`${ENV_VAR}` 有没有没解析的**(没 `--env-file`/没 export 时字面量会原样打进 fetch → 失败)。
+- **`api_style` 有没有拼错**(引擎对非法值会**静默**退回 `openai` 打 `/chat/completions`,拼错的 anthropic 模型会静默失败——这个坑肉眼很难发现)。
+- **coder ≠ tester 是不是真用了不同模型**(同模型 → A6「独立复核」卖点失效)。
+- `--check-net`:对每个 `base_url` 打一次 LiteLLM 免鉴权探针 `${base_url}/health/liveliness`,确认端点真通(不需要有效 key)。
+
+**读法**:
+- `✅ 全绿` → 放心跑 §2 的真 A6。
+- `🟡 有 WARN` → 逐条确认是有意为之(如你就是想测同模型)再跑。
+- `❌ 有 FAIL`(退出码 1)→ 先按提示修好,别急着跑真的。
+
+**📸 若某条 FAIL 看不懂,拍这段自查输出发军师。**
+
+---
+
 ## 2. 跑真实验收 —— 两条路,都是真打模型
 
 > ⚠️ **先理解一个关键区别(你实测会撞到)**:
