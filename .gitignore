@@ -11,7 +11,9 @@ memory.db
 run-origins.json
 
 # Run artifacts (conductor-work run outputs: events jsonl + result json, accumulate per run)
-out/
+# 保留 out/ 文件夹本身(.gitkeep),但忽略里面所有 run 产物(含 dated 子文件夹)
+out/*
+!out/.gitkeep
 
 # Pipeline runtime state (advance CLI single-build working state, kept local per checkout, not tracked in git)
 .helix/
