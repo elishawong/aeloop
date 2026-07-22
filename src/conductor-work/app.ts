@@ -4,12 +4,23 @@ import type { WorkflowRegistry } from "../workflow/registry.js";
 import { loadBrain, type LoadedBrain } from "./brain-loader.js";
 import { loadTaskContract } from "./contract-loader.js";
 import type { LoopEvent } from "../loop/events.js";
+import { LoopEventEmitter } from "../loop/events.js";
+import type { StartRunDeps, RunHandle } from "../loop/runner.js";
+import { startRun } from "../loop/runner.js";
+import type { ContextInjectionResult } from "../context/injector.js";
 import { EvidenceBundleBuilder, EvidenceEventProjector, type EvidenceBundle } from "../evidence/bundle.js";
 import type { RunPlan, TokenBudget } from "../conductor/run.js";
 
 export interface ConductorWorkConfig {
   readonly brainDirectory: string;
   readonly workflows: WorkflowRegistry;
+}
+
+export interface CompanyRunResult {
+  readonly plan: RunPlan;
+  readonly handle: RunHandle;
+  readonly events: readonly LoopEvent[];
+  readonly evidence: EvidenceBundle;
 }
 
 export class ConductorWorkApp {
@@ -46,6 +57,32 @@ export class ConductorWorkApp {
     const projector = new EvidenceEventProjector(builder);
     for (const event of events) projector.accept(event);
     return projector.snapshot();
+  }
+
+  /** Start one candidate-only company run. Human gates are returned, never auto-approved. */
+  async runCandidate(
+    contractPath: string,
+    profile: string,
+    deps: StartRunDeps,
+    options: { readonly injectedContext?: ContextInjectionResult; readonly rejectThreshold?: number; readonly schemaMaxAttempts?: number } = {},
+  ): Promise<CompanyRunResult> {
+    const plan = this.planRun(contractPath);
+    const capturedEvents: LoopEvent[] = [];
+    const emitter = new LoopEventEmitter();
+    emitter.on((event) => {
+      capturedEvents.push(event);
+    });
+    const handle = await startRun(
+      { ...deps, events: emitter, schemaMaxAttempts: options.schemaMaxAttempts },
+      {
+        task: plan.contract.objective,
+        profile,
+        workflowDefId: plan.workflow.id,
+        injectedContext: options.injectedContext ?? { memories: [] },
+        rejectThreshold: options.rejectThreshold ?? 2,
+      },
+    );
+    return { plan, handle, events: capturedEvents, evidence: this.projectEvents(capturedEvents, contractPath) };
   }
 }
 

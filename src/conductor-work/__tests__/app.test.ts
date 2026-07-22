@@ -108,6 +108,15 @@ function makeCliContractPath(): string {
 }
 
 describe("conductor-work CLI", () => {
+  it("fails closed for a run request when the selected profile is unavailable", async () => {
+    const contractPath = makeCliContractPath();
+    const lines: string[] = [];
+    const exitCode = await run(["run", contractPath, "--profile", "missing-profile", "--json"], (line) => lines.push(line));
+    expect(exitCode).toBe(1);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("ProfileNotFoundError");
+  });
+
   it("keeps the existing plain-text plan output unchanged without --json", () => {
     const contractPath = makeCliContractPath();
     const lines: string[] = [];
