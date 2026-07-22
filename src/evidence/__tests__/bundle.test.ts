@@ -48,6 +48,99 @@ describe("EvidenceEventProjector — issue #36 slice 2 omittedContext", () => {
   });
 });
 
+describe("EvidenceEventProjector — issue #54 usage and no-change evidence", () => {
+  it("records provider usage metadata and no-change evidence without inventing a diff", () => {
+    const projector = new EvidenceEventProjector(new EvidenceBundleBuilder({ runId: 9, contractId: "company-a6-readonly-001", requirementIds: ["REQ-READONLY-001"] }));
+    projector.accept({
+      type: "agent_completed",
+      runId: 9,
+      threadId: "thread-9",
+      ts: "2026-01-01T00:00:00.000Z",
+      node: "draft",
+      stepRef: "draft#1",
+      actor: "coder",
+      claimCount: 0,
+      provider: "litellm-deepseek",
+      model: "deepseek-v4-pro",
+      usage: { inputTokens: 120, outputTokens: 12, totalTokens: 132, cacheReadTokens: 40, source: "provider" },
+      latencyMs: 321,
+      outcome: "no_change",
+      noChangeReason: "the requested behavior is already present",
+      noChangeEvidence: "inspected src/example.ts and found the existing implementation",
+    });
+    const bundle = projector.snapshot();
+    expect(bundle.usage).toMatchObject({ inputTokens: 120, outputTokens: 12, cacheReadTokens: 40, estimated: false, model: "deepseek-v4-pro", models: ["deepseek-v4-pro"] });
+    expect(bundle.usageRecords).toEqual([expect.objectContaining({ node: "draft", role: "coder", provider: "litellm-deepseek", model: "deepseek-v4-pro", attempt: 1, latencyMs: 321 })]);
+    // Trust fix (PR #57 review): `noChangeEvidence` is the coder model's own
+    // unverified prose, never a mechanized check — it must never surface as
+    // `passed: true`, and must be tagged `source: "model-reported"` so
+    // consumers can tell it apart from real (`"verified"`) evidence.
+    expect(bundle.evidence).toEqual([expect.objectContaining({ kind: "artifact", passed: false, source: "model-reported", content: "inspected src/example.ts and found the existing implementation" })]);
+  });
+
+  it("never marks model-reported no-change evidence as passed, regardless of how confident the reason/evidence prose reads (trust fix, PR #57 review)", () => {
+    const projector = new EvidenceEventProjector(new EvidenceBundleBuilder({ runId: 11 }));
+    projector.accept({
+      type: "agent_completed",
+      runId: 11,
+      threadId: "thread-11",
+      ts: "2026-01-01T00:00:00.000Z",
+      node: "draft",
+      actor: "coder",
+      claimCount: 0,
+      outcome: "no_change",
+      noChangeReason: "definitely already implemented, verified and passing",
+      noChangeEvidence: "I am certain this is correct",
+    });
+    const [item] = projector.snapshot().evidence;
+    expect(item).toBeDefined();
+    expect(item?.passed).toBe(false);
+    expect(item?.source).toBe("model-reported");
+  });
+
+  it("keeps usage.model unambiguous when coder and tester report usage from different models (trust fix, PR #57 review)", () => {
+    const projector = new EvidenceEventProjector(new EvidenceBundleBuilder({ runId: 10 }));
+    projector.accept({
+      type: "agent_completed",
+      runId: 10,
+      threadId: "thread-10",
+      ts: "2026-01-01T00:00:00.000Z",
+      node: "draft",
+      stepRef: "draft#1",
+      actor: "coder",
+      claimCount: 1,
+      provider: "litellm-deepseek",
+      model: "deepseek-v4-pro",
+      usage: { inputTokens: 100, outputTokens: 10, source: "provider" },
+    });
+    projector.accept({
+      type: "agent_completed",
+      runId: 10,
+      threadId: "thread-10",
+      ts: "2026-01-01T00:00:01.000Z",
+      node: "review",
+      stepRef: "review#1",
+      actor: "tester",
+      claimCount: 1,
+      provider: "litellm-openai",
+      model: "gpt-5-high",
+      usage: { inputTokens: 50, outputTokens: 5, source: "provider" },
+    });
+    const bundle = projector.snapshot();
+    // The aggregate must not silently collapse to "gpt-5-high" (the last
+    // model recorded) — that would misrepresent the coder's tokens as if
+    // they'd also come from the tester's model.
+    expect(bundle.usage.model).toBeUndefined();
+    expect(bundle.usage.models).toEqual(["deepseek-v4-pro", "gpt-5-high"]);
+    expect(bundle.usage).toMatchObject({ inputTokens: 150, outputTokens: 15 });
+    // usageRecords remains the authoritative per-call detail, unaffected.
+    expect(bundle.usageRecords).toEqual([
+      expect.objectContaining({ node: "draft", role: "coder", provider: "litellm-deepseek", model: "deepseek-v4-pro" }),
+      expect.objectContaining({ node: "review", role: "tester", provider: "litellm-openai", model: "gpt-5-high" }),
+    ]);
+  });
+});
+
 describe("TokenBudgetLedger", () => {
   it("stops a run before it exceeds its allocated budget", () => {
     const ledger = new TokenBudgetLedger({ inputTokens: 5, outputTokens: 5, retryTokens: 1 });

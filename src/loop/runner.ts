@@ -663,8 +663,15 @@ async function runStreamAndPersistCore(
             threadId,
             ts: nowIso(),
             node: LOOP_NODES.draft,
+            stepRef,
             actor: "coder",
             claimCount: coderOutput.claims.length,
+            provider: coderResult.provider,
+            model: coderResult.model,
+            ...(coderResult.usage === undefined ? {} : { usage: coderResult.usage }),
+            ...(coderResult.latencyMs === undefined ? {} : { latencyMs: coderResult.latencyMs }),
+            outcome: coderOutput.status,
+            ...(coderOutput.status === "no_change" ? { noChangeReason: coderOutput.reason, noChangeEvidence: coderOutput.evidence } : {}),
           });
         }
       } else if (nodeName === LOOP_NODES.review) {
@@ -698,8 +705,13 @@ async function runStreamAndPersistCore(
             threadId,
             ts: nowIso(),
             node: LOOP_NODES.review,
+            stepRef,
             actor: "tester",
             claimCount: testerOutput.claims.length,
+            provider: testerResult.provider,
+            model: testerResult.model,
+            ...(testerResult.usage === undefined ? {} : { usage: testerResult.usage }),
+            ...(testerResult.latencyMs === undefined ? {} : { latencyMs: testerResult.latencyMs }),
           });
           // Issue #29 PRD §4.2 rows 7/8 — same guard/data this branch
           // already has in scope, no new read needed. `update.rejectCount`

@@ -12,6 +12,7 @@
  */
 
 import type { EscalationDecision, GateDecision, GatePayload, GateType, LoopNodeName } from "./types.js";
+import type { ProviderUsage } from "../harness/types.js";
 
 /** Fields every `LoopEvent` carries, regardless of `type` (PRD §4.0). */
 interface LoopEventBase {
@@ -101,6 +102,14 @@ export interface AgentCompletedEvent extends LoopEventBase {
   node: "draft" | "review";
   actor: "coder" | "tester";
   claimCount: number;
+  stepRef?: string;
+  provider?: string;
+  model?: string;
+  usage?: ProviderUsage;
+  latencyMs?: number;
+  outcome?: "changed" | "no_change";
+  noChangeReason?: string;
+  noChangeEvidence?: string;
 }
 
 /** PRD §4.2 row 5 — a gate has just paused the graph, awaiting a human decision. */
