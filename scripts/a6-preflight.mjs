@@ -94,6 +94,53 @@ function looksPlaceholder(s) {
   return /^(<|xxx|your|todo|changeme|\.\.\.)/i.test(s) || s.includes("<") || s.includes("...");
 }
 
+/** Levenshtein 编辑距离 —— 给「拼错 key」检测用。 */
+function levenshtein(a, b) {
+  const m = a.length;
+  const n = b.length;
+  const d = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      d[i][j] = Math.min(
+        d[i - 1][j] + 1,
+        d[i][j - 1] + 1,
+        d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+  return d[m][n];
+}
+
+/**
+ * 已知 config key(核自 origin/main;引擎其余字段靠 loose index signature 容忍未知 key,
+ * 所以拼错的 key 不会报错、会被静默忽略——这正是要检测的坑)。
+ */
+const KNOWN_KEYS = {
+  workflow: ["reject_threshold", "gate_mode"],
+  harness: ["schema_max_attempts"],
+};
+
+/** 对某个 section 下的字段做「近似已知 key = 疑似拼错」告警(编辑距离 ≤ 2)。 */
+function checkSectionKeyTypos(sectionName, sectionObj) {
+  const known = KNOWN_KEYS[sectionName];
+  if (!known || !isPlainObject(sectionObj)) return;
+  for (const key of Object.keys(sectionObj)) {
+    if (known.includes(key)) continue;
+    let best = null;
+    let bestDist = Infinity;
+    for (const k of known) {
+      const dist = levenshtein(key, k);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = k;
+      }
+    }
+    if (best !== null && bestDist > 0 && bestDist <= 2)
+      warn(
+        `${sectionName}.${key} 不是已知字段,疑似拼错 —— 是不是想写 "${best}"?拼错的 key 会被**静默忽略**(引擎退回默认)。`,
+      );
+  }
+}
+
 console.log("A6 preflight —— 正式跑前配置自查\n================================");
 
 // ── 1. Node 版本 ────────────────────────────────────────────────
@@ -240,13 +287,28 @@ if (configPath) {
         }
       }
 
-      // 4e. workflow.reject_threshold(半自动升级到人的安全网依赖它)
+      // 4e. workflow / harness 数值旋钮 + 拼错 key 检测
+      section("4b. workflow / harness 旋钮");
+
+      // workflow.reject_threshold(半自动升级到人的安全网依赖它)
       if (isPlainObject(config.workflow) && config.workflow.reject_threshold !== undefined) {
         const rt = config.workflow.reject_threshold;
         if (!(typeof rt === "number" && Number.isInteger(rt) && rt >= 1))
-          warn(`workflow.reject_threshold = ${JSON.stringify(rt)} 非正整数 —— 引擎会忽略它退回默认`);
+          warn(`workflow.reject_threshold = ${JSON.stringify(rt)} 非正整数 —— 引擎会 fail-closed 退回默认 2`);
         else ok(`workflow.reject_threshold = ${rt}`);
       }
+
+      // harness.schema_max_attempts(schema 校验总尝试次数;拼错/畸形 → 静默退回默认 2)
+      if (isPlainObject(config.harness) && config.harness.schema_max_attempts !== undefined) {
+        const sa = config.harness.schema_max_attempts;
+        if (!(typeof sa === "number" && Number.isInteger(sa) && sa >= 1))
+          warn(`harness.schema_max_attempts = ${JSON.stringify(sa)} 非正整数 —— 引擎会 fail-closed 退回默认 2`);
+        else ok(`harness.schema_max_attempts = ${sa}`);
+      }
+
+      // 拼错 key 检测:harness/workflow 下未知但近似已知 key 的字段 → 疑似拼错
+      checkSectionKeyTypos("workflow", config.workflow);
+      checkSectionKeyTypos("harness", config.harness);
     }
 
     // ── 5. (可选)base_url 网络可达性 ──────────────────────────
