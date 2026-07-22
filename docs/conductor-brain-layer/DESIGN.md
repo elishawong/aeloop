@@ -1,8 +1,8 @@
-# DESIGN — conductor-brain 层（模型无关的 Helix）
+# DESIGN — conductor-brain 层（模型无关的 AI 大脑）
 
 - **项目**: aeloop
 - **关联**: issue #75（本设计所属）；架构上依赖/引用 issue #2（Conductor 层，A6 之后做）、#30（barrel 导出，**发现已在代码里解决，见 §12**）、#36（Context/Prompt token 控制接线，**半解决，见 §4**）、#37/#58/#59（协议版本/usage 落库，未做，属 Layer2 债务不在本设计范围内）
-- **状态**: 待指挥官确认
+- **状态**: 待操作者确认
 - **最后更新**: 2026-07-22
 
 > 本文档只回答"brain 层怎么设计",不写实现代码。所有对 aeloop 现有代码的引用都标了文件路径，写之前逐条读过源码（见 §12 核实清单）；`aeloop` 已有的、本设计要复用而非重新设计的机制（Token Budget Plane、四层 Prompt⊂Context⊂Harness⊂Loop 内核）另有权威文档 `docs/architecture/AEOLOOP-LAYER-DESIGN.zh-CN.md` / `docs/architecture/TOKEN-OPTIMIZATION-PLAN.zh-CN.md`，本文档不重复其内容，只讲 brain 层如何挂上去、以及 brain 层自己独有的部分。
@@ -13,19 +13,19 @@
 
 ### 问题是什么
 
-指挥官/军师已定盘（issue #75 body）：aeloop 目前有一个已经跑通、有真实多模型验证的**执行引擎**（Layer2，四层 Prompt⊂Context⊂Harness⊂Loop + Conductor 编排），但**没有"大脑"**——没有东西负责"每次对话开场记得上次做到哪、知道自己是谁、不因为聊得久了就飘、说真话、不锁定在某一家模型厂商"。这一层今天是 Helix（本仓库 `ai-agent`）在用一套 Claude-Code-hook 机制手工顶着；Verity（另一套独立原型，见 `pitch-prep/verity-vision.html`，Python + `state/agent.db`，**不是 aeloop 这个代码库**）证明了同一套"人格约束+记忆"思路在概念上可以换到别的模型上跑，但那是一次性的、独立于 aeloop 的演示。
+操作者已定盘（issue #75 body）：aeloop 目前有一个已经跑通、有真实多模型验证的**执行引擎**（Layer2，四层 Prompt⊂Context⊂Harness⊂Loop + Conductor 编排），但**没有"大脑"**——没有东西负责"每次对话开场记得上次做到哪、知道自己是谁、不因为聊得久了就飘、说真话、不锁定在某一家模型厂商"。这一层今天是现有参考实现（`ai-agent` 仓库）在用一套 Claude-Code-hook 机制手工顶着；另一套独立原型（见 `pitch-prep/verity-vision.html`，Python + `state/agent.db`，**不是 aeloop 这个代码库**）证明了同一套"人格约束+记忆"思路在概念上可以换到别的模型上跑，但那是一次性的、独立于 aeloop 的演示。
 
-指挥官要的是把这套"brain"能力**产品化、模型无关化、和 aeloop 这个真实执行引擎缝到一起**，做成可以对外卖、可以在公司自己的 deepseek/seed 上跑的东西，而不是继续锁在 Claude Code 壳 + Elisha 私人积累里。
+操作者要的是把这套"brain"能力**产品化、模型无关化、和 aeloop 这个真实执行引擎缝到一起**，做成可以对外卖、可以在公司自己的 deepseek/seed 上跑的东西，而不是继续锁在 Claude Code 壳 + 创始人私人积累里。
 
 ### 谁需要 / 触发点
 
-- 指挥官的 pitch 需要"brain 层"作为真正卖点——治理型 coder（Layer2 那一层）本身会被商品化，"醒来即延续 + 不漂移 + 说真话 + 不锁模型"才是护城河（issue #75 body 原话）。
+- 操作者的 pitch 需要"brain 层"作为真正卖点——治理型 coder（Layer2 那一层）本身会被商品化，"醒来即延续 + 不漂移 + 说真话 + 不锁模型"才是护城河（issue #75 body 原话）。
 - 公司要摆脱"必须用 Claude 订阅额度才能跑"的处境，把公司自己的 deepseek + seed 模型池用起来。
 - Vertical-slice spike（§10）是即将要讲的 pitch demo 的铁证，需要一份能落地的设计先行。
 
 ### 现状（逐项核实，不转述）
 
-**Layer2（aeloop 执行引擎）比 issue #75 body 描述的更成熟**——issue body 只说"实验已证明 Verity 人格能在 seed 上醒来"，这低估了 aeloop 自己已经做到的事：
+**Layer2（aeloop 执行引擎）比 issue #75 body 描述的更成熟**——issue body 只说"实验已证明另一套独立原型的人格能在 seed 上醒来"，这低估了 aeloop 自己已经做到的事：
 
 - `docs/architecture/conductor-work/CAPABILITY-MAP.zh-CN.md`（诚实能力地图，非自述，逐条可追 merged PR / 真跑记录）记录了 **Run #25** 和 **Run #31**：apikey/LiteLLM 路径下，coder 用 deepseek 系模型出候选、**独立的** tester 用 seed 系模型（真·不同模型，非同模型左右手）复核，两次真实任务都抓到了 coder 自己没发现的 bug（字素/代理对拆分错误）。`EvidenceBundle.usage.models` 里能看到两个不同模型名（`src/evidence/bundle.ts:98` `TokenUsage.models` 字段就是为这个多模型场景设计的）。
 - Run #31 还验证了 `workflow.gate_mode: "semi-auto"`（issue #63，`src/profile/loader.ts:60-76` 定义）：自动批准 G1/G2、G3 和 Escalation 恒人工，fail-closed 的 `reject_threshold` 守卫防止无界循环。
@@ -34,8 +34,8 @@
 **但这是 Layer2（任务执行）的证据，不是 Layer3（brain 持续对话/身份/不漂移）的证据**——这是本设计必须诚实区分的两件事（详见 §5）：
 
 - aeloop 的 `ModelAdapter.invoke()`（`src/harness/types.ts:24-52`）是**无状态单次调用**：给一个 prompt，返回一个 completion，没有会话、没有 hook 生命周期、没有"醒来"概念。Run #25/#31 验证的是"这一次 coder/tester 调用在 deepseek/seed 上产出结构正确、可被验证的结果"，不是"这个模型能连续 50 轮对话不漂移、能自己遵守宪法"。
-- 真正验证过"人格在非 Claude 模型上醒来+延续"的，只有 Verity 那次演示——而且 Verity 是一套**完全独立的实现**（Python hooks + `state/agent.db`，见 `verity-vision.html` 目录结构截图），**不是 aeloop 这个 TypeScript 代码库的一部分**，也不是 aeloop 的 `MemoryStore`。两者除了"都用 SQLite 存记忆"这个设计理念相似，代码上零关联。
-- Helix 自己（本仓库）的机制库（`.claude/hooks/*.mjs`）是**依附于 Claude Code CLI 的 hook 生命周期**（`SessionStart`/`PreToolUse`/`PostToolUse`/`UserPromptSubmit`/`Stop`，由 Claude Code 这个产品在这些时刻调用外部脚本）——这套生命周期钩子是 Claude Code 这个**具体 CLI 产品**提供的能力，aeloop 的 `ModelAdapter` 接口完全没有对应物。这是 §7 Phase1/Phase2 边界的核心技术事实，不是修辞。
+- 真正验证过"人格在非 Claude 模型上醒来+延续"的，只有另一套独立原型那次演示——而且这套原型是一套**完全独立的实现**（Python hooks + `state/agent.db`，见 `verity-vision.html` 目录结构截图），**不是 aeloop 这个 TypeScript 代码库的一部分**，也不是 aeloop 的 `MemoryStore`。两者除了"都用 SQLite 存记忆"这个设计理念相似，代码上零关联。
+- 现有参考实现自己（`ai-agent` 仓库）的机制库（`.claude/hooks/*.mjs`）是**依附于 Claude Code CLI 的 hook 生命周期**（`SessionStart`/`PreToolUse`/`PostToolUse`/`UserPromptSubmit`/`Stop`，由 Claude Code 这个产品在这些时刻调用外部脚本）——这套生命周期钩子是 Claude Code 这个**具体 CLI 产品**提供的能力，aeloop 的 `ModelAdapter` 接口完全没有对应物。这是 §7 Phase1/Phase2 边界的核心技术事实，不是修辞。
 
 **aeloop 目前完全没有自己的"醒来/session/snapshot"机制**——核实：`src/loop/audit-store.ts` 的表只有 `workflow_runs`/`structured_claims`/`approvals`/`step_markers`/`context_omissions`（第 405-491 行 `CREATE TABLE` 语句），没有 `context_snapshots` 表；`docs/architecture/AEOLOOP-LAYER-DESIGN.zh-CN.md` §9 里画的 `CONTEXT_SNAPSHOTS`/`CONTEXT_ITEMS` 是**规划中的 schema**，尚未建表（该文档本身也只是设计稿，非进度记录）。`MemoryStore`（`src/context/store.ts`）只是一个通用的、按 `dbPath` 开实例的 SQLite+FTS5 键值/检索存储，谁都能 `new MemoryStore(path)`，它自己不知道"会话"、"醒来"这些概念——这些完全是 Layer3 要新建的语义。
 
@@ -49,7 +49,7 @@
 
 ```mermaid
 flowchart TB
-    subgraph L3["Layer3 — Brain 行为层（新建，从 Helix 移植）"]
+    subgraph L3["Layer3 — Brain 行为层（新建，从现有参考实现移植）"]
         WAKE["醒来 loop<br/>(读 identity db → 组开场白)"]
         CONST["宪法约束<br/>(CORE 铁律 + hooks 等价物)"]
         POST["Postmortem 复盘仪式"]
@@ -93,11 +93,11 @@ flowchart TB
 
 ```mermaid
 sequenceDiagram
-    participant U as 指挥官/用户
+    participant U as 操作者/用户
     participant OUTER as 外层醒来 loop（②，新建）
     participant MS as identity MemoryStore（brain 自己的 dbPath）
     participant VEC as 向量层（③，新建，[?] 未定型）
-    participant CONST as 宪法约束（L3，从 Helix hooks 移植）
+    participant CONST as 宪法约束（L3，从现有参考实现 hooks 移植）
 
     Note over OUTER: 进程/会话启动
     OUTER->>MS: listMemories() 核心类型全量<br/>(identity/constraint/decision，同 CORE_MEMORY_TYPES 的移植版)
@@ -110,13 +110,13 @@ sequenceDiagram
     OUTER-->>U: 开场白（延续上次话题 + 待你决策项）
 ```
 
-**故意画出的缺口**：`VEC`（向量层）和 `CONST`（宪法约束校验）两条线目前都没有具体实现可以指——向量层是 net-new 组件（§2.3），宪法约束"校验未漂移"这一步在 Helix 自己的体系里也是**靠自觉的开场白格式规范 + 自检**（`CORE/CORE.md` §🚀），不是机制化硬检查；移植到 brain 层时这一步先天就不是"调一个函数拿到 true/false"，而是"这轮生成的开场白本身有没有遵守宪法格式"——需要在 §2.2 外层 loop 的设计里进一步展开，本图先如实标注这是当前设计里最软的一环。
+**故意画出的缺口**：`VEC`（向量层）和 `CONST`（宪法约束校验）两条线目前都没有具体实现可以指——向量层是 net-new 组件（§2.3），宪法约束"校验未漂移"这一步在现有参考实现自己的体系里也是**靠自觉的开场白格式规范 + 自检**（`CORE/CORE.md` §🚀），不是机制化硬检查；移植到 brain 层时这一步先天就不是"调一个函数拿到 true/false"，而是"这轮生成的开场白本身有没有遵守宪法格式"——需要在 §2.2 外层 loop 的设计里进一步展开，本图先如实标注这是当前设计里最软的一环。
 
 ### 关键流程时序图 2：派工 → 折回
 
 ```mermaid
 sequenceDiagram
-    participant U as 指挥官
+    participant U as 操作者
     participant OUTER as 外层调度 loop（②）
     participant TRANS as 意图→TaskContract 翻译器（①）
     participant CW as ConductorWorkApp（已有，src/conductor-work/app.ts）
@@ -163,11 +163,11 @@ sequenceDiagram
 
 ### 1.2 CLI 子进程 vs 库调：`OUTER` 怎么调用 `ConductorWorkApp`
 
-**核实结果（issue #75 已要求我独立核实，不采信 Helix 口述）**：issue #30（"index.ts barrel 不导出 loop/harness/runner"）**premise 已经过期**——
+**核实结果（issue #75 已要求我独立核实，不采信既有转述）**：issue #30（"index.ts barrel 不导出 loop/harness/runner"）**premise 已经过期**——
 
 - issue #30 创建于 `2026-07-21T09:28:16Z`（`gh issue view 30` 核实）。
 - 但 commit `f9164e9`（"fix: expose intentional root library API"，`2026-07-22`，**在 issue #30 创建之后**）已经把 `src/index.ts` 改成把 `./loop/runner.js`、`./loop/events.js`、`./loop/audit-store.js`、`./loop/checkpoint.js`、`./loop/errors.js`、`./harness/types.js`、`./harness/provider-router.js`、`./harness/adapter-registry.js`、`./harness/config.js`、`./harness/errors.js` 全部 re-export（`src/index.ts:37-49`，现状已读过，不是转述）。
-- 也就是说：**issue #30 描述的问题在代码层面已经被后续 commit 解决了，但 issue 本身还开着（GitHub 状态和真实代码之间出现了滞后）**——这是我被要求 spot-check 的具体条目里，代码和 issue 状态确实矛盾的一条，如实报告给军师/指挥官，建议顺手把 issue #30 标记为"已被 f9164e9 解决，待关闭确认"。
+- 也就是说：**issue #30 描述的问题在代码层面已经被后续 commit 解决了，但 issue 本身还开着（GitHub 状态和真实代码之间出现了滞后）**——这是我被要求 spot-check 的具体条目里，代码和 issue 状态确实矛盾的一条，如实报告给操作者，建议顺手把 issue #30 标记为"已被 f9164e9 解决，待关闭确认"。
 
 **由此推出**：进程内库调**真的可以用**——`ConductorWorkApp`（`src/conductor-work/app.ts`）已经通过 `export * from "./conductor-work/index.js"`（`src/index.ts:33`）→ `src/conductor-work/index.ts` 的 `export * from "./app.js"` 完整暴露到包的顶层 API。`runCandidate()`（`app.ts:63-83`）内部直接 `import { startRun } from "../loop/runner.js"` 并在同一进程调用，不 spawn 子进程。
 
@@ -223,16 +223,16 @@ interface TaskContract {
 **校验边界**：翻译器产出的 contract 必须先过 `assertValidTaskContract()` 再交给下游——这个校验是**确定性的、不调模型的**（`contract.ts` 头注释原话："This intentionally does not interpret natural language or call a model"），翻译器自己（可能调模型来做"一句话拆成 Requirement[]"这一步）产出的结果必须经过这道纯代码校验，不能因为"是 brain 自己生成的"就跳过。
 
 **待决策（本设计不替它拍板，列为待确认问题）**：
-- `TaskContract.brain: "personal" | "company"` 这个字段是个**封闭二选一**（`src/conductor/types.ts:8`），而本设计要建的 conductor-brain 是"可复用给公司套用的通用产品"（issue #75 body 北极星），既不是纯粹的"Elisha 私人 Helix"（personal），似乎也不完全是"公司 PRD 编译层"（company，`brains/company/system-prompt.md` 现有描述："Convert an approved PRD and repository constraints into a complete TaskContract"）。**这是一个需要指挥官/军师拍板的具体问题**：conductor-brain 产出的 contract 该标 `"personal"` 还是 `"company"`，还是需要向 aeloop 提一个第三种 `BrainKind`（这会是一个 aeloop 侧的改动，不在本设计范围内，需要另开 issue 跟 aeloop 侧协调）。
+- `TaskContract.brain: "personal" | "company"` 这个字段是个**封闭二选一**（`src/conductor/types.ts:8`），而本设计要建的 conductor-brain 是"可复用给公司套用的通用产品"（issue #75 body 北极星），既不是纯粹的"创始人私人系统"（personal），似乎也不完全是"公司 PRD 编译层"（company，`brains/company/system-prompt.md` 现有描述："Convert an approved PRD and repository constraints into a complete TaskContract"）。**这是一个需要操作者拍板的具体问题**：conductor-brain 产出的 contract 该标 `"personal"` 还是 `"company"`，还是需要向 aeloop 提一个第三种 `BrainKind`（这会是一个 aeloop 侧的改动，不在本设计范围内，需要另开 issue 跟 aeloop 侧协调）。
 - `riskLevel` 由谁判断——翻译器自己用规则/模型判断，还是要求外层 loop 在调用翻译器之前就已经从对话上下文里带一个风险提示？这直接影响"低风险任务能不能全自动跑完不用人工点头"这条 Phase2 愿景，值得单独定，本设计只标记为待决策。
 
 ### 2.2 ② 外层醒来/对话/调度 loop
 
 **职责**：这是 brain 层真正的"主循环"——它是 §0.5 两张时序图里 `OUTER` 这个角色的实现，负责：
 1. 进程/会话启动时的"醒来"（读 identity db → 组开场白，见时序图 1）。
-2. 常规对话轮次里判断"这句话是闲聊还是要派工"（对应 Helix 自己的军师档/旅伴档双档位，`CORE/CORE.md` §⑤——这个"判断该不该派工"本身，Helix 现在也是**靠自觉**，不是机制化判断，移植时这一层的"软"要如实继承，不能假装能机制化掉）。
+2. 常规对话轮次里判断"这句话是闲聊还是要派工"（对应现有参考实现自己的工作档/陪伴档双档位，`CORE/CORE.md` §⑤——这个"判断该不该派工"本身，现有参考实现现在也是**靠自觉**，不是机制化判断，移植时这一层的"软"要如实继承，不能假装能机制化掉）。
 3. 要派工时调 ①翻译器 → Layer2 → 拿回 `EvidenceBundle` → 三态确认门折回 identity db（见时序图 2）。
-4. Postmortem 复盘仪式的触发（对应 Helix CORE 铁律6"犯错即复盘"，`CORE/CORE.md` §③.6）。
+4. Postmortem 复盘仪式的触发（对应现有参考实现 CORE 铁律6"犯错即复盘"，`CORE/CORE.md` §③.6）。
 
 **这一层目前完全没有代码可以指**——不是"部分实现"，是 0。`docs/architecture/AEOLOOP-LAYER-DESIGN.zh-CN.md` 规划的 `context_snapshots`/`context_snapshot_id` 概念（该文档 §4.4）离这一层最近，但也只是规划，未建表。
 
@@ -242,7 +242,7 @@ interface WakeResult {
   readonly openingSummary: string;       // 开场白文本
   readonly continuedThreads: readonly Memory[]; // 延续的话题（active_task 类型）
   readonly pendingDecisions: readonly Memory[]; // 待人工决策项
-  readonly constitutionWarnings: readonly string[]; // [?] 宪法约束检查发现的问题（今天在 Helix 里这一步是自觉自检，见 §0.5 图1 的诚实标注）
+  readonly constitutionWarnings: readonly string[]; // [?] 宪法约束检查发现的问题（今天在现有参考实现里这一步是自觉自检，见 §0.5 图1 的诚实标注）
 }
 
 interface DispatchResult {
@@ -256,7 +256,7 @@ interface DispatchResult {
 
 ### 2.3 ③ 向量层（net-new）
 
-**职责**：在 `MemoryStore` 现有的 FTS5 关键词检索之上，加一层语义检索，用于"关键词没命中但语义相关"的召回场景（比如指挥官换了个说法问同一件事）。
+**职责**：在 `MemoryStore` 现有的 FTS5 关键词检索之上，加一层语义检索，用于"关键词没命中但语义相关"的召回场景（比如操作者换了个说法问同一件事）。
 
 **现状核实**：`package.json` 的 `dependencies`/`devDependencies` 里**没有任何向量/embedding 相关依赖**（`@langchain/langgraph`、`@langchain/langgraph-checkpoint-sqlite`、`better-sqlite3`、`chalk`、`js-yaml`、`zod`、`@inquirer/prompts` —— 已核实全列表），也没有 `sqlite-vec` 之类的 SQLite 向量扩展。这一层是**彻头彻尾的 net-new**，不是"补一个开关就能打开"的半成品。
 
@@ -265,7 +265,7 @@ interface DispatchResult {
 2. **外部 embedding API + 独立向量索引**（如把 embedding 结果存进单独文件/服务）：不依赖 SQLite 扩展，但引入了"两个数据源要保持一致"的新问题（memory 更新了，向量索引要不要同步更新，同步失败怎么办）——这类"两个存储源不同步"的问题正是 `MemoryStore` 现在用单一 SQLite 文件 + FTS5 triggers（`store.ts:188-203`）刻意要避免的那类问题，选这条路等于在已经解决过的问题上开一个新的口子。
 3. **暂不做向量层，Phase1 完全依赖 FTS5 关键词检索**：`MemoryStore.searchMemories()`（`store.ts:399-410`）已经是可用的检索能力，FTS5 对英文/结构化短语的召回效果通常够用，中文自然语言的关键词切分效果存在已知局限（`toSafeFtsQuery()`，`store.ts:430-438`，按空白切分成 token——中文没有空格分词，逐字符会退化成近似全表扫描式的宽松匹配）。
 
-**选了什么**：Phase1 不做向量层，先用 FTS5（选项3），把"要不要做向量层、做哪种"作为 Phase2 的一个独立评估项——这不是回避决策，是因为 issue #75 body 自己也把向量层标成"net-new"（意味着指挥官/军师已经预期这块需要额外投入），而 Phase1 的目标是"周一能 demo"（issue body 原话），一个没有验证过技术可行性的 SQLite 扩展依赖不应该出现在 Phase1 的关键路径上。
+**选了什么**：Phase1 不做向量层，先用 FTS5（选项3），把"要不要做向量层、做哪种"作为 Phase2 的一个独立评估项——这不是回避决策，是因为 issue #75 body 自己也把向量层标成"net-new"（意味着操作者已经预期这块需要额外投入），而 Phase1 的目标是"周一能 demo"（issue body 原话），一个没有验证过技术可行性的 SQLite 扩展依赖不应该出现在 Phase1 的关键路径上。
 
 ---
 
@@ -277,7 +277,7 @@ interface DispatchResult {
 
 1. **brain 拥有自己独立的 `MemoryStore` 实例**，`new MemoryStore(brainIdentityDbPath)`，这个 dbPath **不等于**任何一个 Layer2 profile 的 `<profileDir>/memory.db`（`src/cli/assemble.ts:141`）——两者是完全不同的文件，即便都用同一个 `MemoryStore` 类。
 2. Layer2 一次 run 跑完产出的 `EvidenceBundle`，由外层 loop（②）经三态确认门（§2.2）后，**选择性地**转写成 identity db 里的 memory 记录——不是把整个 `EvidenceBundle` 塞进去，而是提炼成 `postmortem`/`decision`/`active_task` 类型的记录（`MemoryType` 12 类枚举之一，`src/context/types.ts:19-31`）。这个"提炼"动作本身是 §2.2 外层 loop 的职责，不是 `MemoryStore` 自动做的——`MemoryStore` 不知道 `EvidenceBundle` 这个类型的存在（`src/context/store.ts` 和 `src/evidence/bundle.ts` 之间没有任何 import 关系，已核实）。
-3. **`confirmed_by` 字段**（`Memory.confirmedBy`，`src/context/types.ts:49`）在这个场景下的取值需要区分"人工确认"和"经三态门判定为 verified 的 evidence 转写"——这是本设计要新增的一个惯例（不是 `MemoryStore` 现有代码里已经支持的区分，`confirmed_by` 目前是个自由字符串，`store.ts` 没有对它的取值做任何约束），建议约定一个前缀（如 `"engine:run-<runId>"` vs 人工的 `"human:<指挥官标识>"`），但这只是一个**建议**，不是本设计能替 Layer1/Layer2 拍板的接口变更。
+3. **`confirmed_by` 字段**（`Memory.confirmedBy`，`src/context/types.ts:49`）在这个场景下的取值需要区分"人工确认"和"经三态门判定为 verified 的 evidence 转写"——这是本设计要新增的一个惯例（不是 `MemoryStore` 现有代码里已经支持的区分，`confirmed_by` 目前是个自由字符串，`store.ts` 没有对它的取值做任何约束），建议约定一个前缀（如 `"engine:run-<runId>"` vs 人工的 `"human:<操作者标识>"`），但这只是一个**建议**，不是本设计能替 Layer1/Layer2 拍板的接口变更。
 4. **`brains/` 目录（`brains/personal/`、`brains/company/`，已存在，`brain-loader.ts` 读取）和本设计的 identity db 是两个不同的东西，不要混淆**：`brains/*/manifest.yaml` + `system-prompt.md`（`src/conductor-work/brain-loader.ts:22-37`）今天只是**静态文本文件**——一个 YAML 元数据 + 一段 Markdown 系统提示词，`LoadedBrain` 接口（`brain-loader.ts:6-10`）里完全没有 `MemoryStore` 或任何持久记忆的引用。也就是说，**aeloop 现有的"brain"概念（`brains/company/system-prompt.md`）和 issue #75 要建的"conductor-brain"（有持久记忆、能醒来延续）完全是两个不同量级的东西**——前者是一段固定不变的 system prompt，后者是一个有状态、会演化的持久身份。本设计不建议把 identity db 直接塞进 `brains/company/` 目录（那会打破 `brains/` 目录现在"纯静态、可随便复制模板"的简单性），而是作为一个独立的、brain 运行时自己管理的 dbPath，`brains/*/manifest.yaml` 里可以加一个可选字段指向它（`[?]` 具体字段名和格式待定，这是一个小的 aeloop 侧改动，需要跟 Layer2 团队协调，不在本设计单方面拍板范围）。
 
 ---
@@ -321,8 +321,8 @@ Layer2 的 Token Budget Plane 管的是"一次 run 内部"的开销（coder/test
 **Layer2 的验证和 Layer3（brain 持续对话/身份/防漂移）要求的能力，是完全不同的两条能力轴**，不能因为一条硬就推断另一条也稳：
 
 - Layer2 的每次 `ModelAdapter.invoke()` 都是**无状态单次调用**（`src/harness/types.ts:44` `invoke(req: InvokeRequest): Promise<InvokeResult>`，没有会话概念）——模型不需要"记得"上一轮说过什么，每次都是全新上下文。这恰好回避了"多轮对话会不会漂移"这个问题，因为压根没有"多轮"。
-- Verity 在 seed 上"醒来+延续+诚实自报"的验证，是**一次性演示**，跑在一套完全独立的 Python + `state/agent.db` 原型上（不是 aeloop），验证的是"这套人格约束+记忆召回的设计思路，换到 seed 上概念上可行"——这不等于验证了"seed 能在 50 轮真实工作对话里不漂移"、"seed 会不会在没有 hook 硬拦截时自己主动遵守宪法"、"seed 处理长上下文（比如多个待办事项、复杂的待决策项列表）时会不会丢东西"。
-- **诚实标注**：一次干净的醒来演示 ≠ 证明它能扛住高负载多轮对话（Helix 自己的 CORE 铁律7"机制 > 自觉"存在的理由，就是因为"靠自觉的元动作，高负载下必然被静默跳过——结构性的，不是态度问题"，`CORE/CORE.md` §③.7 原话；这条判断是关于**人类操作者**高负载下的失效模式，但类比到模型身上——模型在长上下文/多轮对话里的一致性问题，本质上也是"负载升高后，靠模型自己'记得住、不漂移'这件事的可靠性下降"，同一类结构性风险，只是主体从人换成了模型）。
+- 另一套独立原型在 seed 上"醒来+延续+诚实自报"的验证，是**一次性演示**，跑在一套完全独立的 Python + `state/agent.db` 原型上（不是 aeloop），验证的是"这套人格约束+记忆召回的设计思路，换到 seed 上概念上可行"——这不等于验证了"seed 能在 50 轮真实工作对话里不漂移"、"seed 会不会在没有 hook 硬拦截时自己主动遵守宪法"、"seed 处理长上下文（比如多个待办事项、复杂的待决策项列表）时会不会丢东西"。
+- **诚实标注**：一次干净的醒来演示 ≠ 证明它能扛住高负载多轮对话（现有参考实现自己的 CORE 铁律7"机制 > 自觉"存在的理由，就是因为"靠自觉的元动作，高负载下必然被静默跳过——结构性的，不是态度问题"，`CORE/CORE.md` §③.7 原话；这条判断是关于**人类操作者**高负载下的失效模式，但类比到模型身上——模型在长上下文/多轮对话里的一致性问题，本质上也是"负载升高后，靠模型自己'记得住、不漂移'这件事的可靠性下降"，同一类结构性风险，只是主体从人换成了模型）。
 
 ### 5.3 哪些活可以机制化、哪些必须模型判断（本设计给出的分类）
 
@@ -332,8 +332,8 @@ Layer2 的 Token Budget Plane 管的是"一次 run 内部"的开销（coder/test
 | 证据来源标注 | evidence 是 `verified` 还是 `model-reported` | **可以，已有先例** | `EvidenceSource` 字段（`bundle.ts:34`），机械判断"是否有独立工具/测试产出这条证据" |
 | 三态确认门 | memory 该不该从 unconfirmed 变成 confirmed | **可以，纯数据操作** | `ConfirmationService`（issue #75 已定盘描述"纯数据操作 0 token"） |
 | 意图→需求拆解 | 把一句模糊的话拆成结构化 `Requirement[]` | **不能，需要模型判断** | 这一步本质是自然语言理解，`contract.ts` 头注释自己也说"deterministic validation...does not interpret natural language"——校验能机制化，但产出这个待校验对象的过程不能 |
-| 该不该派工 vs 闲聊 | 军师档/旅伴档判断 | **不能，需要模型判断，Helix 自己现在也是靠自觉** | `CORE/CORE.md` §⑤ 没有对应的 hook 机制，是纯散文规则 |
-| 长对话不漂移 | 50 轮后还记得自己是谁 | **部分可机制化（醒来时重新注入 identity），部分不能（单轮内的一致性）** | 醒来机制本身是机制化的（每次都从 db 重建），但"这一轮回复有没有偷偷违反宪法"这个检查，在 Claude Code 壳里靠的是 hook 硬拦截具体动作（如 `session-commit-gate.mjs` 拦 `git commit`），对"说的话有没有漂移"这种语义层面的东西，Helix 自己现在也没有机制化手段（`CLAUDE.md` 铁律10 原话"半机制盲区"） |
+| 该不该派工 vs 闲聊 | 工作档/陪伴档判断 | **不能，需要模型判断，现有参考实现自己现在也是靠自觉** | `CORE/CORE.md` §⑤ 没有对应的 hook 机制，是纯散文规则 |
+| 长对话不漂移 | 50 轮后还记得自己是谁 | **部分可机制化（醒来时重新注入 identity），部分不能（单轮内的一致性）** | 醒来机制本身是机制化的（每次都从 db 重建），但"这一轮回复有没有偷偷违反宪法"这个检查，在 Claude Code 壳里靠的是 hook 硬拦截具体动作（如 `session-commit-gate.mjs` 拦 `git commit`），对"说的话有没有漂移"这种语义层面的东西，现有参考实现自己现在也没有机制化手段（`CLAUDE.md` 铁律10 原话"半机制盲区"） |
 
 **结论**：deepseek/seed 在"结构化、有独立校验兜底的单次任务"上已经有真实证据（Run #25/#31）；在"brain 层要求的多轮持续一致性"上完全没有专门针对 aeloop 这套架构的验证，唯一的相关证据来自一个不同代码库的一次性演示。这是 Phase1 vertical-slice spike（§10）要优先补上的验证缺口，不是可以假设"反正 Layer2 都验证过了"就跳过的东西。
 
@@ -364,9 +364,9 @@ aeloop 自己的 `ModelAdapter` 接口（`src/harness/types.ts:24-52`）**没有
 
 ### 7.2 Phase1（只换模型，复用 Claude Code 壳）
 
-- **做什么**：brain 层继续运行在 Claude Code CLI 这个壳里（继续享受它的 hook 生命周期），但把壳内实际调用的底层模型换成 seed/deepseek（`[?]` 具体怎么让 Claude Code CLI 调用非 Anthropic 模型——是否有兼容层/代理，Verity 那次演示"跑在 Claude Code 壳里"具体是怎么接线的，本设计没有独立验证过这一步的技术细节，只能转述 issue body 的描述，标注为 `[?]` 待补充验证）。
+- **做什么**：brain 层继续运行在 Claude Code CLI 这个壳里（继续享受它的 hook 生命周期），但把壳内实际调用的底层模型换成 seed/deepseek（`[?]` 具体怎么让 Claude Code CLI 调用非 Anthropic 模型——是否有兼容层/代理，另一套独立原型那次演示"跑在 Claude Code 壳里"具体是怎么接线的，本设计没有独立验证过这一步的技术细节，只能转述 issue body 的描述，标注为 `[?]` 待补充验证）。
 - **边界**：这个阶段"不依赖 Claude 模型"这句话只对了一半——**换了模型，没换运行时**。宪法约束仍然靠 Claude Code CLI 提供的 hook 生命周期硬拦截，这个运行时本身仍然是 Anthropic 的产品。如果 Anthropic 未来限制 Claude Code CLI 只能配合自家模型使用，Phase1 这套方案会失效——这是一个必须写清楚、不能藏起来的风险，不能把 Phase1 说成"完全不锁 Claude"。
-- **可达性**：这是 issue body 说的"周一能 demo"那个目标对应的阶段——因为它复用了 Verity 已经验证过的路径（同一个壳，只是把模型换了），风险最低。
+- **可达性**：这是 issue body 说的"周一能 demo"那个目标对应的阶段——因为它复用了另一套独立原型已经验证过的路径（同一个壳，只是把模型换了），风险最低。
 - **派工路径**：走 §1.2 的①子进程 CLI 模式（`conductor-work.mjs run <contract.json> --json`），因为 brain 本身就是 Claude Code CLI 里的一个交互式会话，每次派工天然是"从这个会话里 spawn 一个子进程"的形态。
 
 ### 7.3 Phase2（换运行时）
@@ -377,7 +377,7 @@ aeloop 自己的 `ModelAdapter` 接口（`src/harness/types.ts:24-52`）**没有
 
 ### 7.4 明确写出的风险
 
-- Phase1 完成后，如果指挥官/军师满足于"demo 能跑就行"而不推进 Phase2，公司实际上仍然 100% 依赖 Claude Code CLI 这个产品——这不是本设计能控制的执行风险，但设计文档有责任把这句话说清楚，不能让 Phase1 的"能跑"被误读成"已经不锁 Claude 了"。
+- Phase1 完成后，如果操作者满足于"demo 能跑就行"而不推进 Phase2，公司实际上仍然 100% 依赖 Claude Code CLI 这个产品——这不是本设计能控制的执行风险，但设计文档有责任把这句话说清楚，不能让 Phase1 的"能跑"被误读成"已经不锁 Claude 了"。
 
 ---
 
@@ -388,13 +388,13 @@ aeloop 自己的 `ModelAdapter` 接口（`src/harness/types.ts:24-52`）**没有
 - **迁移/学习成本**：`.claude/hooks/*.mjs` 这套机制移植到 brain 层不是简单复制粘贴——Claude Code 的 hook payload 格式（stdin 传 `session_id`/`cwd` 等，`session-heartbeat.mjs` 头注释提到"三者 stdin 都带 session_id+cwd"）是 Claude Code 产品自己的约定，移植时要么继续在 Claude Code CLI 里跑（Phase1，直接复用不用改格式）要么在 Phase2 自建运行时里重新设计一套等价 payload 格式（工作量见 §7.3）。
 - **残留风险（如实写，不藏）**：
   - identity db（brain 自己的 `MemoryStore` 实例）和 Layer2 各 profile 的 `memory.db` 是**进程级/文件级隔离，不是权限级隔离**——如果 brain 运行时和某个 Layer2 profile 恰好跑在同一台机器、同一个用户权限下，没有任何机制阻止代码手滑把两个 dbPath 传错（比如误把 brain 的 identity db 路径传给了 `assembleProfileDeps`）。这类"路径传错"的风险目前完全靠人工/代码审查兜底，没有类似 `session-issue-gate.mjs` 那种机制化拦截。
-  - Phase1 阶段的"三态确认门"（brain 层新建的，§2.2）目前只是接口草案，没有验证过在真实多轮对话里，指挥官/用户会不会嫌"每次都要确认"太啰嗦而养成"无脑全部 confirm"的习惯——这是 Helix 自己 CORE 里也承认过的软肋（防幻觉铁律需要人工确认这个环节本身依赖人工不敷衍），brain 层新建的这套门不会自动免疫同样的问题。
+  - Phase1 阶段的"三态确认门"（brain 层新建的，§2.2）目前只是接口草案，没有验证过在真实多轮对话里，操作者/用户会不会嫌"每次都要确认"太啰嗦而养成"无脑全部 confirm"的习惯——这是现有参考实现自己 CORE 里也承认过的软肋（防幻觉铁律需要人工确认这个环节本身依赖人工不敷衍），brain 层新建的这套门不会自动免疫同样的问题。
 
 ---
 
 ## 9. 明确不做清单
 
-- **不在本设计里拍板 `TaskContract.brain` 该标 `"personal"` 还是 `"company"`**（§2.1 待决策）——需要指挥官/军师单独决定，可能需要向 aeloop 提一个新 issue 讨论是否要开放第三种 `BrainKind`。
+- **不在本设计里拍板 `TaskContract.brain` 该标 `"personal"` 还是 `"company"`**（§2.1 待决策）——需要操作者单独决定，可能需要向 aeloop 提一个新 issue 讨论是否要开放第三种 `BrainKind`。
 - **不在本设计里选定向量层的具体技术方案**（§2.3）——需要一次独立的 spike 验证 `better-sqlite3` 的 `loadExtension()` 能力，本设计只列出三个选项和为什么 Phase1 先不做。
 - **不在本设计里设计 gate-controller**（§0.5 时序图2 标注的断链）——"谁来点 approve"这件事，`docs/architecture/conductor-work/CAPABILITY-MAP.zh-CN.md` 已经记录 gate-controller 是一个"代码在但未提交、未接 CLI/UI"的独立半成品（在另一个 worktree `company-gate-controller` 里），brain 层的外层 loop 要怎么对接它，留给实现阶段单独设计，本设计只如实标注这条链目前是断的。
 - **不解决 Layer2 自己的技术债**——issue #37（协议版本兼容运行时校验，仅文档层）、#58（逐 attempt token + retry-waste 核算）、#59（usage 落库/跨进程持久化）都是 Layer2 侧待办，不属于 brain 层设计范围，本设计只在依赖它们的地方标注现状（如 §4.1 的 PromptDelta 未接线）。
@@ -406,7 +406,7 @@ aeloop 自己的 `ModelAdapter` 接口（`src/harness/types.ts:24-52`）**没有
 
 ## 10. Vertical-slice spike 定义
 
-**目标**：这是 pitch demo 要打通的最小闭环，也是 §5.2 提到的"brain 层持续一致性"验证缺口里，第一块真正针对 aeloop 这套架构（而非 Verity 那套独立原型）做的验证。
+**目标**：这是 pitch demo 要打通的最小闭环，也是 §5.2 提到的"brain 层持续一致性"验证缺口里，第一块真正针对 aeloop 这套架构（而非另一套独立原型）做的验证。
 
 **闭环步骤**（对应 §0.5 两张时序图的串联）：
 
@@ -443,4 +443,4 @@ aeloop 自己的 `ModelAdapter` 接口（`src/harness/types.ts:24-52`）**没有
 | `docs/architecture/TOKEN-OPTIMIZATION-PLAN.zh-CN.md` | — | Token Budget Plane 权威文档 |
 | `docs/architecture/conductor-work/CAPABILITY-MAP.zh-CN.md` | — | 诚实能力地图，Run #25/#31 记录来源 |
 | `.claude/hooks/*.mjs`（ai-agent 仓库） | — | Layer3 机制库移植源，Phase1/2 边界依据 |
-| `CORE/CORE.md`（ai-agent 仓库） | — | Helix 醒来协议+铁律，Layer3 行为约束移植源 |
+| `CORE/CORE.md`（ai-agent 仓库） | — | 现有参考实现的醒来协议+铁律，Layer3 行为约束移植源 |
