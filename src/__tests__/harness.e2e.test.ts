@@ -32,7 +32,7 @@ import { SystemConfig } from "../context/config.js";
 import { StalenessEngine } from "../context/staleness.js";
 import { ContextInjector } from "../context/injector.js";
 import { PromptComposer } from "../prompt/composer.js";
-import { CoderOutput } from "../prompt/schema.js";
+import { CoderOutput, isCoderOutputChanged } from "../prompt/schema.js";
 import { AdapterRegistry } from "../harness/adapter-registry.js";
 import { ProviderRouter } from "../harness/provider-router.js";
 import { SchemaValidator } from "../harness/schema-validator.js";
@@ -68,6 +68,7 @@ class FakeAdapter implements ModelAdapter {
   async invoke(req: InvokeRequest): Promise<InvokeResult> {
     this.receivedRequests.push(req);
     const payload: CoderOutput = {
+      status: "changed",
       diff: "--- a/example.ts\n+++ b/example.ts\n@@ -1 +1 @@\n-old\n+new\n",
       claims: [
         {
@@ -156,7 +157,14 @@ describe("Prompt -> Harness vertical slice (real MemoryStore -> real ContextInje
     expect(result.provider).toBe("fake-litellm");
 
     // `data` is a typed CoderOutput — not just "parsed JSON", the zod
-    // schema actually accepted its shape.
+    // schema actually accepted its shape. The fixture's fake output is the
+    // "changed" variant (has a real diff), so narrow via the shared guard
+    // (schema.ts's `isCoderOutputChanged`) rather than reading `.diff` off
+    // the discriminated-union type directly (issue #47's `no_change` variant
+    // doesn't have a `diff` field at all).
+    if (!isCoderOutputChanged(data)) {
+      throw new Error(`expected a "changed" CoderOutput, got status "${data.status}"`);
+    }
     expect(data.diff).toContain("+new");
     expect(data.confidence).toBe("verified");
     expect(data.claims).toHaveLength(1);

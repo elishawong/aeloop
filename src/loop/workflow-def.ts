@@ -26,7 +26,14 @@
  * all.
  */
 
-/** The eight real nodes of the coder/tester loop graph (DESIGN §4) — A4a shipped the first six; A4b (PRD §4.1) adds `escalation`/`cancel`, the Escalation subtree A4a deliberately left out (PRD §0). */
+/**
+ * The real nodes of the coder/tester loop graph (DESIGN §4) — A4a shipped
+ * the first six; A4b (PRD §4.1) added `escalation`/`cancel`, the Escalation
+ * subtree A4a deliberately left out (PRD §0); issue #47 adds `no_change`, a
+ * second terminal alongside `apply`/`cancel` for a `draft` round whose
+ * `coderOutput.status === "no_change"` (a read-only/already-satisfied task
+ * with nothing to send through `g1`/the tester review).
+ */
 export const LOOP_NODES = {
   draft: "draft",
   g1: "g1",
@@ -36,6 +43,7 @@ export const LOOP_NODES = {
   apply: "apply",
   escalation: "escalation",
   cancel: "cancel",
+  noChange: "no_change",
 } as const;
 
 /**
@@ -65,7 +73,7 @@ export const CODER_TESTER_LOOP_DEFINITION = {
   nodes: Object.values(LOOP_NODES),
   edges: [
     { from: "__start__", to: LOOP_NODES.draft },
-    { from: LOOP_NODES.draft, to: LOOP_NODES.g1 },
+    { from: LOOP_NODES.draft, to: [LOOP_NODES.g1, LOOP_NODES.noChange], conditional: true },
     { from: LOOP_NODES.g1, to: [LOOP_NODES.review, LOOP_NODES.draft], conditional: true },
     { from: LOOP_NODES.review, to: [LOOP_NODES.g3, LOOP_NODES.g2, LOOP_NODES.escalation], conditional: true },
     { from: LOOP_NODES.g2, to: [LOOP_NODES.draft, LOOP_NODES.escalation], conditional: true },
@@ -73,5 +81,6 @@ export const CODER_TESTER_LOOP_DEFINITION = {
     { from: LOOP_NODES.escalation, to: [LOOP_NODES.draft, LOOP_NODES.g3, LOOP_NODES.cancel], conditional: true },
     { from: LOOP_NODES.apply, to: "__end__" },
     { from: LOOP_NODES.cancel, to: "__end__" },
+    { from: LOOP_NODES.noChange, to: "__end__" },
   ],
 } as const;

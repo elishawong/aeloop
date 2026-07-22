@@ -28,6 +28,7 @@ function buildState(overrides: Partial<LoopStateType> = {}): LoopStateType {
     feedback: undefined,
     injectedContext: { memories: [] },
     coderOutput: {
+      status: "changed",
       diff: "--- a/example.ts\n+++ b/example.ts\n@@ -1 +1 @@\n-old\n+new\n",
       claims: [],
       confidence: "verified",
@@ -49,6 +50,7 @@ function buildState(overrides: Partial<LoopStateType> = {}): LoopStateType {
     rejectThreshold: 2,
     escalationDecision: undefined,
     cancelled: false,
+    noChange: false,
     ...overrides,
   };
 }

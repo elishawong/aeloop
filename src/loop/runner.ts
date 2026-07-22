@@ -91,6 +91,7 @@ import type {
 import type { ContextInjectionResult } from "../context/injector.js";
 import type { ProviderRouter } from "../harness/provider-router.js";
 import type { PromptComposer } from "../prompt/composer.js";
+import { isCoderOutputChanged } from "../prompt/schema.js";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -301,8 +302,23 @@ async function computeRunProgress(
   const done = snapshot.next.length === 0;
 
   if (done) {
-    currentState = snapshot.values.applied ? LOOP_NODES.apply : LOOP_NODES.cancel;
-    status = snapshot.values.applied ? "completed" : "cancelled";
+    // Issue #47: a third terminal outcome alongside `apply`/`cancel` — a
+    // `no_change` round (`snapshot.values.noChange`) also ends the run
+    // `"completed"` (nothing went wrong, there was just nothing to change),
+    // but with its own `current_state: "no_change"`, distinct from the
+    // `g1`/`apply` path's `current_state: "apply"` (PRD-equivalent
+    // acceptance for this issue: don't reuse the `g1`/`changed` completion's
+    // `current_state` value for a run that never went through `g1` at all).
+    if (snapshot.values.applied) {
+      currentState = LOOP_NODES.apply;
+      status = "completed";
+    } else if (snapshot.values.noChange) {
+      currentState = LOOP_NODES.noChange;
+      status = "completed";
+    } else {
+      currentState = LOOP_NODES.cancel;
+      status = "cancelled";
+    }
   } else {
     const nextNode = snapshot.next[0];
     if (nextNode === undefined) {
@@ -595,7 +611,7 @@ async function runStreamAndPersistCore(
     // "updates" iteration, unchanged (R6-B2's own invariant + PRD §9.6's
     // write-cadence guarantee both depend on that never changing).
     let interruptSeenThisChunk = false;
-    let terminalNodeSeenThisChunk: "apply" | "cancel" | undefined;
+    let terminalNodeSeenThisChunk: "apply" | "cancel" | "no_change" | undefined;
 
     for (const [nodeName, rawUpdate] of Object.entries(payload)) {
       if (nodeName === "__interrupt__") {
@@ -741,7 +757,7 @@ async function runStreamAndPersistCore(
               runId,
               gateType: entry.gate,
               stepRef,
-              diffRef: latestCoderOutput?.diff ?? null,
+              diffRef: latestCoderOutput && isCoderOutputChanged(latestCoderOutput) ? latestCoderOutput.diff : null,
               reasoningText: entry.reasoningText ?? null,
               decision: entry.decision,
               decidedBy: decidedBy!,
@@ -773,13 +789,13 @@ async function runStreamAndPersistCore(
             decidedBy: decidedBy!,
           });
         });
-      } else if (nodeName === LOOP_NODES.apply || nodeName === LOOP_NODES.cancel) {
-        // Issue #29 PRD §4.2 row 3 — these two terminal nodes had no
-        // per-chunk handling at all before this event system (nothing to
-        // persist for them beyond what `computeRunProgress()` below already
-        // computes); `node_completed` is the only new thing this branch
-        // does. No `stepRef` — `apply`/`cancel` have no counter concept
-        // anywhere else in this codebase (PRD §9.4).
+      } else if (nodeName === LOOP_NODES.apply || nodeName === LOOP_NODES.cancel || nodeName === LOOP_NODES.noChange) {
+        // Issue #29 PRD §4.2 row 3 — these terminal nodes had no per-chunk
+        // handling at all before this event system (nothing to persist for
+        // them beyond what `computeRunProgress()` below already computes);
+        // `node_completed` is the only new thing this branch does. No
+        // `stepRef` — `apply`/`cancel`/`noChange` (issue #47 adds the third)
+        // have no counter concept anywhere else in this codebase (PRD §9.4).
         emitter.emit({
           type: "node_completed",
           runId,
@@ -935,6 +951,7 @@ export async function startRun(deps: StartRunDeps, input: StartRunInput): Promis
     rejectThreshold: input.rejectThreshold,
     escalationDecision: undefined,
     cancelled: false,
+    noChange: false,
   };
 
   const result = await runStreamAndPersist(compiled, initial, cfg, deps.audit, run.id, undefined, {}, emitter);

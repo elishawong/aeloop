@@ -147,6 +147,63 @@ describe("CoderOutput", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  describe("no_change variant (issue #47)", () => {
+    it("accepts a valid no_change payload", () => {
+      const result = CoderOutput.safeParse({
+        status: "no_change",
+        reason: "the requested behavior was already implemented",
+        evidence: "read src/example.ts and confirmed the function already exists",
+        claims: [],
+        confidence: "verified",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects an empty reason", () => {
+      const result = CoderOutput.safeParse({
+        status: "no_change",
+        reason: "",
+        evidence: "read src/example.ts",
+        claims: [],
+        confidence: "verified",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects a whitespace-only reason", () => {
+      const result = CoderOutput.safeParse({
+        status: "no_change",
+        reason: "   ",
+        evidence: "read src/example.ts",
+        claims: [],
+        confidence: "verified",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects an empty evidence", () => {
+      const result = CoderOutput.safeParse({
+        status: "no_change",
+        reason: "already implemented",
+        evidence: "",
+        claims: [],
+        confidence: "verified",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects a whitespace-only evidence", () => {
+      const result = CoderOutput.safeParse({
+        status: "no_change",
+        reason: "already implemented",
+        evidence: "\n\t  ",
+        claims: [],
+        confidence: "verified",
+      });
+      expect(result.success).toBe(false);
+    });
+  });
 });
 
 describe("TesterOutput", () => {

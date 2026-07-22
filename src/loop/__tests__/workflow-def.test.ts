@@ -8,7 +8,8 @@
  *
  * A4b (docs/feature/a4b-loop/PRD.md §4.1/§5) grows this from A4a's six
  * nodes/three gate types to eight nodes/four gate types — `escalation`/
- * `cancel` + `ESCALATION_ACK`.
+ * `cancel` + `ESCALATION_ACK`. Issue #47 adds a ninth node, `noChange`
+ * (`"no_change"`), a second terminal alongside `apply`/`cancel`.
  */
 import { describe, expect, it } from "vitest";
 import { CODER_TESTER_LOOP_DEFINITION, GATE_TYPES, LOOP_NODES } from "../workflow-def.js";
@@ -18,8 +19,18 @@ describe("CODER_TESTER_LOOP_DEFINITION", () => {
     expect(new Set(CODER_TESTER_LOOP_DEFINITION.nodes)).toEqual(new Set(Object.values(LOOP_NODES)));
   });
 
-  it("LOOP_NODES has the eight real A4b nodes, no more, no less", () => {
-    expect(Object.keys(LOOP_NODES).sort()).toEqual(["apply", "cancel", "draft", "escalation", "g1", "g2", "g3", "review"]);
+  it("LOOP_NODES has the nine real nodes (A4b's eight + issue #47's noChange), no more, no less", () => {
+    expect(Object.keys(LOOP_NODES).sort()).toEqual([
+      "apply",
+      "cancel",
+      "draft",
+      "escalation",
+      "g1",
+      "g2",
+      "g3",
+      "noChange",
+      "review",
+    ]);
   });
 
   it("GATE_TYPES has all four A4b gate types, including ESCALATION_ACK", () => {

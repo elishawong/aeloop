@@ -10,14 +10,19 @@ import { PromptComposer } from "../../../prompt/composer.js";
 import { AdapterRegistry } from "../../../harness/adapter-registry.js";
 import { ProviderRouter } from "../../../harness/provider-router.js";
 import type { AvailabilityResult, InvokeRequest, InvokeResult, ModelAdapter } from "../../../harness/types.js";
-import type { CoderOutput, TesterOutput } from "../../../prompt/schema.js";
+import type { CoderOutputChanged, TesterOutput } from "../../../prompt/schema.js";
 import { createReviewNode } from "../tester.js";
 import type { LoopStateType } from "../../types.js";
 
 const NOW = "2026-07-20T00:00:00.000Z";
 const SUBSCRIPTION_PERSONAS_DIR = path.join(resolveProfileDir("subscription"), "personas");
 
-const CODER_OUTPUT: CoderOutput = {
+// Typed as the "changed" variant specifically (not the broader `CoderOutput`
+// union) — this fixture always has a real `diff`, and `createReviewNode`
+// itself now throws if it's ever handed a "no_change" one (issue #47), so
+// there's nothing to narrow here.
+const CODER_OUTPUT: CoderOutputChanged = {
+  status: "changed",
   diff: "--- a/example.ts\n+++ b/example.ts\n@@ -1 +1 @@\n-old\n+new\n",
   claims: [
     { claimText: "the tests were run and passed", confidence: "verified", sourceRef: "test output", verifiedBy: "tool_execution" },
@@ -70,6 +75,7 @@ function buildState(overrides: Partial<LoopStateType> = {}): LoopStateType {
     rejectThreshold: 2,
     escalationDecision: undefined,
     cancelled: false,
+    noChange: false,
     ...overrides,
   };
 }

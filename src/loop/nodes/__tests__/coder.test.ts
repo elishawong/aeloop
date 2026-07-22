@@ -24,6 +24,7 @@ const NOW = "2026-07-20T00:00:00.000Z";
 const SUBSCRIPTION_PERSONAS_DIR = path.join(resolveProfileDir("subscription"), "personas");
 
 const VALID_CODER_OUTPUT: CoderOutput = {
+  status: "changed",
   diff: "--- a/example.ts\n+++ b/example.ts\n@@ -1 +1 @@\n-old\n+new\n",
   claims: [{ claimText: "the change compiles", confidence: "verified" }],
   confidence: "verified",
@@ -84,6 +85,7 @@ function buildState(overrides: Partial<LoopStateType> = {}): LoopStateType {
     rejectThreshold: 2,
     escalationDecision: undefined,
     cancelled: false,
+    noChange: false,
     ...overrides,
   };
 }

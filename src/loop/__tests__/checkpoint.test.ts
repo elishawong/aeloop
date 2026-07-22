@@ -46,6 +46,7 @@ class FakeCoderAdapter implements ModelAdapter {
 
   async invoke(_req: InvokeRequest): Promise<InvokeResult> {
     const payload: CoderOutput = {
+      status: "changed",
       diff: "--- a/example.ts\n+++ b/example.ts\n@@ -1 +1 @@\n-old\n+new\n",
       claims: [],
       confidence: "verified",
@@ -96,6 +97,7 @@ function initialState(): LoopStateType {
     rejectThreshold: 2,
     escalationDecision: undefined,
     cancelled: false,
+    noChange: false,
   };
 }
 

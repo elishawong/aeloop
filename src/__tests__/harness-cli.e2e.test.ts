@@ -55,7 +55,7 @@ import { SystemConfig } from "../context/config.js";
 import { StalenessEngine } from "../context/staleness.js";
 import { ContextInjector } from "../context/injector.js";
 import { PromptComposer } from "../prompt/composer.js";
-import { CoderOutput } from "../prompt/schema.js";
+import { CoderOutput, isCoderOutputChanged } from "../prompt/schema.js";
 import { buildAdapterRegistry } from "../harness/config.js";
 import { ProviderRouter } from "../harness/provider-router.js";
 import { SchemaValidator } from "../harness/schema-validator.js";
@@ -169,6 +169,12 @@ describe("Prompt -> Harness cli-bridge vertical slice (real MemoryStore -> real 
     // `data` is a typed CoderOutput — not just "parsed JSON", the zod
     // schema actually accepted its shape (produced by the fixture's
     // "claims-with-trace" scenario, which is deliberately CoderOutput-shaped).
+    // Narrow via the shared guard (schema.ts's `isCoderOutputChanged`) before
+    // reading `.diff` — issue #47's discriminated union only has that field
+    // on the "changed" variant.
+    if (!isCoderOutputChanged(data)) {
+      throw new Error(`expected a "changed" CoderOutput, got status "${data.status}"`);
+    }
     expect(data.diff).toContain("+new");
     expect(data.confidence).toBe("verified");
     expect(data.claims).toHaveLength(1);

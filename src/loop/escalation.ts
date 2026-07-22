@@ -24,6 +24,7 @@
 
 import { interrupt } from "@langchain/langgraph";
 import { GATE_TYPES } from "./workflow-def.js";
+import { isCoderOutputChanged } from "../prompt/schema.js";
 import type { EscalationResumeValue, GateLogEntry, GatePayload, LoopStateType } from "./types.js";
 
 /**
@@ -40,7 +41,7 @@ export function createEscalationNode(): (state: LoopStateType) => Partial<LoopSt
     const payload: GatePayload = {
       gate: GATE_TYPES.ESCALATION_ACK,
       question: "reject_count reached the threshold — revise / force-pass / abandon?",
-      ...(state.coderOutput?.diff !== undefined ? { diffRef: state.coderOutput.diff } : {}),
+      ...(state.coderOutput && isCoderOutputChanged(state.coderOutput) ? { diffRef: state.coderOutput.diff } : {}),
       ...(state.testerOutput?.issues !== undefined ? { issues: state.testerOutput.issues } : {}),
     };
 

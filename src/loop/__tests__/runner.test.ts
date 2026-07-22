@@ -53,6 +53,7 @@ class FakeCoderAdapter implements ModelAdapter {
   async invoke(_req: InvokeRequest): Promise<InvokeResult> {
     this.calls += 1;
     const payload: CoderOutput = {
+      status: "changed",
       diff: `--- a/example.ts\n+++ b/example.ts\n@@ -1 +1 @@\n-old\n+round${this.calls}\n`,
       claims: [
         { claimText: "the change compiles", confidence: "verified", sourceRef: "tsc" },
@@ -105,6 +106,51 @@ function buildDeps(
 }
 
 /**
+ * Issue #47's "nothing to change" coder variant — always returns a
+ * `CoderOutputNoChange`-shaped `CoderOutput` (`status: "no_change"`), never
+ * a diff. Paired with a `FakeTesterAdapter` in `buildDeps()`'s caller below
+ * only to satisfy `ProviderRouter`'s `{coder, tester}` role registration —
+ * `graph.ts`'s real `routeAfterDraft` routes a `"no_change"` round straight
+ * to the `noChange` terminal, so `review`/the tester adapter is never
+ * actually invoked on this path (mirrors `routeAfterDraft`'s own doc
+ * comment in `gates.ts`).
+ */
+class NoChangeCoderAdapter implements ModelAdapter {
+  readonly id = "fake-coder";
+  readonly kind = "direct-api" as const;
+  calls = 0;
+
+  async checkAvailability(): Promise<AvailabilityResult> {
+    return { available: true, checkedAt: NOW };
+  }
+
+  async invoke(_req: InvokeRequest): Promise<InvokeResult> {
+    this.calls += 1;
+    const payload: CoderOutput = {
+      status: "no_change",
+      reason: "the requested behavior was already implemented",
+      evidence: "read src/example.ts and confirmed the function already exists",
+      claims: [],
+      confidence: "verified",
+    };
+    return { content: JSON.stringify(payload), provider: this.id, model: "fake-coder-model-v1" };
+  }
+}
+
+function buildNoChangeDeps(dbPath: string): { deps: StartRunDeps; coder: NoChangeCoderAdapter; audit: AuditStore } {
+  const coder = new NoChangeCoderAdapter();
+  const tester = new FakeTesterAdapter(["pass"]);
+  const registry = new AdapterRegistry();
+  registry.register(coder);
+  registry.register(tester);
+  const router = new ProviderRouter({ coder: { provider: coder.id }, tester: { provider: tester.id } }, registry);
+  const composer = new PromptComposer(SUBSCRIPTION_PERSONAS_DIR);
+  const audit = new AuditStore(dbPath);
+  const checkpointer = createSqliteCheckpointer(dbPath);
+  return { deps: { router, composer, audit, checkpointer }, coder, audit };
+}
+
+/**
  * Coder fake whose claims-per-round is scriptable (unlike `FakeCoderAdapter`
  * above, always 2) — Review Round-2 R2-2 (`docs/feature/a4b-loop/test-report.md`)
  * needs a round that legally returns zero claims (`prompt/schema.ts`'s
@@ -126,6 +172,7 @@ class ScriptableClaimsCoderAdapter implements ModelAdapter {
     const n = this.claimsPerCall[Math.min(this.calls, this.claimsPerCall.length - 1)] ?? 1;
     this.calls += 1;
     const payload: CoderOutput = {
+      status: "changed",
       diff: `--- a/example.ts\n+++ b/example.ts\n@@ -1 +1 @@\n-old\n+round${this.calls}\n`,
       claims: Array.from({ length: n }, (_, i) => ({
         claimText: `round ${this.calls} claim ${i + 1}`,
@@ -283,6 +330,51 @@ describe("startRun", () => {
     expect(claims.every((c) => c.step_ref === "draft#1")).toBe(true);
     expect(claims.every((c) => c.model_used === "fake-coder-model-v1" && c.provider_used === "fake-coder")).toBe(true);
     expect(claims.map((c) => c.claim_text)).toEqual(["the change compiles", "matches the requested behavior"]);
+  });
+
+  it("issue #47: a no_change round completes the run in one startRun() call — done: true, no interrupt, coder called once, tester never called, workflow_runs status completed/current_state no_change, and the emitted events include node_completed(no_change) + run_completed exactly once", async () => {
+    const dbPath = tmpDbPath("start-run-no-change.sqlite");
+    const { deps, coder, audit } = buildNoChangeDeps(dbPath);
+    audits.push(audit);
+    const { events, emitter } = collectEvents();
+
+    const handle = await startRun(
+      { ...deps, events: emitter },
+      {
+        task: "check whether the function already exists",
+        profile: "subscription",
+        workflowDefId: "coder-tester-loop",
+        injectedContext: { memories: [] },
+        rejectThreshold: 2,
+      },
+    );
+
+    // Terminal in one shot — no G1 interrupt, the run is simply done.
+    expect(handle.done).toBe(true);
+    expect(handle.interrupt).toBeUndefined();
+
+    // The no_change coder ran exactly once; routeAfterDraft short-circuits straight to `noChange`,
+    // so the tester adapter registered in buildNoChangeDeps() is never invoked / G1 is never reached.
+    expect(coder.calls).toBe(1);
+    const testerCalls = readClaims(dbPath, handle.runId).filter((c) => c.actor === "tester");
+    expect(testerCalls).toHaveLength(0);
+    const approvals = readApprovals(dbPath, handle.runId);
+    expect(approvals.find((a) => a.gate_type === "G1_SEND_TO_TESTER")).toBeUndefined();
+
+    // workflow_runs lands on the dedicated no_change terminal state, not g1/apply/escalation.
+    const run = audit.getRunById(handle.runId);
+    expect(run).toMatchObject({ status: "completed", currentState: "no_change" });
+
+    // Event stream: exactly one node_completed(no_change) and exactly one run_completed, no gate_requested.
+    const noChangeCompleted = events.filter((e) => e.type === "node_completed" && (e as { node: string }).node === "no_change");
+    expect(noChangeCompleted).toHaveLength(1);
+    const runCompleted = events.filter((e) => e.type === "run_completed");
+    expect(runCompleted).toHaveLength(1);
+    expect(events.some((e) => e.type === "gate_requested")).toBe(false);
+    expect(events.some((e) => e.type === "run_cancelled")).toBe(false);
+    // run_completed is the very last event, and carries the same terminal current_state.
+    expect(events.at(-1)?.type).toBe("run_completed");
+    expect(events.at(-1)).toMatchObject({ currentState: "no_change" });
   });
 });
 
@@ -1243,6 +1335,7 @@ function initialLoopState(task: string, rejectThreshold: number): LoopStateType 
     rejectThreshold,
     escalationDecision: undefined,
     cancelled: false,
+    noChange: false,
   };
 }
 
