@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveProfileDir } from "../../profile/loader.js";
 import { PromptComposer } from "../../prompt/composer.js";
@@ -21,6 +22,7 @@ import type { AvailabilityResult, InvokeRequest, InvokeResult, ModelAdapter } fr
 import type { CoderOutput, TesterOutput } from "../../prompt/schema.js";
 import { AuditStore } from "../../loop/audit-store.js";
 import { createSqliteCheckpointer } from "../../loop/checkpoint.js";
+import { LoopEventEmitter, type GateDecidedEvent } from "../../loop/events.js";
 import { startRun } from "../../loop/runner.js";
 import type { ProfileConfig } from "../../profile/loader.js";
 import type { CliDeps } from "../assemble.js";
@@ -302,6 +304,186 @@ describe("runInteractiveLoop — accepts a handle without stepCounters (the resu
     expect(final.done).toBe(true);
     const run = deps.audit.getRunById(final.runId);
     expect(run?.status).toBe("completed");
+  });
+});
+
+/** Collects every `gate_decided` event a run emits, in order — used below to inspect `decidedBy` per gate without any new `AuditStore` read method. */
+function collectGateDecisions(emitter: LoopEventEmitter): GateDecidedEvent[] {
+  const decisions: GateDecidedEvent[] = [];
+  emitter.on((event) => {
+    if (event.type === "gate_decided") decisions.push(event);
+  });
+  return decisions;
+}
+
+describe("runInteractiveLoop — workflow.gate_mode: 'semi-auto' (issue #63)", () => {
+  it("auto-approves G1 and G2 with no prompter call, recorded as a system decision distinct from the human decidedBy, while G3 still prompts", async () => {
+    const dbPath = tmpDbPath("semi-auto-g1-g2.sqlite");
+    const { deps, coder, tester } = buildCliDeps(dbPath, ["reject", "pass"]);
+    deps.profileConfig.workflow = { ...deps.profileConfig.workflow, gate_mode: "semi-auto" };
+    const emitter = new LoopEventEmitter();
+    deps.events = emitter;
+    const decisions = collectGateDecisions(emitter);
+
+    const started = await startRun(deps, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 5, // high enough that the first reject routes to g2, not escalation.
+    });
+    expect(started.interrupt?.gate).toBe("G1_SEND_TO_TESTER");
+
+    // Only G3 needs a scripted answer — G1 (auto) -> review(reject) -> G2 (auto) -> draft(round2)
+    // -> G1 (auto) -> review(pass) -> G3 (human, scripted here).
+    const prompter = new FakePrompter({ confirm: [true] });
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const final = await runInteractiveLoop(deps, prompter, started, "elisha");
+
+    expect(final.done).toBe(true);
+    expect(coder.calls).toBe(2);
+    expect(tester.calls).toBe(2);
+    const run = deps.audit.getRunById(final.runId);
+    expect(run).toMatchObject({ status: "completed", currentState: "apply" });
+
+    // The prompter was called exactly once — for G3, not for either G1 round or the G2 round.
+    expect(prompter.calls).toHaveLength(1);
+    expect(prompter.calls[0]?.kind).toBe("confirm");
+
+    // Every gate decision this run recorded, split by gate type — G1/G2 must be attributed to
+    // the system's semi-auto decidedBy, never the real human "elisha"; G3 must be the reverse
+    // (requirement 2: the audit trail must distinguish a system auto-approval from a real human
+    // decision — never fake one as the other).
+    const g1G2Decisions = decisions.filter((d) => d.gate === "G1_SEND_TO_TESTER" || d.gate === "G2_SEND_TO_FIX");
+    const g3Decisions = decisions.filter((d) => d.gate === "G3_FINAL_MERGE");
+    expect(g1G2Decisions.length).toBeGreaterThan(0);
+    expect(g3Decisions.length).toBeGreaterThan(0);
+    for (const decision of g1G2Decisions) {
+      expect(decision.decidedBy).not.toBe("elisha");
+      expect(decision.decidedBy).toBe("system (semi-auto)");
+      expect(decision.decision).toBe("approved");
+    }
+    for (const decision of g3Decisions) {
+      expect(decision.decidedBy).toBe("elisha");
+    }
+  });
+
+  it("Escalation still prompts a human even in semi-auto, once reject_count hits the threshold", async () => {
+    const dbPath = tmpDbPath("semi-auto-escalation.sqlite");
+    const { deps } = buildCliDeps(dbPath, ["reject"]);
+    deps.profileConfig.workflow = { ...deps.profileConfig.workflow, gate_mode: "semi-auto" };
+    const emitter = new LoopEventEmitter();
+    deps.events = emitter;
+    const decisions = collectGateDecisions(emitter);
+
+    const started = await startRun(deps, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 1, // first reject already reaches the threshold -> escalation, bypassing g2 entirely
+    });
+    expect(started.interrupt?.gate).toBe("G1_SEND_TO_TESTER");
+
+    // G1 auto-approved -> review(reject, hits threshold) -> Escalation (human, scripted) -> abandon.
+    const prompter = new FakePrompter({ select: ["abandon"] });
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const final = await runInteractiveLoop(deps, prompter, started, "elisha");
+
+    expect(final.done).toBe(true);
+    // Exactly one prompter call — the Escalation gate — not G1 (auto-approved).
+    expect(prompter.calls).toHaveLength(1);
+    expect(prompter.calls[0]?.kind).toBe("select");
+    const run = deps.audit.getRunById(final.runId);
+    expect(run).toMatchObject({ status: "cancelled", currentState: "cancel" });
+
+    const escalationDecisions = decisions.filter((d) => d.gate === "ESCALATION_ACK");
+    expect(escalationDecisions.length).toBeGreaterThan(0);
+    for (const decision of escalationDecisions) {
+      expect(decision.decidedBy).toBe("elisha");
+    }
+    const g1Decisions = decisions.filter((d) => d.gate === "G1_SEND_TO_TESTER");
+    expect(g1Decisions.length).toBeGreaterThan(0);
+    for (const decision of g1Decisions) {
+      expect(decision.decidedBy).toBe("system (semi-auto)");
+    }
+  });
+
+  /**
+   * Zorro/Codex independent-review hardening ask: `interrupt.gate` and `workflow_runs.
+   * current_state` should always agree in real code (both ultimately come from the same
+   * `computeRunProgress()` read — `loop/runner.ts`), so this scenario is not reachable through
+   * `startRun()`/`resumeRun()` alone. This test forces the disagreement directly at the DB layer
+   * (a second, independent `better-sqlite3` connection to the same file, the same technique
+   * `loop/__tests__/runner.test.ts` already uses for read-side DB assertions) to prove the
+   * defensive assertion in `runInteractiveLoop()` actually fires and refuses to auto-approve,
+   * rather than trusting `interrupt.gate` alone.
+   */
+  it("refuses to auto-approve when workflow_runs.current_state disagrees with interrupt.gate (defensive gate-identity assertion)", async () => {
+    const dbPath = tmpDbPath("semi-auto-gate-identity-mismatch.sqlite");
+    const { deps } = buildCliDeps(dbPath, ["pass"]);
+    deps.profileConfig.workflow = { ...deps.profileConfig.workflow, gate_mode: "semi-auto" };
+
+    const started = await startRun(deps, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 2,
+    });
+    expect(started.interrupt?.gate).toBe("G1_SEND_TO_TESTER");
+
+    // Simulate `interrupt.gate` ("G1_SEND_TO_TESTER", still held in `started` above) and
+    // `workflow_runs.current_state` disagreeing — a state this codebase's own real code paths
+    // should never produce, but the assertion must fail closed if they ever do.
+    const writeDb = new Database(dbPath);
+    try {
+      writeDb.prepare(`UPDATE workflow_runs SET current_state = 'g3' WHERE id = ?`).run(started.runId);
+    } finally {
+      writeDb.close();
+    }
+
+    const prompter = new FakePrompter({ confirm: [true] });
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await expect(runInteractiveLoop(deps, prompter, started, "elisha")).rejects.toThrow(/gate-identity mismatch/);
+    // The prompter must never have been consulted — the assertion fires before any decision path.
+    expect(prompter.calls).toHaveLength(0);
+  });
+});
+
+describe("runInteractiveLoop — workflow.gate_mode: 'manual' (explicit) behaves identically to the toggle being absent", () => {
+  it("still prompts for every gate, same as the default (no config field at all)", async () => {
+    const dbPath = tmpDbPath("manual-explicit.sqlite");
+    const { deps } = buildCliDeps(dbPath, ["pass"]);
+    deps.profileConfig.workflow = { ...deps.profileConfig.workflow, gate_mode: "manual" };
+    const emitter = new LoopEventEmitter();
+    deps.events = emitter;
+    const decisions = collectGateDecisions(emitter);
+
+    const started = await startRun(deps, {
+      task: "add a function",
+      profile: "subscription",
+      workflowDefId: "coder-tester-loop",
+      injectedContext: { memories: [] },
+      rejectThreshold: 2,
+    });
+
+    const prompter = new FakePrompter({ confirm: [true, true] }); // G1 approve, G3 approve
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const final = await runInteractiveLoop(deps, prompter, started, "elisha");
+
+    expect(final.done).toBe(true);
+    expect(prompter.calls).toHaveLength(2);
+    const run = deps.audit.getRunById(final.runId);
+    expect(run).toMatchObject({ status: "completed", currentState: "apply" });
+    expect(decisions.length).toBeGreaterThan(0);
+    for (const decision of decisions) {
+      expect(decision.decidedBy).toBe("elisha");
+    }
   });
 });
 

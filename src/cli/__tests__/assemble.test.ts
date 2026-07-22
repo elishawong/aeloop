@@ -407,6 +407,53 @@ describe("resolveRejectThreshold", () => {
       store.close();
     }
   });
+
+  /**
+   * Issue #63 `semi-auto-gate-mode` independent review (Zorro/Codex blocker 2): before this guard,
+   * `.nan`/`.inf` YAML tags in `config.yaml` parse to real JS `NaN`/`Infinity` — both `typeof
+   * === "number"` — and were returned as-is from tier 1, which would have made
+   * `loop/runner.ts`'s `rejectCount >= rejectThreshold` escalation check permanently false (a
+   * silent, unbounded auto-approval loop, especially dangerous under `workflow.gate_mode:
+   * "semi-auto"`, which still relies on that check to reach a human at Escalation). Same
+   * malformed-value set `resolveSchemaMaxAttempts()`'s own test below exercises, so both
+   * profile-sourced numeric knobs are proven to fail closed the same way.
+   */
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0, -1, 1.5])(
+    "falls through to tier 2 (never returns the raw value) for a malformed reject_threshold (%j)",
+    (bad) => {
+      const store = new MemoryStore(":memory:");
+      try {
+        const systemConfig = new SystemConfig(store);
+        systemConfig.set("default_reject_threshold", "7");
+        const profileConfig: ProfileConfig = {
+          profile: "subscription",
+          providers: {},
+          roles: {},
+          workflow: { reject_threshold: bad },
+        };
+        expect(resolveRejectThreshold(profileConfig, systemConfig)).toBe(7);
+      } finally {
+        store.close();
+      }
+    },
+  );
+
+  it("still accepts a valid positive integer reject_threshold (e.g. 1) as tier 1 — the guard isn't overly strict", () => {
+    const store = new MemoryStore(":memory:");
+    try {
+      const systemConfig = new SystemConfig(store);
+      systemConfig.set("default_reject_threshold", "7");
+      const profileConfig: ProfileConfig = {
+        profile: "subscription",
+        providers: {},
+        roles: {},
+        workflow: { reject_threshold: 1 },
+      };
+      expect(resolveRejectThreshold(profileConfig, systemConfig)).toBe(1);
+    } finally {
+      store.close();
+    }
+  });
 });
 
 describe("resolveSchemaMaxAttempts (issue #45 follow-up)", () => {

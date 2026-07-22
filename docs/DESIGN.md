@@ -422,6 +422,7 @@ harness:
   schema_max_attempts: 2               # default 2; positive integer
 workflow:
   reject_threshold: 2
+  gate_mode: manual                    # or "semi-auto"; default "manual" when absent
 ```
 
 **Profile boundary — `harness.schema_max_attempts` vs `workflow.reject_threshold`** (issue #45): these are two independent knobs, not aliases of each other.
@@ -429,6 +430,8 @@ workflow:
 - `workflow.reject_threshold` (default `2`): a **tester rejection escalation** counter at the G1/G2/G3 loop level — how many times the tester can reject the coder's work (tracked as `reject_count` against the run's snapshotted `reject_threshold`, see §schema `WORKFLOW_RUN`) before the run forces escalation.
 
 They live in different layers (harness/adapter call retries vs. the LangGraph review loop) and must not be conflated when tuning either profile.
+
+**`workflow.gate_mode`** (issue #63, full design: `docs/feature/semi-auto-gate-mode/PRD.md`): a human-gate automation toggle, `"manual"` (default when absent — the behavior described everywhere else in this document) or `"semi-auto"`. In `"semi-auto"`, `src/cli/run-loop.ts`'s `runInteractiveLoop()` auto-approves G1 (send draft to tester) and G2 (send tester findings back to the coder) with no human prompt, recording the decision under a distinct `decided_by` value (`"system (semi-auto)"`) rather than the real human's username, so the audit trail (§5 `APPROVAL`) always tells an automated approval apart from a human one. **G3 (final apply) and Escalation always stay human, in every mode** — this is the one safety invariant `gate_mode` can never override, enforced by `run-loop.ts` only ever consulting a fixed, closed `AUTO_APPROVABLE_GATES = {G1, G2}` set (not derived from config) plus a defensive gate-identity assertion against `workflow_runs.current_state` before any auto-approval. `profile/loader.ts` validates the value fail-closed at load time — anything other than `"manual"`/`"semi-auto"` throws `ProfileConfigParseError` rather than silently defaulting.
 
 ---
 

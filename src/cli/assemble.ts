@@ -207,9 +207,32 @@ export function resolveContextBudgetManager(profileConfig: ProfileConfig): Conte
   return new ContextBudgetManager(tokenBudget);
 }
 
+/**
+ * Tier 1 validity guard (issue #63 `semi-auto-gate-mode` independent review,
+ * Zorro/Codex blocker 2): `fromProfile` must be a finite positive integer to
+ * count as tier 1 — the exact same `Number.isInteger(fromProfile) &&
+ * fromProfile >= 1` guard `resolveSchemaMaxAttempts()` below already uses
+ * for its own profile-sourced value, copied here verbatim (not a new
+ * pattern) so both profile-sourced numeric knobs fail closed the same way.
+ * A malformed value — including YAML's `.nan`/`.inf` tags, which parse to a
+ * real JS `NaN`/`Infinity` (`typeof` "number", but neither is an integer) —
+ * now falls through to tier 2/3 instead of being returned as-is. This
+ * matters concretely: `loop/runner.ts`'s escalation check
+ * (`rejectCount >= rejectThreshold`) can never be true against a `NaN`/
+ * `Infinity` threshold, so an unvalidated `reject_threshold: .inf` in
+ * `config.yaml` would have silently defeated the reject-count-to-Escalation
+ * safety net entirely — the exact human-in-the-loop backstop that
+ * `workflow.gate_mode: "semi-auto"` (issue #63) still depends on reaching a
+ * human at G3/Escalation even when G1/G2 auto-approve. `Number.isInteger()`
+ * alone already excludes both `NaN` and `Infinity` (neither is an integer),
+ * so no separate `Number.isFinite()` check is needed on top of it — same as
+ * the sibling function.
+ */
 export function resolveRejectThreshold(profileConfig: ProfileConfig, systemConfig: SystemConfig): number {
   const fromProfile = profileConfig.workflow?.reject_threshold;
-  if (typeof fromProfile === "number") return fromProfile;
+  if (typeof fromProfile === "number" && Number.isInteger(fromProfile) && fromProfile >= 1) {
+    return fromProfile;
+  }
 
   const fromSystemConfig = systemConfig.getDefaultRejectThreshold();
   if (fromSystemConfig !== null) return fromSystemConfig;
