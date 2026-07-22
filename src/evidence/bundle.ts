@@ -20,6 +20,19 @@ export interface EvidenceClaim {
   readonly evidenceRefs: readonly string[];
 }
 
+/**
+ * Provenance of an {@link EvidenceItem}'s content — distinct from `kind`
+ * (what *category* of evidence this is: source/tool/test/artifact/human).
+ * `source` instead answers "how much should `passed` be trusted": `"verified"`
+ * means an independent, mechanized check produced this item (a test runner, a
+ * tool invocation, a diff review); `"model-reported"` means the agent itself
+ * asserted it with no independent check backing it up (e.g. a coder's
+ * `no_change` `reason`/`evidence` prose — see `CoderOutputNoChange`,
+ * `src/prompt/schema.ts`). Optional/absent is treated as `"verified"` for
+ * backward compatibility with evidence recorded before this field existed.
+ */
+export type EvidenceSource = "verified" | "model-reported";
+
 export interface EvidenceItem {
   readonly id: string;
   readonly kind: EvidenceKind;
@@ -28,6 +41,7 @@ export interface EvidenceItem {
   readonly contentHash?: string;
   readonly passed?: boolean;
   readonly content?: string;
+  readonly source?: EvidenceSource;
 }
 
 export interface UsageRecord {
@@ -61,7 +75,27 @@ export interface TokenUsage {
   readonly cacheReadTokens: number;
   readonly retryTokens: number;
   readonly estimated: boolean;
+  /**
+   * The single model these aggregated counters came from — populated only
+   * while every `recordUsage()` call contributing to this total agreed on
+   * one model name (the common case: one coder/tester model per run).
+   * `undefined` once a *second* distinct model is recorded, rather than
+   * silently overwriting with whichever call happened last — a coder on
+   * one model and a tester on another must never be summarized as if only
+   * the more recently recorded one ran. See `models` for the multi-model
+   * case; `usageRecords` (`EvidenceBundle.usageRecords`) remains the
+   * authoritative per-call breakdown regardless.
+   */
   readonly model?: string;
+  /**
+   * Every distinct model name recorded so far, in first-seen order.
+   * Present whenever at least one `recordUsage()` call carried a `model`;
+   * a single entry here is the backward-compatible case `model` also
+   * reports. Two or more entries is the signal that `model` was
+   * deliberately left `undefined` above because the aggregate spans
+   * multiple models.
+   */
+  readonly models?: readonly string[];
   readonly costUsd?: number;
 }
 
@@ -111,6 +145,8 @@ export class EvidenceBundleBuilder {
   private readonly eventTypes = new Set<string>();
   private usage: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, retryTokens: 0, estimated: false };
   private readonly usageRecords: UsageRecord[] = [];
+  /** Distinct model names seen across every `recordUsage()` call, in first-seen order — see `TokenUsage.model`/`.models` doc comments for why this needs to be tracked separately from `this.usage.model`. */
+  private readonly modelsSeen: string[] = [];
   private status: EvidenceBundle["status"] = "running";
   private omittedContext: readonly OmittedContextEntry[] = [];
 
@@ -152,13 +188,25 @@ export class EvidenceBundleBuilder {
       });
     }
     if (event.type === "agent_completed" && event.outcome === "no_change" && event.noChangeReason && event.noChangeEvidence) {
+      // Trust fix (issue #54 PR #57 review): `noChangeEvidence` is prose the
+      // coder model itself wrote (`CoderOutputNoChange.evidence`,
+      // `src/prompt/schema.ts`) to justify producing no diff — nothing here
+      // independently checked it against the actual repository state.
+      // Recording it as `passed: true` would tell downstream consumers a
+      // mechanized check confirmed "no change was needed", when in truth
+      // it's an unverified, model-reported claim. Fail-closed: `passed` is
+      // explicitly `false` (never `true`) and `source: "model-reported"`
+      // names why, so this can never be mistaken for `"verified"` evidence
+      // (e.g. a real test run) without a caller opting in by inspecting
+      // `source` itself.
       this.addEvidence({
         id: `no-change-${event.runId}-${event.stepRef ?? "draft"}`,
         kind: "artifact",
         title: event.noChangeReason,
         ref: `evidence://run/${event.runId}/no-change`,
         content: event.noChangeEvidence,
-        passed: true,
+        passed: false,
+        source: "model-reported",
       });
     }
     return this;
@@ -193,13 +241,17 @@ export class EvidenceBundleBuilder {
     nonNegativeInteger(usage.cacheReadTokens, "cacheReadTokens");
     nonNegativeInteger(usage.retryTokens, "retryTokens");
     if (usage.costUsd !== undefined && (!Number.isFinite(usage.costUsd) || usage.costUsd < 0)) throw new TypeError("costUsd must be a non-negative finite number");
+    if (usage.model !== undefined && !this.modelsSeen.includes(usage.model)) this.modelsSeen.push(usage.model);
     this.usage = {
       inputTokens: this.usage.inputTokens + usage.inputTokens,
       outputTokens: this.usage.outputTokens + usage.outputTokens,
       cacheReadTokens: this.usage.cacheReadTokens + usage.cacheReadTokens,
       retryTokens: this.usage.retryTokens + usage.retryTokens,
       estimated: this.usage.estimated || usage.estimated,
-      model: usage.model ?? this.usage.model,
+      // Trust fix (issue #54 PR #57 review): never collapse two distinct
+      // models into "whichever was recorded last" — see `TokenUsage.model`.
+      model: this.modelsSeen.length === 1 ? this.modelsSeen[0] : undefined,
+      ...(this.modelsSeen.length > 0 ? { models: [...this.modelsSeen] } : {}),
       costUsd: (this.usage.costUsd ?? 0) + (usage.costUsd ?? 0),
     };
     return this;
