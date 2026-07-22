@@ -1,0 +1,2487 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Conductor Work × Aeloop — 可信 AI 工作流平台</title>
+    <style>
+      /* ============ Tokens ============ */
+      :root {
+        color-scheme: dark;
+        --ink: #0a0e1a;
+        --ink-1: #0e1424;
+        --ink-2: #141c31;
+        --panel: rgba(20, 28, 49, 0.62);
+        --panel-solid: #131a2c;
+        --line: rgba(120, 150, 210, 0.14);
+        --line-strong: rgba(120, 150, 210, 0.28);
+        --grid: rgba(91, 140, 255, 0.045);
+        --text: #ccd4e8;
+        --text-dim: #7d89a6;
+        --text-faint: #56617e;
+        --head: #f3f6fd;
+        --signal: #5b8cff;
+        --signal-soft: rgba(91, 140, 255, 0.12);
+        --verified: #34d399;
+        --verified-soft: rgba(52, 211, 153, 0.12);
+        --gate: #f6b73c;
+        --gate-soft: rgba(246, 183, 60, 0.12);
+        --denied: #f2557a;
+        --denied-soft: rgba(242, 85, 122, 0.1);
+        --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code",
+          Menlo, "Roboto Mono", monospace;
+        --sans: system-ui, -apple-system, "Segoe UI", "PingFang SC",
+          "Noto Sans SC", "Microsoft YaHei", sans-serif;
+        --maxw: 1120px;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          color-scheme: light;
+          --ink: #f4f6fc;
+          --ink-1: #eef1f9;
+          --ink-2: #e6ebf6;
+          --panel: rgba(255, 255, 255, 0.72);
+          --panel-solid: #ffffff;
+          --line: rgba(30, 55, 110, 0.12);
+          --line-strong: rgba(30, 55, 110, 0.22);
+          --grid: rgba(56, 90, 190, 0.05);
+          --text: #2c3450;
+          --text-dim: #59657f;
+          --text-faint: #8791a8;
+          --head: #131a2e;
+          --signal: #3a63d8;
+          --signal-soft: rgba(58, 99, 216, 0.1);
+          --verified: #0f9d68;
+          --verified-soft: rgba(15, 157, 104, 0.1);
+          --gate: #b5791a;
+          --gate-soft: rgba(181, 121, 26, 0.12);
+          --denied: #d23a63;
+          --denied-soft: rgba(210, 58, 99, 0.09);
+        }
+      }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --ink: #0a0e1a;
+        --ink-1: #0e1424;
+        --ink-2: #141c31;
+        --panel: rgba(20, 28, 49, 0.62);
+        --panel-solid: #131a2c;
+        --line: rgba(120, 150, 210, 0.14);
+        --line-strong: rgba(120, 150, 210, 0.28);
+        --grid: rgba(91, 140, 255, 0.045);
+        --text: #ccd4e8;
+        --text-dim: #7d89a6;
+        --text-faint: #56617e;
+        --head: #f3f6fd;
+        --signal: #5b8cff;
+        --signal-soft: rgba(91, 140, 255, 0.12);
+        --verified: #34d399;
+        --verified-soft: rgba(52, 211, 153, 0.12);
+        --gate: #f6b73c;
+        --gate-soft: rgba(246, 183, 60, 0.12);
+        --denied: #f2557a;
+        --denied-soft: rgba(242, 85, 122, 0.1);
+      }
+      :root[data-theme="light"] {
+        color-scheme: light;
+        --ink: #f4f6fc;
+        --ink-1: #eef1f9;
+        --ink-2: #e6ebf6;
+        --panel: rgba(255, 255, 255, 0.72);
+        --panel-solid: #ffffff;
+        --line: rgba(30, 55, 110, 0.12);
+        --line-strong: rgba(30, 55, 110, 0.22);
+        --grid: rgba(56, 90, 190, 0.05);
+        --text: #2c3450;
+        --text-dim: #59657f;
+        --text-faint: #8791a8;
+        --head: #131a2e;
+        --signal: #3a63d8;
+        --signal-soft: rgba(58, 99, 216, 0.1);
+        --verified: #0f9d68;
+        --verified-soft: rgba(15, 157, 104, 0.1);
+        --gate: #b5791a;
+        --gate-soft: rgba(181, 121, 26, 0.12);
+        --denied: #d23a63;
+        --denied-soft: rgba(210, 58, 99, 0.09);
+      }
+
+      /* ============ Reset ============ */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+        * {
+          animation-duration: 0.001ms !important;
+          transition-duration: 0.001ms !important;
+        }
+      }
+      body {
+        background: var(--ink);
+        color: var(--text);
+        font-family: var(--sans);
+        font-size: 16px;
+        line-height: 1.72;
+        overflow-x: hidden;
+        -webkit-font-smoothing: antialiased;
+        position: relative;
+      }
+      /* blueprint grid ground */
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: -2;
+        pointer-events: none;
+        background-image:
+          linear-gradient(var(--grid) 1px, transparent 1px),
+          linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+        background-size: 48px 48px;
+      }
+      body::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: -2;
+        pointer-events: none;
+        background:
+          radial-gradient(
+            720px 480px at 82% -6%,
+            var(--signal-soft),
+            transparent 60%
+          ),
+          radial-gradient(
+            560px 420px at 8% 4%,
+            var(--verified-soft),
+            transparent 62%
+          );
+        opacity: 0.9;
+      }
+
+      ::selection {
+        background: var(--signal-soft);
+        color: var(--head);
+      }
+      a {
+        color: inherit;
+      }
+      :focus-visible {
+        outline: 2px solid var(--signal);
+        outline-offset: 3px;
+        border-radius: 3px;
+      }
+
+      /* ============ Nav ============ */
+      nav {
+        position: fixed;
+        inset: 0 0 auto 0;
+        z-index: 100;
+        height: 56px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 0 clamp(16px, 4vw, 40px);
+        background: color-mix(in srgb, var(--ink) 82%, transparent);
+        backdrop-filter: blur(14px);
+        border-bottom: 1px solid var(--line);
+      }
+      .brandmark {
+        font-family: var(--mono);
+        font-size: 13.5px;
+        letter-spacing: 0.02em;
+        color: var(--head);
+        margin-right: auto;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        white-space: nowrap;
+      }
+      .brandmark b {
+        color: var(--signal);
+        font-weight: 600;
+      }
+      .brandmark .x {
+        color: var(--text-faint);
+        font-weight: 400;
+      }
+      .navlinks {
+        display: flex;
+        gap: 2px;
+      }
+      nav a.navlink {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--text-dim);
+        text-decoration: none;
+        padding: 6px 11px;
+        border-radius: 6px;
+        letter-spacing: 0.02em;
+        transition: color 0.18s, background 0.18s;
+        white-space: nowrap;
+      }
+      nav a.navlink:hover {
+        color: var(--head);
+        background: var(--signal-soft);
+      }
+      nav a.navlink.active {
+        color: var(--signal);
+      }
+      @media (max-width: 860px) {
+        .navlinks {
+          display: none;
+        }
+      }
+
+      /* ============ Layout primitives ============ */
+      section {
+        position: relative;
+        max-width: var(--maxw);
+        margin: 0 auto;
+        padding: clamp(72px, 11vw, 128px) clamp(20px, 5vw, 56px);
+      }
+      .eyebrow {
+        font-family: var(--mono);
+        font-size: 12px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--signal);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      .eyebrow::before {
+        content: "";
+        width: 26px;
+        height: 1px;
+        background: var(--signal);
+      }
+      h2.title {
+        font-size: clamp(26px, 4.4vw, 40px);
+        line-height: 1.15;
+        font-weight: 680;
+        color: var(--head);
+        letter-spacing: -0.015em;
+        text-wrap: balance;
+        max-width: 20ch;
+      }
+      .title em {
+        font-style: normal;
+        color: var(--signal);
+      }
+      .lede {
+        margin-top: 20px;
+        max-width: 62ch;
+        color: var(--text-dim);
+        font-size: clamp(15px, 1.5vw, 17px);
+      }
+      .divider {
+        max-width: var(--maxw);
+        margin: 0 auto;
+        height: 1px;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          var(--line-strong),
+          transparent
+        );
+      }
+      .reveal {
+        opacity: 0;
+        transform: translateY(22px);
+        transition: opacity 0.7s ease, transform 0.7s ease;
+      }
+      .reveal.in {
+        opacity: 1;
+        transform: none;
+      }
+
+      /* ============ Hero ============ */
+      #hero {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding-top: 92px;
+      }
+      .hero-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        letter-spacing: 0.04em;
+        color: var(--text-dim);
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        padding: 5px 13px;
+        margin-bottom: 30px;
+        width: fit-content;
+      }
+      .hero-badge .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--verified);
+        box-shadow: 0 0 10px var(--verified);
+        animation: pulse 2.4s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.35;
+        }
+      }
+      .hero-lockup {
+        font-family: var(--mono);
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        line-height: 1.02;
+        color: var(--head);
+        font-size: clamp(40px, 8.4vw, 92px);
+        display: flex;
+        flex-direction: column;
+      }
+      .hero-lockup .layer-tag {
+        font-family: var(--mono);
+        font-size: clamp(10px, 1.3vw, 13px);
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        font-weight: 500;
+        margin-bottom: 6px;
+      }
+      .hero-lockup .l-brain {
+        color: var(--signal);
+      }
+      .hero-lockup .l-engine {
+        color: var(--verified);
+      }
+      .hero-lockup .conductor {
+        background: linear-gradient(96deg, var(--signal), #9db8ff);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      .hero-lockup .plus {
+        color: var(--text-faint);
+        font-weight: 300;
+      }
+      .hero-lockup .aeloop {
+        color: var(--head);
+      }
+      .hero-sub {
+        margin-top: 30px;
+        max-width: 60ch;
+        font-size: clamp(17px, 2vw, 21px);
+        line-height: 1.6;
+        color: var(--text);
+      }
+      .hero-sub b {
+        color: var(--head);
+        font-weight: 600;
+      }
+      .hero-meta {
+        margin-top: 34px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .hero-chip {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--text-dim);
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 7px 12px;
+        background: var(--panel);
+      }
+      .hero-chip b {
+        color: var(--signal);
+        font-weight: 600;
+      }
+      .hero-note {
+        margin-top: 26px;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--text-faint);
+        letter-spacing: 0.03em;
+      }
+
+      /* ============ Generic cards ============ */
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 24px;
+        backdrop-filter: blur(8px);
+      }
+      .grid {
+        display: grid;
+        gap: 16px;
+        margin-top: 44px;
+      }
+      .g3 {
+        grid-template-columns: repeat(3, 1fr);
+      }
+      .g2 {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      @media (max-width: 820px) {
+        .g3,
+        .g2 {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* ============ From Verity: before/after ============ */
+      .evo-grid {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: 20px;
+        align-items: stretch;
+        margin-top: 44px;
+      }
+      @media (max-width: 880px) {
+        .evo-grid {
+          grid-template-columns: 1fr;
+        }
+        .evo-arrow {
+          transform: rotate(90deg);
+          justify-self: center;
+        }
+      }
+      .evo-col {
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        overflow: hidden;
+        background: var(--panel);
+      }
+      .evo-head {
+        padding: 15px 20px;
+        font-family: var(--mono);
+        font-size: 12px;
+        letter-spacing: 0.04em;
+        border-bottom: 1px solid var(--line);
+      }
+      .evo-old .evo-head {
+        color: var(--text-dim);
+        background: rgba(125, 137, 166, 0.06);
+      }
+      .evo-new .evo-head {
+        color: var(--signal);
+        background: var(--signal-soft);
+      }
+      .evo-head b {
+        display: block;
+        font-size: 15px;
+        color: var(--head);
+        margin-top: 3px;
+        letter-spacing: 0;
+        font-family: var(--sans);
+        font-weight: 650;
+      }
+      .evo-new .evo-head b {
+        color: var(--head);
+      }
+      .evo-body {
+        padding: 8px 20px 16px;
+      }
+      .evo-row {
+        display: flex;
+        gap: 11px;
+        padding: 11px 0;
+        border-bottom: 1px solid var(--line);
+        font-size: 13.5px;
+        line-height: 1.55;
+      }
+      .evo-row:last-child {
+        border-bottom: none;
+      }
+      .evo-row .k {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+        width: 72px;
+        flex-shrink: 0;
+        padding-top: 2px;
+      }
+      .evo-old .evo-row .v {
+        color: var(--text-dim);
+      }
+      .evo-new .evo-row .v {
+        color: var(--text);
+      }
+      .evo-new .evo-row .v strong {
+        color: var(--head);
+        font-weight: 650;
+      }
+      .evo-arrow {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--mono);
+        color: var(--signal);
+        font-size: 26px;
+      }
+      .split-note {
+        margin-top: 26px;
+        border-left: 2px solid var(--signal);
+        padding: 4px 0 4px 18px;
+        color: var(--text-dim);
+        font-size: 14.5px;
+        max-width: 74ch;
+      }
+      .split-note b {
+        color: var(--head);
+        font-weight: 650;
+      }
+      code.inl {
+        font-family: var(--mono);
+        font-size: 0.86em;
+        color: var(--signal);
+        background: var(--signal-soft);
+        padding: 1px 6px;
+        border-radius: 5px;
+      }
+
+      /* ============ Architecture diagram ============ */
+      .arch {
+        margin-top: 46px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0;
+      }
+      .arch-row {
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+      .arch-node {
+        border-radius: 12px;
+        border: 1px solid var(--line-strong);
+        background: var(--panel-solid);
+        padding: 15px 20px;
+        min-width: 180px;
+        text-align: center;
+      }
+      .arch-node .an-label {
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+        margin-bottom: 4px;
+      }
+      .arch-node .an-title {
+        color: var(--head);
+        font-weight: 600;
+        font-size: 14.5px;
+      }
+      .arch-node .an-desc {
+        color: var(--text-dim);
+        font-size: 12px;
+        margin-top: 4px;
+        line-height: 1.5;
+      }
+      .arch-brain {
+        border-color: rgba(91, 140, 255, 0.45);
+        background: linear-gradient(180deg, var(--signal-soft), transparent),
+          var(--panel-solid);
+        min-width: min(560px, 92%);
+        padding: 20px 24px;
+      }
+      .arch-brain .an-title {
+        color: var(--signal);
+        font-size: 17px;
+      }
+      .arch-engine {
+        border-color: rgba(52, 211, 153, 0.4);
+        background: linear-gradient(180deg, var(--verified-soft), transparent),
+          var(--panel-solid);
+        min-width: min(700px, 96%);
+        padding: 20px 24px;
+      }
+      .arch-engine .an-title {
+        color: var(--verified);
+        font-size: 17px;
+      }
+      .engine-layers {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: center;
+        margin-top: 14px;
+      }
+      .engine-layers span {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 5px 9px;
+        background: var(--ink-1);
+      }
+      .seam {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 9px 16px;
+        margin: 4px 0;
+        border-radius: 999px;
+        border: 1px dashed var(--line-strong);
+        background: var(--ink-1);
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--text);
+      }
+      .seam .arrow {
+        color: var(--signal);
+      }
+      .seam.up .arrow {
+        color: var(--verified);
+      }
+      .seam b {
+        color: var(--head);
+        font-weight: 600;
+      }
+      .arch-conn {
+        width: 1px;
+        height: 22px;
+        background: linear-gradient(
+          to bottom,
+          var(--line-strong),
+          var(--signal)
+        );
+      }
+      .arch-side {
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+        justify-content: center;
+        margin-top: 16px;
+      }
+      .arch-side .arch-node {
+        min-width: 150px;
+      }
+      .arch-node.side-repo {
+        border-color: rgba(242, 85, 122, 0.32);
+      }
+      .arch-node.side-repo .an-title {
+        color: var(--denied);
+        font-size: 13px;
+      }
+      .arch-node.side-profile {
+        border-color: rgba(246, 183, 60, 0.32);
+      }
+      .arch-node.side-profile .an-title {
+        color: var(--gate);
+        font-size: 13px;
+      }
+      .arch-node.side-report .an-title {
+        color: var(--head);
+        font-size: 13px;
+      }
+
+      /* ============ Problem list ============ */
+      .prob {
+        display: flex;
+        gap: 14px;
+        align-items: flex-start;
+      }
+      .prob .num {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--denied);
+        border: 1px solid var(--denied-soft);
+        background: var(--denied-soft);
+        border-radius: 7px;
+        padding: 3px 8px;
+        flex-shrink: 0;
+        margin-top: 2px;
+      }
+      .prob h4 {
+        color: var(--head);
+        font-size: 15px;
+        font-weight: 640;
+        margin-bottom: 4px;
+      }
+      .prob p {
+        color: var(--text-dim);
+        font-size: 13.5px;
+        line-height: 1.6;
+      }
+
+      /* ============ Mechanism / evidence chain ============ */
+      .chain {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin: 8px 0 6px;
+        font-family: var(--mono);
+        font-size: 12.5px;
+      }
+      .chain .step {
+        border: 1px solid var(--line-strong);
+        border-radius: 7px;
+        padding: 7px 11px;
+        color: var(--text);
+        background: var(--ink-1);
+        white-space: nowrap;
+      }
+      .chain .step.first {
+        border-color: rgba(91, 140, 255, 0.4);
+        color: var(--signal);
+      }
+      .chain .step.last {
+        border-color: rgba(52, 211, 153, 0.4);
+        color: var(--verified);
+      }
+      .chain .to {
+        color: var(--text-faint);
+      }
+      .verdicts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 16px;
+      }
+      .vd {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        border-radius: 999px;
+        padding: 5px 12px;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .vd::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+      }
+      .vd.v { color: var(--verified); background: var(--verified-soft); }
+      .vd.v::before { background: var(--verified); }
+      .vd.f { color: var(--denied); background: var(--denied-soft); }
+      .vd.f::before { background: var(--denied); }
+      .vd.n { color: var(--gate); background: var(--gate-soft); }
+      .vd.n::before { background: var(--gate); }
+      .vd.s { color: var(--text-dim); background: rgba(125,137,166,0.1); }
+      .vd.s::before { background: var(--text-dim); }
+
+      .mech-card h4 {
+        color: var(--head);
+        font-size: 15.5px;
+        font-weight: 650;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .mech-card h4 .ic {
+        font-family: var(--mono);
+        color: var(--signal);
+      }
+      .mech-card p {
+        color: var(--text-dim);
+        font-size: 13.5px;
+        line-height: 1.62;
+      }
+      .mech-card ul {
+        list-style: none;
+        margin-top: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .mech-card li {
+        font-size: 13px;
+        color: var(--text);
+        display: flex;
+        gap: 8px;
+        line-height: 1.5;
+      }
+      .mech-card li::before {
+        content: "→";
+        color: var(--verified);
+        font-family: var(--mono);
+        flex-shrink: 0;
+      }
+
+      /* ============ Coverage table ============ */
+      .tbl-wrap {
+        overflow-x: auto;
+        margin-top: 22px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+      }
+      table.cov {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 520px;
+      }
+      table.cov th {
+        text-align: left;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+        padding: 13px 18px;
+        border-bottom: 1px solid var(--line-strong);
+        background: var(--ink-1);
+      }
+      table.cov td {
+        padding: 14px 18px;
+        font-size: 13.5px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: middle;
+      }
+      table.cov tr:last-child td {
+        border-bottom: none;
+      }
+      table.cov td.req {
+        font-family: var(--mono);
+        color: var(--head);
+      }
+      table.cov td.mono {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--text-dim);
+      }
+      .rst {
+        font-family: var(--mono);
+        font-size: 11px;
+        padding: 3px 9px;
+        border-radius: 5px;
+        font-weight: 600;
+      }
+      .rst.pass { color: var(--verified); background: var(--verified-soft); }
+      .rst.np { color: var(--gate); background: var(--gate-soft); }
+
+      /* ============ Security / forbidden ============ */
+      .sec-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 16px;
+        margin-top: 44px;
+      }
+      @media (max-width: 820px) {
+        .sec-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .sec-card h4 {
+        color: var(--head);
+        font-size: 15px;
+        font-weight: 650;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .sec-card .tag {
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 3px 8px;
+        border-radius: 5px;
+        margin-left: auto;
+      }
+      .tag.closed { color: var(--denied); background: var(--denied-soft); }
+      .tag.allow { color: var(--verified); background: var(--verified-soft); }
+      .deny-list {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+      }
+      .deny-list li {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        color: var(--text-dim);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 0;
+      }
+      .deny-list li .mk {
+        flex-shrink: 0;
+        font-weight: 700;
+      }
+      .deny-list li.no .mk { color: var(--denied); }
+      .deny-list li.yes .mk { color: var(--verified); }
+      .deny-list li.no {
+        text-decoration: line-through;
+        text-decoration-color: var(--denied-soft);
+      }
+
+      /* ============ Workflow flow ============ */
+      .flow {
+        display: flex;
+        align-items: stretch;
+        gap: 0;
+        flex-wrap: wrap;
+        margin-top: 40px;
+      }
+      .flow-node {
+        flex: 1 1 128px;
+        min-width: 128px;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        padding: 15px 14px;
+        text-align: center;
+        background: var(--panel);
+      }
+      .flow-node .fn-label {
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+        margin-bottom: 6px;
+      }
+      .flow-node .fn-title {
+        color: var(--head);
+        font-size: 13.5px;
+        font-weight: 600;
+      }
+      .flow-node.gate {
+        border-color: rgba(246, 183, 60, 0.42);
+        background: var(--gate-soft);
+      }
+      .flow-node.gate .fn-label {
+        color: var(--gate);
+      }
+      .flow-node.done {
+        border-color: rgba(52, 211, 153, 0.42);
+        background: var(--verified-soft);
+      }
+      .flow-node.done .fn-label {
+        color: var(--verified);
+      }
+      .flow-sep {
+        display: flex;
+        align-items: center;
+        color: var(--text-faint);
+        font-family: var(--mono);
+        padding: 0 8px;
+      }
+      @media (max-width: 720px) {
+        .flow {
+          flex-direction: column;
+        }
+        .flow-sep {
+          transform: rotate(90deg);
+          padding: 6px 0;
+          justify-content: center;
+        }
+      }
+      .wf-list {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+        margin-top: 30px;
+      }
+      @media (max-width: 720px) {
+        .wf-list {
+          grid-template-columns: 1fr;
+        }
+      }
+      .wf-item {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 13px 16px;
+        background: var(--panel);
+      }
+      .wf-item .wf-name {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--signal);
+        min-width: 152px;
+      }
+      .wf-item .wf-goal {
+        font-size: 13px;
+        color: var(--text-dim);
+      }
+      .wf-item.first {
+        border-color: rgba(52, 211, 153, 0.35);
+      }
+      .wf-item.first .wf-name {
+        color: var(--verified);
+      }
+
+      /* ============ Status / roadmap ============ */
+      .status-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-top: 40px;
+        margin-bottom: 8px;
+      }
+      .sl {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--text-dim);
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .sl .m {
+        font-weight: 700;
+      }
+      .m-done { color: var(--verified); }
+      .m-branch { color: var(--signal); }
+      .m-plan { color: var(--text-faint); }
+      .m-no { color: var(--denied); }
+
+      .roadmap {
+        margin-top: 20px;
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+      }
+      table.rm {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 640px;
+      }
+      table.rm th {
+        text-align: left;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+        padding: 13px 18px;
+        border-bottom: 1px solid var(--line-strong);
+        background: var(--ink-1);
+      }
+      table.rm td {
+        padding: 13px 18px;
+        font-size: 13.5px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: middle;
+      }
+      table.rm tr:last-child td {
+        border-bottom: none;
+      }
+      table.rm td.ph {
+        font-family: var(--mono);
+        color: var(--text-dim);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      table.rm td.nm {
+        color: var(--head);
+        font-weight: 550;
+      }
+      table.rm td.out {
+        color: var(--text-dim);
+        font-size: 12.5px;
+      }
+      .st {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        padding: 3px 9px;
+        border-radius: 5px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .st.done { color: var(--verified); background: var(--verified-soft); }
+      .st.branch { color: var(--signal); background: var(--signal-soft); }
+      .st.plan { color: var(--text-dim); background: rgba(125,137,166,0.1); }
+
+      /* ============ Value ============ */
+      .value-list {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin-top: 40px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+      }
+      .value-row {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: 18px;
+        align-items: center;
+        padding: 16px 22px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+      }
+      .value-row:last-child {
+        border-bottom: none;
+      }
+      .value-row .from {
+        color: var(--text-dim);
+        font-size: 14px;
+        text-align: right;
+      }
+      .value-row .to {
+        color: var(--head);
+        font-size: 14.5px;
+        font-weight: 600;
+      }
+      .value-row .ar {
+        font-family: var(--mono);
+        color: var(--signal);
+      }
+      @media (max-width: 720px) {
+        .value-row {
+          grid-template-columns: 1fr;
+          gap: 4px;
+          text-align: left;
+        }
+        .value-row .from {
+          text-align: left;
+        }
+        .value-row .ar {
+          display: none;
+        }
+      }
+
+      /* ============ Aeloop nested layers ============ */
+      .nest-wrap {
+        display: grid;
+        grid-template-columns: 1.35fr 1fr;
+        gap: 24px;
+        margin-top: 44px;
+        align-items: start;
+      }
+      @media (max-width: 900px) {
+        .nest-wrap {
+          grid-template-columns: 1fr;
+        }
+      }
+      .nest {
+        border-radius: 14px;
+        border: 1px solid var(--line-strong);
+        padding: 16px;
+        position: relative;
+      }
+      .nest > .nest {
+        margin-top: 12px;
+      }
+      .nest-l4 {
+        border-color: rgba(91, 140, 255, 0.4);
+        background: rgba(91, 140, 255, 0.05);
+      }
+      .nest-l3 {
+        border-color: rgba(52, 211, 153, 0.36);
+        background: rgba(52, 211, 153, 0.05);
+      }
+      .nest-l2 {
+        border-color: rgba(246, 183, 60, 0.36);
+        background: rgba(246, 183, 60, 0.05);
+      }
+      .nest-l1 {
+        border-color: rgba(242, 85, 122, 0.34);
+        background: rgba(242, 85, 122, 0.05);
+      }
+      .nest-tag {
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 600;
+        display: flex;
+        align-items: baseline;
+        gap: 9px;
+        flex-wrap: wrap;
+      }
+      .nest-l4 > .nest-tag .n { color: var(--signal); }
+      .nest-l3 > .nest-tag .n { color: var(--verified); }
+      .nest-l2 > .nest-tag .n { color: var(--gate); }
+      .nest-l1 > .nest-tag .n { color: var(--denied); }
+      .nest-tag .nm {
+        color: var(--head);
+        font-size: 13.5px;
+      }
+      .nest-tag .role {
+        color: var(--text-dim);
+        font-weight: 400;
+        font-family: var(--sans);
+        font-size: 12px;
+      }
+      .nest-mods {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 9px;
+      }
+      .nest-mods span {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--text-dim);
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        padding: 3px 7px;
+        background: var(--ink-1);
+      }
+      .nest-core {
+        text-align: center;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--text-faint);
+        padding: 9px;
+        border: 1px dashed var(--line-strong);
+        border-radius: 8px;
+        margin-top: 10px;
+      }
+      .cross-layers h4 {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--text-dim);
+        letter-spacing: 0.04em;
+        margin-bottom: 4px;
+      }
+      .cross-list {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .cross-item {
+        display: flex;
+        gap: 12px;
+        align-items: baseline;
+        padding: 12px 16px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--line);
+      }
+      .cross-item:last-child {
+        border-bottom: none;
+      }
+      .cross-item .cn {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        color: var(--signal);
+        min-width: 96px;
+        flex-shrink: 0;
+      }
+      .cross-item .cd {
+        font-size: 12.5px;
+        color: var(--text-dim);
+        line-height: 1.5;
+      }
+      .nest-note {
+        margin-top: 14px;
+        font-size: 12.5px;
+        color: var(--text-faint);
+        line-height: 1.6;
+      }
+      .nest-note b {
+        color: var(--text-dim);
+      }
+
+      /* ============ Comparison (ruflo vs aeloop) ============ */
+      .cmp-wrap {
+        overflow-x: auto;
+        margin-top: 44px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+      }
+      table.cmp {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 640px;
+      }
+      table.cmp th {
+        text-align: left;
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--line-strong);
+        font-size: 14px;
+        vertical-align: bottom;
+      }
+      table.cmp th .th-tag {
+        display: block;
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin-bottom: 5px;
+        color: var(--text-faint);
+      }
+      table.cmp th.dim {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+        font-weight: 500;
+        width: 118px;
+      }
+      table.cmp th.c-ruflo {
+        color: var(--text-dim);
+        background: rgba(125, 137, 166, 0.05);
+      }
+      table.cmp th.c-aeloop {
+        color: var(--signal);
+        background: var(--signal-soft);
+      }
+      table.cmp td {
+        padding: 14px 20px;
+        font-size: 13.5px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+        line-height: 1.55;
+      }
+      table.cmp tr:last-child td {
+        border-bottom: none;
+      }
+      table.cmp td.dim {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+      }
+      table.cmp td.c-ruflo {
+        color: var(--text-dim);
+        background: rgba(125, 137, 166, 0.03);
+      }
+      table.cmp td.c-aeloop {
+        color: var(--text);
+      }
+      table.cmp td.c-aeloop strong {
+        color: var(--head);
+        font-weight: 650;
+      }
+      .cmp-verdict {
+        margin-top: 24px;
+        display: flex;
+        gap: 14px;
+        align-items: flex-start;
+        border: 1px solid rgba(91, 140, 255, 0.3);
+        background: var(--signal-soft);
+        border-radius: 12px;
+        padding: 18px 22px;
+      }
+      .cmp-verdict .cv-ic {
+        font-family: var(--mono);
+        color: var(--signal);
+        font-size: 18px;
+        flex-shrink: 0;
+      }
+      .cmp-verdict p {
+        font-size: 13.5px;
+        color: var(--text);
+        line-height: 1.62;
+      }
+      .cmp-verdict p b {
+        color: var(--head);
+        font-weight: 650;
+      }
+
+      /* ============ Why aeloop first ============ */
+      .why-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 16px;
+        margin-top: 44px;
+      }
+      @media (max-width: 820px) {
+        .why-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .why-card {
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        padding: 22px;
+        background: var(--panel);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .why-card .why-k {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--verified);
+      }
+      .why-card h4 {
+        color: var(--head);
+        font-size: 16px;
+        font-weight: 650;
+        line-height: 1.35;
+      }
+      .why-card p {
+        color: var(--text-dim);
+        font-size: 13.5px;
+        line-height: 1.62;
+      }
+      .why-card p b {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      /* ============ Footer ============ */
+      footer {
+        max-width: var(--maxw);
+        margin: 0 auto;
+        padding: 48px clamp(20px, 5vw, 56px) 80px;
+        border-top: 1px solid var(--line);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px 28px;
+        align-items: baseline;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--text-faint);
+      }
+      footer .fbrand {
+        color: var(--head);
+      }
+      footer .fbrand b {
+        color: var(--signal);
+      }
+      footer .disc {
+        margin-left: auto;
+        max-width: 46ch;
+        line-height: 1.6;
+      }
+
+      /* theme toggle */
+      .theme-toggle {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--text-dim);
+        background: transparent;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 6px 10px;
+        cursor: pointer;
+        margin-left: 8px;
+        transition: color 0.18s, border-color 0.18s;
+      }
+      .theme-toggle:hover {
+        color: var(--head);
+        border-color: var(--line-strong);
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <span class="brandmark">
+        <b>Conductor Work</b><span class="x">×</span
+        ><span style="color: var(--verified)">Aeloop</span>
+      </span>
+      <div class="navlinks">
+        <a class="navlink" href="#hero">概览</a>
+        <a class="navlink" href="#evolution">从 Verity</a>
+        <a class="navlink" href="#architecture">两层拆分</a>
+        <a class="navlink" href="#engine">四层引擎</a>
+        <a class="navlink" href="#trust">可信机制</a>
+        <a class="navlink" href="#workflow">工作流</a>
+        <a class="navlink" href="#choice">vs Ruflo</a>
+        <a class="navlink" href="#whyfirst">为什么先做</a>
+        <a class="navlink" href="#status">现状 · 路线</a>
+      </div>
+      <button class="theme-toggle" id="themeToggle" aria-label="切换主题">
+        ◐ 主题
+      </button>
+    </nav>
+
+    <!-- ============ HERO ============ -->
+    <section id="hero">
+      <div class="reveal">
+        <div class="hero-badge">
+          <span class="dot"></span> 领导评审稿 · 2026-07-21 · 名称暂定
+        </div>
+        <div class="hero-lockup">
+          <span class="layer-tag l-brain">产品层 · 大脑</span>
+          <span class="conductor">Conductor Work</span>
+          <span style="height: 10px"></span>
+          <span class="layer-tag l-engine">执行内核 · 引擎</span>
+          <span class="aeloop">Aeloop</span>
+        </div>
+        <p class="hero-sub">
+          面向企业研发的<b>可信 AI 工作流平台</b>。它解决的不是「再加一个聊天机器人」——而是把
+          AI 从<b>一次性对话</b>,升级成<b>可控、可审、可恢复</b>的工作流。
+        </p>
+        <div class="hero-meta">
+          <span class="hero-chip"><b>冻结</b>需求为任务契约</span>
+          <span class="hero-chip">多模型<b>独立复核</b></span>
+          <span class="hero-chip">人工<b>闸门</b> · 跨进程恢复</span>
+          <span class="hero-chip">每步<b>证据</b>与 Token 账本</span>
+          <span class="hero-chip"><b>fail-closed</b> 安全策略</span>
+        </div>
+        <p class="hero-note">
+          // 首个验证工作流 = Coder 生成候选变更 + 独立 Tester 审核。架构不绑定程序员流程。
+        </p>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ EVOLUTION ============ -->
+    <section id="evolution">
+      <div class="reveal">
+        <div class="eyebrow">从 Verity 走到今天</div>
+        <h2 class="title">同一个初心,<em>换了一副骨架</em></h2>
+        <p class="lede">
+          上一版 <b style="color: var(--head)">Verity</b>(2026-07 提案)是一套<b
+            style="color: var(--head)"
+            >骑在 Claude Code 之上</b
+          >的治理层——用 hook、<code class="inl">CLAUDE.md</code>、Python
+          脚本把规则钉在单一模型上。方向对,但大脑和引擎焊死在一起,换模型即重写。这一版把它<b
+            style="color: var(--head)"
+            >切成两层</b
+          >。
+        </p>
+      </div>
+
+      <div class="evo-grid reveal">
+        <div class="evo-col evo-old">
+          <div class="evo-head">
+            旧 · Verity v1.2
+            <b>单体治理层 · 依赖 Claude</b>
+          </div>
+          <div class="evo-body">
+            <div class="evo-row">
+              <span class="k">形态</span>
+              <span class="v">骑在 Claude Code hook 上的一整块</span>
+            </div>
+            <div class="evo-row">
+              <span class="k">模型</span>
+              <span class="v">绑定 Claude 单模型</span>
+            </div>
+            <div class="evo-row">
+              <span class="k">治理载体</span>
+              <span class="v">Python hook + md 文件,强制力分级(多为弱提醒)</span>
+            </div>
+            <div class="evo-row">
+              <span class="k">复核</span>
+              <span class="v">Coder / Tester 同栈同模型</span>
+            </div>
+            <div class="evo-row">
+              <span class="k">记忆</span>
+              <span class="v">agent.db 个人记忆,全局注入</span>
+            </div>
+            <div class="evo-row">
+              <span class="k">扩展</span>
+              <span class="v">固定 coder-tester 角色</span>
+            </div>
+            <div class="evo-row">
+              <span class="k">定位</span>
+              <span class="v">个人工具 → 逐步放大到公司</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="evo-arrow">⟶</div>
+
+        <div class="evo-col evo-new">
+          <div class="evo-head">
+            新 · Conductor Work × Aeloop
+            <b>产品层 + 引擎层 · 模型无关</b>
+          </div>
+          <div class="evo-body">
+            <div class="evo-row">
+              <span class="k">形态</span>
+              <span class="v"><strong>大脑 / 引擎两层拆分</strong>,契约为界</span>
+            </div>
+            <div class="evo-row">
+              <span class="k">模型</span>
+              <span class="v"><strong>模型无关</strong>:换 Profile / Adapter,不重写 Workflow</span>
+            </div>
+            <div class="evo-row">
+              <span class="k">治理载体</span>
+              <span class="v">焊进引擎:<strong>契约 / 证据链 / fail-closed / 审计表</strong></span>
+            </div>
+            <div class="evo-row">
+              <span class="k">复核</span>
+              <span class="v"><strong>不同模型</strong>、Tester 只读、不继承推理上下文</span>
+            </div>
+            <div class="evo-row">
+              <span class="k">记忆</span>
+              <span class="v">长期知识留产品层,引擎只存<strong>本次 Run 快照 + 证据</strong></span>
+            </div>
+            <div class="evo-row">
+              <span class="k">扩展</span>
+              <span class="v"><strong>Workflow 插件平台</strong>(research / prd / design…)</span>
+            </div>
+            <div class="evo-row">
+              <span class="k">定位</span>
+              <span class="v">面向企业研发的<strong>可信工作流平台</strong></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="split-note">
+        <b>怎么拆出来的</b>——Verity 把「要做什么」(需求编译、风险判断、产品交互)和「怎么可靠执行」(模型、上下文、闸门、恢复、审计)混在一块。这一版沿这条缝切开:上半段成为
+        <b>Conductor Work</b>(可替换的产品大脑),下半段成为 <b>Aeloop</b>(模型无关、可开源的执行内核);两者之间用
+        <code class="inl">TaskContract</code> 往下、<code class="inl">EvidenceBundle</code> 往上通信。公司版
+        checkout 可以整块移除个人材料,而不动引擎。
+      </p>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ ARCHITECTURE ============ -->
+    <section id="architecture">
+      <div class="reveal">
+        <div class="eyebrow">系统架构</div>
+        <h2 class="title">两层,一道<em>契约缝</em></h2>
+        <p class="lede">
+          需求与执行分离、模型与流程分离、人工决定与模型建议分离、本地变更与远端
+          Git 分离——四道分离线,都落在这张图上。
+        </p>
+      </div>
+
+      <div class="arch reveal">
+        <div class="arch-row">
+          <div class="arch-node">
+            <div class="an-label">来源</div>
+            <div class="an-title">用户 / 审批人</div>
+            <div class="an-desc">PRD · Figma · 仓库规则</div>
+          </div>
+        </div>
+        <div class="arch-conn"></div>
+
+        <div class="arch-row">
+          <div class="arch-node arch-brain">
+            <div class="an-label">产品层 · 大脑</div>
+            <div class="an-title">Conductor Work</div>
+            <div class="an-desc">
+              需求编译 · 风险判断 · 公司政策 · 产品交互与结果展示
+            </div>
+          </div>
+        </div>
+
+        <div class="seam">
+          <span class="arrow">▼</span> 下行 · <b>TaskContract</b>
+          <span style="color: var(--text-faint)"
+            >需求 / 范围 / 验收 / 禁止项 · 快照 hash 冻结</span
+          >
+        </div>
+
+        <div class="arch-row">
+          <div class="arch-node arch-engine">
+            <div class="an-label">执行内核 · 引擎</div>
+            <div class="an-title">Aeloop</div>
+            <div class="an-desc">模型无关的可信工作流执行内核</div>
+            <div class="engine-layers">
+              <span>Prompt</span>
+              <span>Context / 快照 · 预算</span>
+              <span>Harness / 模型 · 工具</span>
+              <span>Policy / fail-closed</span>
+              <span>Evidence / Claim→证据</span>
+              <span>Loop / 闸门 · Checkpoint</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="arch-side">
+          <div class="arch-node side-profile">
+            <div class="an-label">Work Profile</div>
+            <div class="an-title">LiteLLM · 模型 · 工具 · 安全策略</div>
+          </div>
+          <div class="arch-node side-repo">
+            <div class="an-label">隔离 Workspace</div>
+            <div class="an-title">禁止远端 Git 写操作</div>
+          </div>
+        </div>
+
+        <div class="seam up">
+          <span class="arrow">▲</span> 上行 · <b>EvidenceBundle + GateRequest</b>
+          <span style="color: var(--text-faint)"
+            >覆盖矩阵 / 变更 / 测试 / 审批 / Token · 人工决定回注</span
+          >
+        </div>
+
+        <div class="arch-row">
+          <div class="arch-node side-report">
+            <div class="an-label">交付</div>
+            <div class="an-title">候选变更 + 证据 → 回到审批人</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ AELOOP LAYERS ============ -->
+    <section id="engine">
+      <div class="reveal">
+        <div class="eyebrow">Aeloop 引擎内部</div>
+        <h2 class="title">四层<em>嵌套</em>,加几道横切核心层</h2>
+        <p class="lede">
+          引擎不是一堆平铺的模块,而是层层相套:一次
+          <code class="inl">Loop</code> 步骤穿过
+          <code class="inl">Harness</code> 真调模型,取用
+          <code class="inl">Context</code> 决定注入什么,最里面
+          <code class="inl">Prompt</code> 框住模型这一步说什么。
+        </p>
+      </div>
+
+      <div class="nest-wrap reveal">
+        <!-- nested four layers -->
+        <div class="nest nest-l4">
+          <div class="nest-tag">
+            <span class="n">④ Loop</span><span class="nm">编排 · 闸门 · 恢复 · 审计</span>
+            <span class="role">怎么把一步步串起来、在哪暂停、断了怎么接</span>
+          </div>
+          <div class="nest-mods">
+            <span>LangGraph 图</span><span>coder / tester 节点</span>
+            <span>G1/G2/G3 + 升级门</span><span>SqliteSaver checkpoint</span>
+            <span>审计表</span>
+          </div>
+          <div class="nest nest-l3">
+            <div class="nest-tag">
+              <span class="n">③ Harness</span><span class="nm">调模型 · 验工具</span>
+              <span class="role">怎么真正把请求打到模型、验证工具执行没造假</span>
+            </div>
+            <div class="nest-mods">
+              <span>ProviderRouter</span><span>AdapterRegistry</span>
+              <span>LiteLLM / Claude CLI / Codex CLI</span>
+              <span>SchemaValidator</span><span>ToolExecVerifier</span>
+            </div>
+            <div class="nest nest-l2">
+              <div class="nest-tag">
+                <span class="n">② Context</span><span class="nm">注入 · 过期 · 置信度</span>
+                <span class="role">注入什么、还能信多少</span>
+              </div>
+              <div class="nest-mods">
+                <span>SQLite + FTS5 记忆</span><span>StalenessEngine</span>
+                <span>ConfirmationService 三态</span><span>ContextInjector</span>
+              </div>
+              <div class="nest nest-l1">
+                <div class="nest-tag">
+                  <span class="n">① Prompt</span><span class="nm">说什么 · 什么结构</span>
+                  <span class="role">最内核</span>
+                </div>
+                <div class="nest-mods">
+                  <span>Personas(文件即角色)</span>
+                  <span>结构化输出 schema</span><span>PromptComposer</span>
+                </div>
+                <div class="nest-core">模型的这一步</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- cross-cutting core layers -->
+        <div class="cross-layers">
+          <h4>// 横切核心层(不在嵌套里,贯穿全流程)</h4>
+          <div class="cross-list">
+            <div class="cross-item">
+              <span class="cn">Contracts</span>
+              <span class="cd">公共中立契约 · TaskContract 冻结需求</span>
+            </div>
+            <div class="cross-item">
+              <span class="cn">Policy</span>
+              <span class="cd">fail-closed:文件 / 工具 / 依赖 / SCM 策略</span>
+            </div>
+            <div class="cross-item">
+              <span class="cn">Evidence</span>
+              <span class="cd">Claim → 证据核验,产出 EvidenceBundle</span>
+            </div>
+            <div class="cross-item">
+              <span class="cn">Workflows</span>
+              <span class="cd">registry + 插件契约,coder-tester 为内建</span>
+            </div>
+            <div class="cross-item">
+              <span class="cn">Conductor</span>
+              <span class="cd">确定性 orchestrator——产品缝,不是模型 persona</span>
+            </div>
+            <div class="cross-item">
+              <span class="cn">Profile</span>
+              <span class="cd">overlay:subscription(个人)/ apikey(公司 LiteLLM)</span>
+            </div>
+          </div>
+          <p class="nest-note">
+            <b>为什么嵌套而非平铺</b>——外层永远只通过内层暴露的接口调用它,换掉
+            Harness 里的某个 adapter 不影响 Prompt;把治理(Policy / Evidence /
+            Contracts)提成横切层,是为了让「可信」独立于「跑哪个模型」。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ PROBLEM ============ -->
+    <section id="problem">
+      <div class="reveal">
+        <div class="eyebrow">业务问题</div>
+        <h2 class="title">障碍不是「AI 不会生成」,是<em>生成结果进不了可控流程</em></h2>
+      </div>
+      <div class="grid g3 reveal">
+        <div class="card prob">
+          <span class="num">01</span>
+          <div>
+            <h4>需求漂移</h4>
+            <p>模型补充 PRD 没要求的功能,或悄悄遗漏边界条件。</p>
+          </div>
+        </div>
+        <div class="card prob">
+          <span class="num">02</span>
+          <div>
+            <h4>幻觉与假验证</h4>
+            <p>声称「已运行测试」,却没有可追溯的证据。</p>
+          </div>
+        </div>
+        <div class="card prob">
+          <span class="num">03</span>
+          <div>
+            <h4>上下文断裂</h4>
+            <p>换聊天、换模型或中断后,要从头重新解释背景。</p>
+          </div>
+        </div>
+        <div class="card prob">
+          <span class="num">04</span>
+          <div>
+            <h4>缺乏独立复核</h4>
+            <p>同一模型生成又自审,错误模式高度相关,审了等于没审。</p>
+          </div>
+        </div>
+        <div class="card prob">
+          <span class="num">05</span>
+          <div>
+            <h4>安全风险</h4>
+            <p>自动工具可能改错文件、引未批准依赖、执行远端 Git 操作。</p>
+          </div>
+        </div>
+        <div class="card prob">
+          <span class="num">06</span>
+          <div>
+            <h4>不可复用 · 不可见成本</h4>
+            <p>提示散落临时聊天,无法版本化;Token / 延迟 / 重试无账可查。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ TRUST ============ -->
+    <section id="trust">
+      <div class="reveal">
+        <div class="eyebrow">防幻觉与可信机制</div>
+        <h2 class="title">把「自觉要求」<em>换成可执行机制</em></h2>
+        <p class="lede">
+          模型声明不直接视为事实。每一句「做到了」,都要能落到具体命令、退出码和输出摘要。
+        </p>
+      </div>
+
+      <div class="grid g2 reveal">
+        <div class="card mech-card">
+          <h4><span class="ic">◇</span> Claim-to-Evidence 证据链</h4>
+          <div class="chain">
+            <span class="step first">Requirement</span>
+            <span class="to">→</span>
+            <span class="step">Claim</span>
+            <span class="to">→</span>
+            <span class="step">Changed Artifact</span>
+            <span class="to">→</span>
+            <span class="step">Tool Execution</span>
+            <span class="to">→</span>
+            <span class="step">Exit Code / Hash</span>
+            <span class="to">→</span>
+            <span class="step last">Verification</span>
+          </div>
+          <p>每条声明都被打上明确状态,不允许「大概过了」这种模糊态:</p>
+          <div class="verdicts">
+            <span class="vd v">verified</span>
+            <span class="vd f">failed</span>
+            <span class="vd n">not_proven</span>
+            <span class="vd s">stale</span>
+          </div>
+        </div>
+
+        <div class="card mech-card">
+          <h4><span class="ic">◉</span> 独立模型复核</h4>
+          <p>生产者 ≠ 审查者,从机制上切断相关错误。</p>
+          <ul>
+            <li>Coder 与 Tester 使用<strong style="color: var(--head)">不同模型</strong></li>
+            <li>Tester 只读,不继承 Coder 的全部推理上下文</li>
+            <li>按 Requirement ID 给 PASS / FAIL / NOT_PROVEN</li>
+            <li>连续失败达阈值<strong style="color: var(--head)">升级给人</strong>,不无限烧 Token</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="reveal">
+        <div
+          style="
+            margin-top: 30px;
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--text-dim);
+            letter-spacing: 0.04em;
+          "
+        >
+          需求覆盖矩阵 · Requirement Coverage
+        </div>
+        <div class="tbl-wrap">
+          <table class="cov">
+            <thead>
+              <tr>
+                <th>Requirement</th>
+                <th>Implementation</th>
+                <th>Evidence</th>
+                <th>Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="req">REQ-001</td>
+                <td>src/features/search/…</td>
+                <td class="mono">test:status-filter · exit 0</td>
+                <td><span class="rst pass">PASS</span></td>
+              </tr>
+              <tr>
+                <td class="req">REQ-002</td>
+                <td style="color: var(--text-dim)">未找到完整实现</td>
+                <td class="mono">无</td>
+                <td><span class="rst np">NOT_PROVEN</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ SECURITY ============ -->
+    <section id="security">
+      <div class="reveal">
+        <div class="eyebrow">安全与合规边界</div>
+        <h2 class="title">默认 <em>fail-closed</em>:没明确允许,就是拒绝</h2>
+      </div>
+
+      <div class="sec-grid reveal">
+        <div class="card sec-card">
+          <h4>
+            Git 操作
+            <span class="tag closed">永久禁止</span>
+          </h4>
+          <ul class="deny-list">
+            <li class="no"><span class="mk">✕</span> git commit</li>
+            <li class="no"><span class="mk">✕</span> git push</li>
+            <li class="no"><span class="mk">✕</span> 创建 Pull / Merge Request</li>
+            <li class="no"><span class="mk">✕</span> merge</li>
+            <li class="no"><span class="mk">✕</span> 修改远端分支 / 标签</li>
+          </ul>
+          <p style="margin-top: 12px; color: var(--text-faint); font-size: 12.5px">
+            引擎永不自动写远端。未来若要自动化 SCM,必须由独立产品模块 + 新审批政策实现,不进内核。
+          </p>
+        </div>
+
+        <div class="card sec-card">
+          <h4>
+            Workspace
+            <span class="tag closed">隔离</span>
+          </h4>
+          <ul class="deny-list">
+            <li class="yes"><span class="mk">✓</span> 每个 Run 独立隔离工作区</li>
+            <li class="yes"><span class="mk">✓</span> 记录 baseline commit 与初始 dirty 状态</li>
+            <li class="yes"><span class="mk">✓</span> 从错误目录恢复 → 拒绝继续(非仅警告)</li>
+            <li class="yes"><span class="mk">✓</span> Reviewer 只读</li>
+            <li class="yes"><span class="mk">✓</span> 产出 = 本地候选变更 + 证据</li>
+          </ul>
+        </div>
+
+        <div class="card sec-card">
+          <h4>
+            依赖
+            <span class="tag allow">Allowlist</span>
+          </h4>
+          <ul class="deny-list">
+            <li class="yes"><span class="mk">✓</span> 只允许公司批准的包</li>
+            <li class="yes"><span class="mk">✓</span> 只允许批准的内部 registry</li>
+            <li class="no"><span class="mk">✕</span> 不在清单的依赖 → 直接失败</li>
+            <li class="yes"><span class="mk">✓</span> 依赖策略版本随 Run 固化进审计</li>
+          </ul>
+        </div>
+
+        <div class="card sec-card">
+          <h4>
+            网络与数据
+            <span class="tag allow">Allowlist</span>
+          </h4>
+          <ul class="deny-list">
+            <li class="yes"><span class="mk">✓</span> 默认无网,或仅 LiteLLM / 内部 GitLab / 批准 Figma</li>
+            <li class="yes"><span class="mk">✓</span> 凭据来自环境或公司 secret manager</li>
+            <li class="no"><span class="mk">✕</span> PRD / Figma / 仓库内容 / 日志不入公共代码仓</li>
+            <li class="yes"><span class="mk">✓</span> 日志可配置脱敏与保留周期</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ WORKFLOW ============ -->
+    <section id="workflow">
+      <div class="reveal">
+        <div class="eyebrow">可扩展工作流</div>
+        <h2 class="title">首个流程是 <em>coder-tester</em>,但平台不止于此</h2>
+        <p class="lede">
+          严格代码变更 + 独立审核,人工闸门在关键处暂停;同一套引擎,通过
+          Workflow 插件扩展到调研、PRD、设计核对等场景。
+        </p>
+      </div>
+
+      <div class="flow reveal">
+        <div class="flow-node">
+          <div class="fn-label">读取</div>
+          <div class="fn-title">PRD / Figma</div>
+        </div>
+        <div class="flow-sep">→</div>
+        <div class="flow-node">
+          <div class="fn-label">冻结</div>
+          <div class="fn-title">TaskContract</div>
+        </div>
+        <div class="flow-sep">→</div>
+        <div class="flow-node">
+          <div class="fn-label">生成</div>
+          <div class="fn-title">Coder 候选变更</div>
+        </div>
+        <div class="flow-sep">→</div>
+        <div class="flow-node gate">
+          <div class="fn-label">G1 人工</div>
+          <div class="fn-title">确认</div>
+        </div>
+        <div class="flow-sep">→</div>
+        <div class="flow-node">
+          <div class="fn-label">独立</div>
+          <div class="fn-title">Tester 审核</div>
+        </div>
+        <div class="flow-sep">→</div>
+        <div class="flow-node gate">
+          <div class="fn-label">G3 人工</div>
+          <div class="fn-title">最终确认</div>
+        </div>
+        <div class="flow-sep">→</div>
+        <div class="flow-node done">
+          <div class="fn-label">交付</div>
+          <div class="fn-title">EvidenceBundle</div>
+        </div>
+      </div>
+
+      <div class="wf-list reveal">
+        <div class="wf-item first">
+          <span class="wf-name">coder-tester</span>
+          <span class="wf-goal">代码生成、验证、返工与人工闸门</span>
+        </div>
+        <div class="wf-item">
+          <span class="wf-name">research-synthesis</span>
+          <span class="wf-goal">多源调研、引用核验、结论分级</span>
+        </div>
+        <div class="wf-item">
+          <span class="wf-name">prd-authoring</span>
+          <span class="wf-goal">需求收集、冲突检测、PRD 生成与审核</span>
+        </div>
+        <div class="wf-item">
+          <span class="wf-name">design-compliance</span>
+          <span class="wf-goal">PRD / Figma / 实现一致性检查</span>
+        </div>
+        <div class="wf-item">
+          <span class="wf-name">release-readiness</span>
+          <span class="wf-goal">测试、依赖、安全与发布证据汇总</span>
+        </div>
+        <div class="wf-item">
+          <span class="wf-name" style="color: var(--text-dim)">+ Custom</span>
+          <span class="wf-goal">强类型 TS 插件先行,攒够 2–3 个真实流程再抽象 DSL</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ RUFLO vs AELOOP ============ -->
+    <section id="choice">
+      <div class="reveal">
+        <div class="eyebrow">选型对照</div>
+        <h2 class="title">已经有 <em>Ruflo</em>,为什么还要自研 Aeloop</h2>
+        <p class="lede">
+          <b style="color: var(--head)">Ruflo</b>(第三方开源
+          <code class="inl">ruvnet/claude-flow</code>
+          的本地版)是一套「什么都能接」的 Agent 元框架;<b
+            style="color: var(--head)"
+            >Aeloop</b
+          >
+          走的是「一条严格可信流程做透」。两者不是竞品——Ruflo 是借鉴与参考源。
+        </p>
+      </div>
+
+      <div class="cmp-wrap reveal">
+        <table class="cmp">
+          <thead>
+            <tr>
+              <th class="dim">维度</th>
+              <th class="c-ruflo">
+                <span class="th-tag">第三方 · 社区维护</span>Ruflo / claude-flow
+              </th>
+              <th class="c-aeloop">
+                <span class="th-tag">自研 · 自己掌控</span>Aeloop
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="dim">来源</td>
+              <td class="c-ruflo">第三方开源(ruvnet/claude-flow),数千次提交、社区维护</td>
+              <td class="c-aeloop"><strong>自研</strong>,边界与路线自己定</td>
+            </tr>
+            <tr>
+              <td class="dim">定位</td>
+              <td class="c-ruflo">Agent 元框架:堆能力(海量 MCP 工具 / 近百 agent / swarm / federation)</td>
+              <td class="c-aeloop"><strong>治理优先的 coder/tester 引擎</strong>,治理焊进内核</td>
+            </tr>
+            <tr>
+              <td class="dim">广度 vs 深度</td>
+              <td class="c-ruflo">广:什么都能接,能力多而杂</td>
+              <td class="c-aeloop"><strong>深</strong>:契约→证据→闸门→审计一条链做透</td>
+            </tr>
+            <tr>
+              <td class="dim">治理</td>
+              <td class="c-ruflo">能力导向,治理不是第一性</td>
+              <td class="c-aeloop">契约 / 证据 / fail-closed / 审计<strong>是第一性</strong></td>
+            </tr>
+            <tr>
+              <td class="dim">模型</td>
+              <td class="c-ruflo">偏 Claude Code / Codex 生态</td>
+              <td class="c-aeloop"><strong>模型无关</strong>(LiteLLM,换 Profile)</td>
+            </tr>
+            <tr>
+              <td class="dim">维护成本</td>
+              <td class="c-ruflo">≈ 零(社区扛)</td>
+              <td class="c-aeloop">自己扛——但换来可控</td>
+            </tr>
+            <tr>
+              <td class="dim">对 Aeloop 的角色</td>
+              <td class="c-ruflo">借鉴 / 参考源,不是竞品</td>
+              <td class="c-aeloop"><strong>我们要下注的差异化</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="cmp-verdict reveal">
+        <span class="cv-ic">▸</span>
+        <p>
+          一句话:<b>Ruflo 赌广度,社区已经在替我们跑</b>;Aeloop
+          的赌注是<b>「深度 + 治理」</b>——把「AI 干活但每一步可审、可拦、不能靠嘴糊弄」这件事做成确定性能力,这是买不来、也是
+          Ruflo 那条路线不优先解决的。
+        </p>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ WHY AELOOP FIRST ============ -->
+    <section id="whyfirst">
+      <div class="reveal">
+        <div class="eyebrow">为什么先押 Aeloop</div>
+        <h2 class="title">两层里,<em>先把引擎钉死</em></h2>
+        <p class="lede">
+          不是不做产品层,而是产品层需要一块稳定地基。先做引擎的四个理由:
+        </p>
+      </div>
+
+      <div class="why-grid reveal">
+        <div class="why-card">
+          <span class="why-k">01 · 地基先稳</span>
+          <h4>引擎边界钉死,产品层才不会盖在流沙上</h4>
+          <p>
+            先完成公共契约 / 事件 / workspace / evidence / workflow
+            缝的重构,<b>再</b>用公司 LiteLLM 做真实验收——避免在旧边界上<b>固化 profile 行为</b>,回头推倒重来。
+          </p>
+        </div>
+        <div class="why-card">
+          <span class="why-k">02 · 风险最小</span>
+          <h4>引擎不含凭证与私人材料,可独立开源、独立验收</h4>
+          <p>
+            公司 checkout 只需满足 <code class="inl">config.yaml</code>
+            契约;PRD / 仓库内容 / 记忆库都留在产品层。引擎这块<b>拿出来给人看、给人审都安全</b>。
+          </p>
+        </div>
+        <div class="why-card">
+          <span class="why-k">03 · 打最痛的点</span>
+          <h4>coder-tester 是当前最痛、最可测的场景</h4>
+          <p>
+            先用它把「<b>契约 → 证据 → 闸门 → 审计</b>」全链真实跑通,拿到确定性价值,再谈扩
+            research / prd / design 等其它 workflow。
+          </p>
+        </div>
+        <div class="why-card">
+          <span class="why-k">04 · 差异化在这</span>
+          <h4>差异化赌注押在引擎,不在能力堆叠</h4>
+          <p>
+            广度那条路 Ruflo / 社区在走;我们的价值在<b>治理深度</b>。先把引擎做出别人抄不走的确定性,<b>再</b>考虑规模与产品化。
+          </p>
+        </div>
+      </div>
+
+      <p class="split-note" style="margin-top: 30px">
+        已经能证明的是:<code class="inl">pnpm run demo:company</code>
+        跑通了「校验公司契约 + 确定性选中 workflow」——<b>不调模型、不碰仓库、零公司凭证</b>,证明这套两层骨架本身立得住。下一步(A6)才是接
+        LiteLLM 做双 Profile 真实验收。
+      </p>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ STATUS / ROADMAP ============ -->
+    <section id="status">
+      <div class="reveal">
+        <div class="eyebrow">现状与路线</div>
+        <h2 class="title">已经<em>在跑</em>的,和刻意<em>还没做</em>的</h2>
+        <p class="lede">
+          如实分级——不把设计当已完成,也不把「刻意不做」当遗漏。
+        </p>
+      </div>
+
+      <div class="status-legend reveal">
+        <span class="sl"><span class="m m-done">●</span> 已实现</span>
+        <span class="sl"><span class="m m-branch">◐</span> 设计中 · 分支</span>
+        <span class="sl"><span class="m m-plan">○</span> 规划</span>
+        <span class="sl"><span class="m m-no">⊘</span> 刻意暂不做</span>
+      </div>
+
+      <div class="roadmap reveal">
+        <table class="rm">
+          <thead>
+            <tr>
+              <th>能力</th>
+              <th>产出物</th>
+              <th>状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="nm">引擎骨架:防幻觉上下文 + Prompt</td>
+              <td class="out">结构化输出 schema · SQLite+FTS5 记忆 · 置信度三态注入</td>
+              <td><span class="st done">● 已实现</span></td>
+            </tr>
+            <tr>
+              <td class="nm">Harness · 多 provider 路由</td>
+              <td class="out">LiteLLM / Claude CLI / Codex CLI 适配 · ToolExecVerifier</td>
+              <td><span class="st done">● 已实现</span></td>
+            </tr>
+            <tr>
+              <td class="nm">Loop · 闸门 + 跨进程恢复</td>
+              <td class="out">LangGraph 图 · G1/G2/G3+升级门 · SqliteSaver checkpoint · 审计表</td>
+              <td><span class="st done">● 已实现</span></td>
+            </tr>
+            <tr>
+              <td class="nm">CLI / TUI 入口</td>
+              <td class="out">start / resume / list · 交互门审 · 368 测试全绿</td>
+              <td><span class="st done">● 已实现</span></td>
+            </tr>
+            <tr>
+              <td class="nm">两层拆分 · Conductor slice</td>
+              <td class="out">workflow registry · TaskContract 校验 · 确定性 orchestrator · fail-closed policy · 无凭证公司 demo</td>
+              <td><span class="st branch">◐ 分支 MVP</span></td>
+            </tr>
+            <tr>
+              <td class="nm">双 Profile 真实验收(A6)</td>
+              <td class="out">subscription + LiteLLM 两条路径真实跑通</td>
+              <td><span class="st plan">○ 规划</span></td>
+            </tr>
+            <tr>
+              <td class="nm">更多 workflow · 声明式 DSL</td>
+              <td class="out">research / prd / design 插件 · YAML/JSON DSL</td>
+              <td><span class="st plan">○ 规划</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="grid g2 reveal" style="margin-top: 22px">
+        <div class="card">
+          <h4 style="color: var(--verified); font-size: 14px; font-family: var(--mono); margin-bottom: 12px">
+            ● 已经能证明的(公司 demo)
+          </h4>
+          <p style="color: var(--text-dim); font-size: 13.5px; line-height: 1.62">
+            <code class="inl">pnpm run demo:company</code> 用一份公司契约,确定性地校验 +
+            选中内建 workflow——<b style="color: var(--head)">不调模型、不碰仓库、不带任何公司凭证</b>,验证的是架构骨架本身可跑。
+          </p>
+        </div>
+        <div class="card">
+          <h4 style="color: var(--denied); font-size: 14px; font-family: var(--mono); margin-bottom: 12px">
+            ⊘ 刻意暂不做(不是遗漏)
+          </h4>
+          <ul style="list-style: none; display: flex; flex-direction: column; gap: 7px">
+            <li style="font-size: 13px; color: var(--text-dim)">— 模型驱动的 brain 对话</li>
+            <li style="font-size: 13px; color: var(--text-dim)">— 远程插件市场 / 动态代码加载</li>
+            <li style="font-size: 13px; color: var(--text-dim)">— 自动 Git commit / push / PR / merge</li>
+            <li style="font-size: 13px; color: var(--text-dim)">— 声明式 workflow DSL(TS 插件是更稳的第一步)</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ============ VALUE ============ -->
+    <section id="value">
+      <div class="reveal">
+        <div class="eyebrow">价值与差异化</div>
+        <h2 class="title">不是「多一个 Agent」,是<em>一种受控的 AI 工作方式</em></h2>
+      </div>
+      <div class="value-list reveal">
+        <div class="value-row">
+          <span class="from">聊天上下文</span>
+          <span class="ar">→</span>
+          <span class="to">持久任务契约</span>
+        </div>
+        <div class="value-row">
+          <span class="from">模型自述</span>
+          <span class="ar">→</span>
+          <span class="to">证据链</span>
+        </div>
+        <div class="value-row">
+          <span class="from">单模型自审</span>
+          <span class="ar">→</span>
+          <span class="to">独立模型复核</span>
+        </div>
+        <div class="value-row">
+          <span class="from">一次性 Prompt</span>
+          <span class="ar">→</span>
+          <span class="to">可版本化 Workflow</span>
+        </div>
+        <div class="value-row">
+          <span class="from">人工反复解释</span>
+          <span class="ar">→</span>
+          <span class="to">跨进程恢复</span>
+        </div>
+        <div class="value-row">
+          <span class="from">不可见消耗</span>
+          <span class="ar">→</span>
+          <span class="to">按任务统计 Token / 时间 / 成本</span>
+        </div>
+        <div class="value-row">
+          <span class="from">自由工具调用</span>
+          <span class="ar">→</span>
+          <span class="to">企业安全策略</span>
+        </div>
+      </div>
+      <p class="split-note" style="margin-top: 34px">
+        最终目标:让 AI 自动化从「<b>看起来能做</b>」变成「<b>过程可控、结果可查、失败可恢复、人仍掌握最终决定</b>」。
+      </p>
+    </section>
+
+    <footer>
+      <span class="fbrand"><b>Conductor Work</b> × Aeloop</span>
+      <span>领导评审稿 · 2026-07-21 · 名称暂定</span>
+      <span class="disc">
+        本页仅介绍工作场景,不含私人产品、私人记忆或个人项目规划。状态标注如实分级,以
+        SOLUTION-DESIGN 与实现状态文档为准。
+      </span>
+    </footer>
+
+    <script>
+      // scroll reveal
+      (function () {
+        var els = document.querySelectorAll(".reveal");
+        if (!("IntersectionObserver" in window)) {
+          els.forEach(function (e) {
+            e.classList.add("in");
+          });
+          return;
+        }
+        var obs = new IntersectionObserver(
+          function (entries) {
+            entries.forEach(function (e) {
+              if (e.isIntersecting) {
+                e.target.classList.add("in");
+                obs.unobserve(e.target);
+              }
+            });
+          },
+          { threshold: 0.12 }
+        );
+        els.forEach(function (e) {
+          obs.observe(e);
+        });
+      })();
+
+      // nav active highlight
+      (function () {
+        var ids = [
+          "hero",
+          "evolution",
+          "architecture",
+          "engine",
+          "problem",
+          "trust",
+          "security",
+          "workflow",
+          "choice",
+          "whyfirst",
+          "status",
+        ];
+        var links = {};
+        document.querySelectorAll("nav a.navlink").forEach(function (a) {
+          links[a.getAttribute("href").slice(1)] = a;
+        });
+        var obs = new IntersectionObserver(
+          function (entries) {
+            entries.forEach(function (e) {
+              if (e.isIntersecting) {
+                Object.values(links).forEach(function (a) {
+                  a.classList.remove("active");
+                });
+                if (links[e.target.id]) links[e.target.id].classList.add("active");
+              }
+            });
+          },
+          { rootMargin: "-45% 0px -50% 0px" }
+        );
+        ids.forEach(function (id) {
+          var el = document.getElementById(id);
+          if (el) obs.observe(el);
+        });
+      })();
+
+      // theme toggle
+      (function () {
+        var btn = document.getElementById("themeToggle");
+        if (!btn) return;
+        btn.addEventListener("click", function () {
+          var root = document.documentElement;
+          var cur = root.getAttribute("data-theme");
+          if (!cur) {
+            cur = window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+          }
+          root.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+        });
+      })();
+    </script>
+  </body>
+</html>
