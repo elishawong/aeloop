@@ -1,14 +1,24 @@
 {
   "schemaVersion": "1.0",
   "contractId": "company-a6-readonly-001",
-  "objective": "Inspect the repository and report whether the requested behavior is already implemented. Do not modify files.",
+  "objective": "Inspect the aeloop repository in read-only mode and confirm, with cited file+symbol evidence, that two governance guarantees are already implemented in the source. This is a code-inspection task: for each requirement below, open the named source files, locate the enforcing code, and quote it as evidence. Do not modify, create, or delete any file.",
   "requirements": [
     {
-      "id": "REQ-READONLY-001",
-      "text": "Inspect the repository without changing any file.",
+      "id": "REQ-FAILCLOSED-001",
+      "text": "Confirm the engine fail-closes git writes under a candidate-only policy. Locate (a) where a contract whose policy.allowGitWrite is not false is rejected, and (b) where an attempted git write is turned into a policy violation. Inspect src/conductor/contract.ts and src/conductor/policy.ts.",
       "acceptanceCriteria": [
-        "The run completes without a code diff.",
-        "The final result contains checked evidence."
+        "Evidence quotes the code in src/conductor/contract.ts that requires policy.allowGitWrite to be false.",
+        "Evidence quotes the code in src/conductor/policy.ts that raises a GIT_WRITE_FORBIDDEN violation when a git write is attempted.",
+        "The run completes without any code diff."
+      ]
+    },
+    {
+      "id": "REQ-SEMIAUTO-001",
+      "text": "Confirm the workflow supports a semi-auto gate mode that auto-approves the coder->tester (G1) and tester->fix (G2) gates while keeping the final apply gate (G3) and Escalation human. Inspect src/cli/run-loop.ts (issue #63) and src/cli/assemble.ts.",
+      "acceptanceCriteria": [
+        "Evidence quotes the code in src/cli/run-loop.ts that reads workflow.gate_mode and, when it is 'semi-auto', auto-approves only G1 and G2 with a 'system (semi-auto)' decision.",
+        "Evidence confirms that G3 (final apply) and Escalation still require a human decision even in semi-auto mode.",
+        "The run completes without any code diff."
       ]
     }
   ],
