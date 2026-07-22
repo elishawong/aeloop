@@ -14,5 +14,20 @@ pnpm run build
 node scripts/conductor-work.mjs plan ./contract.json
 ```
 
-The current MVP exposes planning. Actual model execution continues through the
-Aeloop CLI/runtime after the plan is approved.
+## Candidate-only execution
+
+The company runner can now start a governed candidate run. It never approves a
+human gate and never performs Git writes, commits, pushes, pull requests, or
+merges.
+
+```bash
+export AI_AGENT_PROFILE=apikey
+export AELOOP_PROFILES_ROOT="$PWD/profiles"
+pnpm run build
+node scripts/conductor-work.mjs run ./contract.json --profile apikey --json --events ./company-run.events.jsonl
+```
+
+The JSON result contains the versioned `RunPlan`, the current run handle, and a
+company-safe `EvidenceBundle`. The optional JSONL file contains the observed
+`LoopEvent` trail. A result with `run.interrupt` is waiting for an external
+human decision; it is not auto-approved.
