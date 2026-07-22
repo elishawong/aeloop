@@ -1,0 +1,45 @@
+# profiles-apikey.config.example.yaml — 模板文件，不含真实密钥。
+#
+# PRD §2 B3 / §5「deepseek/seed 真实凭证来源」待决策项：这是「①本机手动建
+# profiles/apikey/config.yaml」这个选项的模板，供操作者复制到
+# profiles/apikey/config.yaml（已被 .gitignore 排除，见 aeloop 仓库
+# .gitignore 的 `profiles/apikey/` 一行）后填真实值。
+#
+# 这次 spike（PRD §5）实际选了③：本机 subscription 先证明机制，真实
+# deepseek/seed 凭证跑留给操作者之后在公司电脑上补——本文件因此不是这次
+# spike 跑通所必需的，只是按 PRD §2 B3 任务清单产出的模板，供以后真正切
+# deepseek/seed 时用。
+#
+# 字段形状核实自：src/profile/loader.ts（ProfileConfig/ProviderConfig）+
+# src/harness/config.ts（buildAdapterRegistry 的 "direct-api" 分支，
+# LiteLLMAdapter 需要 base_url/api_key/model/api_style）。
+
+profile: apikey
+
+providers:
+  # coder 角色：deepseek 系模型，走 LiteLLM 兼容的 direct-api 路径。
+  deepseek-direct:
+    kind: direct-api
+    base_url: "https://<deepseek-litellm-endpoint>" # [?] 待操作者填真实 endpoint
+    api_key: "<REDACTED>" # [?] 待操作者填真实 key，不进 git
+    model: "<deepseek-model-id>" # [?] 待操作者填真实 model 名
+    api_style: "anthropic" # [?] LiteLLMAdapter 支持的 api_style 之一，具体取值待操作者按真实 endpoint 确认
+
+  # tester 角色：seed 系模型，独立于 coder 的另一个 provider（真·不同模型，非同模型左右手）。
+  seed-direct:
+    kind: direct-api
+    base_url: "https://<seed-litellm-endpoint>" # [?] 待操作者填真实 endpoint
+    api_key: "<REDACTED>" # [?] 待操作者填真实 key，不进 git
+    model: "<seed-model-id>" # [?] 待操作者填真实 model 名
+    api_style: "anthropic" # [?] 同上
+
+roles:
+  coder:
+    provider: deepseek-direct
+  tester:
+    provider: seed-direct
+
+workflow:
+  reject_threshold: 2
+  # gate_mode: "semi-auto"  # [?] 可选，issue #63；这次 spike 的 driver 自己在库调层面做等价的
+  #                           G1/G2 自动放行（resumeRun 手动调用），不依赖这个 profile 级开关。
