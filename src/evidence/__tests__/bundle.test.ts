@@ -48,6 +48,33 @@ describe("EvidenceEventProjector — issue #36 slice 2 omittedContext", () => {
   });
 });
 
+describe("EvidenceEventProjector — issue #54 usage and no-change evidence", () => {
+  it("records provider usage metadata and no-change evidence without inventing a diff", () => {
+    const projector = new EvidenceEventProjector(new EvidenceBundleBuilder({ runId: 9, contractId: "company-a6-readonly-001", requirementIds: ["REQ-READONLY-001"] }));
+    projector.accept({
+      type: "agent_completed",
+      runId: 9,
+      threadId: "thread-9",
+      ts: "2026-01-01T00:00:00.000Z",
+      node: "draft",
+      stepRef: "draft#1",
+      actor: "coder",
+      claimCount: 0,
+      provider: "litellm-deepseek",
+      model: "deepseek-v4-pro",
+      usage: { inputTokens: 120, outputTokens: 12, totalTokens: 132, cacheReadTokens: 40, source: "provider" },
+      latencyMs: 321,
+      outcome: "no_change",
+      noChangeReason: "the requested behavior is already present",
+      noChangeEvidence: "inspected src/example.ts and found the existing implementation",
+    });
+    const bundle = projector.snapshot();
+    expect(bundle.usage).toMatchObject({ inputTokens: 120, outputTokens: 12, cacheReadTokens: 40, estimated: false, model: "deepseek-v4-pro" });
+    expect(bundle.usageRecords).toEqual([expect.objectContaining({ node: "draft", role: "coder", provider: "litellm-deepseek", model: "deepseek-v4-pro", attempt: 1, latencyMs: 321 })]);
+    expect(bundle.evidence).toEqual([expect.objectContaining({ kind: "artifact", passed: true, content: "inspected src/example.ts and found the existing implementation" })]);
+  });
+});
+
 describe("TokenBudgetLedger", () => {
   it("stops a run before it exceeds its allocated budget", () => {
     const ledger = new TokenBudgetLedger({ inputTokens: 5, outputTokens: 5, retryTokens: 1 });

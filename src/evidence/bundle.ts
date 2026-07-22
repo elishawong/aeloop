@@ -1,4 +1,5 @@
 import type { LoopEvent } from "../loop/events.js";
+import type { ProviderUsage } from "../harness/types.js";
 
 export type EvidenceKind = "source" | "tool" | "test" | "artifact" | "human";
 export type ClaimStatus = "supported" | "unsupported" | "unknown" | "rejected";
@@ -26,6 +27,17 @@ export interface EvidenceItem {
   readonly ref: string;
   readonly contentHash?: string;
   readonly passed?: boolean;
+  readonly content?: string;
+}
+
+export interface UsageRecord {
+  readonly node: "draft" | "review";
+  readonly role: "coder" | "tester";
+  readonly provider: string;
+  readonly model: string;
+  readonly attempt: number;
+  readonly usage: ProviderUsage;
+  readonly latencyMs?: number;
 }
 
 /**
@@ -62,6 +74,7 @@ export interface EvidenceBundle {
   readonly claims: readonly EvidenceClaim[];
   readonly evidence: readonly EvidenceItem[];
   readonly usage: TokenUsage;
+  readonly usageRecords: readonly UsageRecord[];
   readonly eventTypes: readonly string[];
   readonly unprovenItems: readonly string[];
   /**
@@ -97,6 +110,7 @@ export class EvidenceBundleBuilder {
   private readonly evidence = new Map<string, EvidenceItem>();
   private readonly eventTypes = new Set<string>();
   private usage: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, retryTokens: 0, estimated: false };
+  private readonly usageRecords: UsageRecord[] = [];
   private status: EvidenceBundle["status"] = "running";
   private omittedContext: readonly OmittedContextEntry[] = [];
 
@@ -115,6 +129,37 @@ export class EvidenceBundleBuilder {
     // simply leaves `omittedContext` at its `[]` default, never throws.
     if (event.type === "run_started" && event.contextOmitted) {
       this.omittedContext = [...event.contextOmitted];
+    }
+    if (event.type === "agent_completed" && event.usage) {
+      const attempt = event.stepRef?.match(/#(\d+)$/)?.[1];
+      const record: UsageRecord = {
+        node: event.node,
+        role: event.actor,
+        provider: event.provider ?? "unknown",
+        model: event.model ?? "unknown",
+        attempt: attempt ? Number(attempt) : 1,
+        usage: event.usage,
+        ...(event.latencyMs === undefined ? {} : { latencyMs: event.latencyMs }),
+      };
+      this.usageRecords.push(record);
+      this.recordUsage({
+        inputTokens: event.usage.inputTokens ?? 0,
+        outputTokens: event.usage.outputTokens ?? 0,
+        cacheReadTokens: event.usage.cacheReadTokens ?? 0,
+        retryTokens: 0,
+        estimated: event.usage.source === "estimate",
+        model: event.model ?? "unknown",
+      });
+    }
+    if (event.type === "agent_completed" && event.outcome === "no_change" && event.noChangeReason && event.noChangeEvidence) {
+      this.addEvidence({
+        id: `no-change-${event.runId}-${event.stepRef ?? "draft"}`,
+        kind: "artifact",
+        title: event.noChangeReason,
+        ref: `evidence://run/${event.runId}/no-change`,
+        content: event.noChangeEvidence,
+        passed: true,
+      });
     }
     return this;
   }
@@ -171,6 +216,7 @@ export class EvidenceBundleBuilder {
       claims: [...this.claims.values()],
       evidence: [...this.evidence.values()],
       usage: this.usage,
+      usageRecords: [...this.usageRecords],
       eventTypes: [...this.eventTypes],
       unprovenItems: requirements.filter((item) => item.status !== "verified").map((item) => item.requirementId),
       omittedContext: this.omittedContext,
