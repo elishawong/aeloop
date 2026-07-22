@@ -24,7 +24,7 @@ merges.
 export AI_AGENT_PROFILE=apikey
 export AELOOP_PROFILES_ROOT="$PWD/profiles"
 pnpm run build
-node scripts/conductor-work.mjs run ./contract.json --profile apikey --json --events ./company-run.events.jsonl
+node scripts/conductor-work.mjs run ./examples/company-a6-readonly.contract.json --profile apikey --json --events ./company-run.events.jsonl
 ```
 
 The JSON result contains the versioned `RunPlan`, the current run handle, and a
