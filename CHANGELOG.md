@@ -7,6 +7,13 @@ project does not yet follow semantic versioning (see `version` in
 
 ## [Unreleased]
 
+- **2026-07-22** — Semi-auto gate mode (`workflow.gate_mode: "manual" | "semi-auto"`,
+  #63): `semi-auto` auto-approves G1/G2 (coder→tester, tester→fix) with
+  `decidedBy = "system (semi-auto)"`, while G3 (final apply) and Escalation stay
+  human. Default `manual` preserves existing behavior byte-for-byte. Includes a
+  fail-closed `reject_threshold` guard (malformed values fall through to the
+  default so the escalation-to-human safety net can't be silently disabled) and a
+  gate-identity assertion guarding the auto-approval path.
 - **2026-07-21** — A5 CLI/TUI: a real, installable `aeloop` command
   (`start`/`resume`/`list`) driving the Loop engine end to end against the
   `subscription` profile — chalk-colorized diff rendering (`diff-render.ts`)

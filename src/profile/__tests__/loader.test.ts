@@ -208,6 +208,65 @@ describe("loadProfile — minimal required-field validation before returning ok:
   });
 });
 
+describe("loadProfile — workflow.gate_mode (issue #63)", () => {
+  it("throws ProfileConfigParseError for an invalid workflow.gate_mode value (fail-closed at config load)", () => {
+    const profilesRoot = makeTmpProfilesRoot();
+    const dir = path.join(profilesRoot, "bad-gate-mode");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, "config.yaml"),
+      "profile: bad-gate-mode\nproviders: {}\nroles: {}\nworkflow:\n  gate_mode: yolo\n",
+      "utf-8",
+    );
+
+    let thrown: unknown;
+    try {
+      loadProfile("bad-gate-mode", profilesRoot);
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(ProfileConfigParseError);
+    expect((thrown as Error).name).toBe("ProfileConfigParseError");
+  });
+
+  it("accepts 'manual'", () => {
+    const profilesRoot = makeTmpProfilesRoot();
+    const dir = path.join(profilesRoot, "gate-mode-manual");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, "config.yaml"),
+      "profile: gate-mode-manual\nproviders: {}\nroles: {}\nworkflow:\n  gate_mode: manual\n",
+      "utf-8",
+    );
+
+    const result = loadProfile("gate-mode-manual", profilesRoot);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.config.workflow?.gate_mode).toBe("manual");
+  });
+
+  it("accepts 'semi-auto'", () => {
+    const profilesRoot = makeTmpProfilesRoot();
+    const dir = path.join(profilesRoot, "gate-mode-semi-auto");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, "config.yaml"),
+      "profile: gate-mode-semi-auto\nproviders: {}\nroles: {}\nworkflow:\n  gate_mode: semi-auto\n",
+      "utf-8",
+    );
+
+    const result = loadProfile("gate-mode-semi-auto", profilesRoot);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.config.workflow?.gate_mode).toBe("semi-auto");
+  });
+
+  it("defaults to undefined (manual) when workflow.gate_mode is absent — byte-for-byte pre-#63 shape", () => {
+    const result = loadProfile("subscription");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.config.workflow?.gate_mode).toBeUndefined();
+  });
+});
+
 describe("loadProfile — path traversal is blocked (review, feature/issue-1-a0-a1-scaffold)", () => {
   it("real repro: a '../../../CLAUDE'-style profile name no longer leaks the repo's own CLAUDE.md directory", () => {
     // Before the fix, `path.join(profilesRoot, profile)` collapsed the ".."

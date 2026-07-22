@@ -17,6 +17,26 @@
  * of what `resumeRun()` returns to its caller), so the summary is a real
  * post-loop `audit.getRunById()` read, not something inferred from the
  * handle alone.
+ *
+ * **Issue #63 — `workflow.gate_mode: "semi-auto"`** (full design/safety
+ * boundary: `docs/feature/semi-auto-gate-mode/PRD.md`): this is the one
+ * place in this codebase that branches on that toggle (`profile/loader.ts`'s
+ * `ProfileConfig.workflow.gate_mode`, resolved once per call, default
+ * `"manual"`). In `"semi-auto"`, `AUTO_APPROVABLE_GATES` (G1/G2 only — never
+ * G3, never Escalation) skips the `Prompter` call entirely and resumes with
+ * a synthetic `{decision:"approved"}`, recorded under `SEMI_AUTO_DECIDED_BY`
+ * instead of the real human `decidedBy` this function was called with — see
+ * that constant's own doc comment for why. The graph/gate nodes
+ * (`loop/graph.ts`/`loop/gates.ts`) are completely unaware this toggle
+ * exists: from `resumeRun()`'s point of view a semi-auto auto-approval is
+ * indistinguishable from a human one except for which `decidedBy` string
+ * lands in `approvals.decided_by`. `"manual"` (or `gate_mode` absent
+ * entirely) takes the exact same code path this function always has —
+ * byte-for-byte unchanged behavior for every profile that doesn't opt in.
+ * A defensive gate-identity assertion in the loop body below (Zorro/Codex
+ * independent-review hardening ask) double-checks `interrupt.gate` against
+ * `workflow_runs.current_state` before ever auto-approving — see that
+ * check's own inline comment.
  */
 import { danger, ok } from "./colors.js";
 import { renderEscalation, renderG1, renderG2, renderG3 } from "./gate-view.js";
@@ -117,6 +137,43 @@ async function decideForGate(prompter: Prompter, gate: GateType, rawQuestion: st
   }
 }
 
+/**
+ * Issue #63: the two gates `workflow.gate_mode: "semi-auto"` (`profile/loader.ts`'s
+ * `ProfileConfig.workflow.gate_mode`) auto-approves with no human prompt — G1
+ * (send the coder's draft to the tester) and G2 (send the tester's findings
+ * back to the coder for a fix). G3 (final apply) and `ESCALATION_ACK` are
+ * deliberately **not** in this set — they stay human in every mode, per
+ * `docs/feature/semi-auto-gate-mode/PRD.md`'s explicit safety-boundary
+ * requirement (§2 Goals / §3 non-goals), so `runInteractiveLoop()`'s branch
+ * below only ever skips the prompt for these two.
+ */
+const AUTO_APPROVABLE_GATES: ReadonlySet<GateType> = new Set([GATE_TYPES.G1_SEND_TO_TESTER, GATE_TYPES.G2_SEND_TO_FIX]);
+
+/**
+ * `interrupt.gate`'s counterpart in `workflow_runs.current_state`
+ * (`loop/workflow-def.ts`'s `LOOP_NODES` — see `loop/runner.ts`'s
+ * `resumeDecisionsFor()` for the same node-name convention) — used only by
+ * the gate-identity assertion below, never as a general-purpose lookup.
+ */
+const AUTO_APPROVABLE_DB_STATE: Readonly<Record<string, string>> = {
+  [GATE_TYPES.G1_SEND_TO_TESTER]: LOOP_NODES.g1,
+  [GATE_TYPES.G2_SEND_TO_FIX]: LOOP_NODES.g2,
+};
+
+/**
+ * The `decidedBy` recorded for a semi-auto gate's automatic approval —
+ * deliberately never the real human's username (`main.ts`'s
+ * `os.userInfo().username`, threaded into this function as its own
+ * `decidedBy` parameter for every *human* decision in the same run).
+ * `resumeRun()` stores `decidedBy` verbatim into `approvals.decided_by`
+ * (`loop/audit-store.ts`) — this distinct string is how a later reader of
+ * the audit trail tells a real human approval apart from a semi-auto system
+ * approval for the exact same gate type, without needing a schema change to
+ * add a boolean flag alongside it (requirement 2: "never fake it as a human
+ * decision").
+ */
+const SEMI_AUTO_DECIDED_BY = "system (semi-auto)";
+
 function printFinalSummary(deps: CliDeps, runId: number): void {
   const run = deps.audit.getRunById(runId);
   if (run?.status === "completed" && run.currentState === LOOP_NODES.noChange) {
@@ -144,6 +201,9 @@ function printFinalSummary(deps: CliDeps, runId: number): void {
 
 export async function runInteractiveLoop(deps: CliDeps, prompter: Prompter, handle: RunLoopHandle, decidedBy: string): Promise<RunHandle> {
   let current = normalizeHandle(handle);
+  // Issue #63: read once per call, not once per gate — `gate_mode` is a
+  // per-run/per-profile setting, not something that can change mid-loop.
+  const gateMode = deps.profileConfig.workflow?.gate_mode ?? "manual";
 
   while (!current.done) {
     const interrupt = current.interrupt;
@@ -152,6 +212,25 @@ export async function runInteractiveLoop(deps: CliDeps, prompter: Prompter, hand
     }
 
     console.log(renderGate(interrupt.gate, interrupt.payload));
+
+    if (gateMode === "semi-auto" && AUTO_APPROVABLE_GATES.has(interrupt.gate)) {
+      // Defensive gate-identity assertion (Zorro/Codex independent review hardening ask): only
+      // ever auto-approve if `workflow_runs.current_state` — read fresh, independently of
+      // `interrupt.gate` — agrees this is really G1/G2, not G3/Escalation. Should be unreachable
+      // through real code, but auto-approval is security-sensitive, so a disagreement fails
+      // closed (throws) rather than trusting `interrupt.gate` alone.
+      if (deps.audit.getRunById(current.runId)?.currentState !== AUTO_APPROVABLE_DB_STATE[interrupt.gate]) {
+        throw new Error(`run-loop: gate-identity mismatch for run #${current.runId} (interrupt.gate="${interrupt.gate}") — refusing to auto-approve`);
+      }
+      // No prompter call for G1/G2 in semi-auto — this is the whole point of the toggle. Still
+      // printed to the terminal (line above) so a human watching along sees what happened, plus an
+      // explicit banner distinguishing this from an interactive approval.
+      console.log(ok(`[semi-auto] auto-approved — ${interrupt.gate} (recorded as "${SEMI_AUTO_DECIDED_BY}", not a human decision)`));
+      const resumeValue: GateResumeValue = { decision: "approved" };
+      current = await resumeRun(deps, current.runId, current.threadId, resumeValue, SEMI_AUTO_DECIDED_BY, current.stepCounters);
+      continue;
+    }
+
     const resumeValue = await decideForGate(prompter, interrupt.gate, interrupt.payload.question);
     current = await resumeRun(deps, current.runId, current.threadId, resumeValue, decidedBy, current.stepCounters);
   }

@@ -31,6 +31,29 @@ export interface ProfileConfig {
   roles: Record<string, RoleBinding>;
   workflow?: {
     reject_threshold?: number;
+    /**
+     * Issue #63: human-gate automation toggle (full design/safety boundary:
+     * `docs/feature/semi-auto-gate-mode/PRD.md`). `"manual"` (the default
+     * when this key is absent — byte-for-byte today's pre-#63 behavior)
+     * means a human approves every gate (G1/G2/G3 plus Escalation).
+     * `"semi-auto"` auto-approves G1 (send draft to tester) and G2 (send
+     * tester findings back to the coder for a fix) with no human prompt —
+     * `cli/run-loop.ts`'s `runInteractiveLoop()` is what actually branches
+     * on this value; the graph/gate nodes themselves (`loop/gates.ts`) are
+     * unchanged and have no idea this toggle exists. G3 (final apply) and
+     * Escalation are deliberately **not** included — they stay human in
+     * every mode.
+     *
+     * Validated here, fail-closed, same posture as the `profile`/
+     * `providers`/`roles` checks `assertProfileConfigShape()` already does
+     * below: a present-but-invalid value (anything other than `"manual"`/
+     * `"semi-auto"`) throws `ProfileConfigParseError` at load time rather
+     * than silently being coerced to a default or silently ignored — since
+     * this key controls whether human review of a gate is skipped, a typo'd
+     * config value must never be misread as "the safe default", it must fail
+     * loud instead.
+     */
+    gate_mode?: "manual" | "semi-auto";
     [key: string]: unknown;
   };
   /**
@@ -266,6 +289,23 @@ function assertProfileConfigShape(
       configPath,
       new Error(`missing or non-mapping required field "roles"`),
     );
+  }
+  // Issue #63: `workflow.gate_mode`, when present, must be one of the two
+  // real values `run-loop.ts` understands. `workflow` itself stays
+  // unvalidated beyond this (same "loader stays shallow" posture this
+  // function's own doc comment describes for `providers[id]`'s nested
+  // shape) — only this one key gets a fail-closed check, because it's the
+  // one that controls whether a gate's human review is skipped.
+  const workflowSection = config["workflow"];
+  if (isPlainObject(workflowSection)) {
+    const gateMode = workflowSection["gate_mode"];
+    if (gateMode !== undefined && gateMode !== "manual" && gateMode !== "semi-auto") {
+      throw new ProfileConfigParseError(
+        profile,
+        configPath,
+        new Error(`workflow.gate_mode must be "manual" or "semi-auto", got ${JSON.stringify(gateMode)}`),
+      );
+    }
   }
 }
 
