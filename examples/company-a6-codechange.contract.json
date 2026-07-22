@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "1.0",
+  "contractId": "company-a6-codechange-001",
+  "objective": "Implement a new utility function as a candidate change. This is a CODE-WRITING task, not an inspection — produce the complete implementation, do not report 'no change'. Create the function `truncateByGraphemes` intended for a new file `src/util/truncate-by-graphemes.ts`. Signature: `export function truncateByGraphemes(input: string, maxLength: number): string`. Behaviour: return the first `maxLength` user-perceived characters of `input`; if `input` was longer than `maxLength` user-perceived characters, append a single ellipsis character '…' (U+2026) to the returned prefix. The function MUST NOT split a multi-code-unit character (an emoji, a surrogate pair, or a base character plus combining marks / ZWJ sequence) across the truncation boundary. Provide the full function body.",
+  "requirements": [
+    {
+      "id": "REQ-CODE-001",
+      "text": "Implement truncateByGraphemes(input, maxLength) that truncates by user-perceived characters (graphemes), never splitting a surrogate pair, emoji, or combining/ZWJ sequence, and appends '…' only when the input was actually truncated.",
+      "acceptanceCriteria": [
+        "truncateByGraphemes('hello', 10) returns 'hello' unchanged (shorter than maxLength, no ellipsis appended).",
+        "truncateByGraphemes('hello world', 5) returns 'hello…'.",
+        "A single emoji such as '😀' counts as ONE user-perceived character, not two UTF-16 code units.",
+        "truncateByGraphemes('👩‍👩‍👧 family', 1) must not return a broken half of the ZWJ emoji sequence.",
+        "maxLength <= 0 is handled without throwing and returns a consistent result (empty string or a lone ellipsis).",
+        "The candidate is produced without writing to git and without modifying any tracked file (candidate-only)."
+      ]
+    }
+  ],
+  "riskLevel": "low",
+  "policy": {
+    "allowedPaths": ["src/util/**"],
+    "forbiddenChanges": [
+      "git commit",
+      "git push",
+      "pull request",
+      "merge"
+    ],
+    "allowedCommands": [],
+    "allowedDependencies": [],
+    "allowNetwork": false,
+    "allowGitWrite": false,
+    "reviewerReadOnly": true
+  },
+  "sourceSnapshots": {
+    "PRD": "company-a6-codechange-manual-check"
+  },
+  "createdAt": "2026-07-22T00:00:00.000Z",
+  "brain": "company"
+}
