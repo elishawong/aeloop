@@ -27,7 +27,7 @@ import { StateGraph, START, END } from "@langchain/langgraph";
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { createDraftNode } from "./nodes/coder.js";
 import { createReviewNode } from "./nodes/tester.js";
-import { createG1Node, createG2Node, createG3Node, routeAfterG1, routeAfterG2, routeAfterG3, routeAfterReview } from "./gates.js";
+import { createG1Node, createG2Node, createG3Node, routeAfterDraft, routeAfterG1, routeAfterG2, routeAfterG3, routeAfterReview } from "./gates.js";
 import { createEscalationNode, routeAfterEscalation } from "./escalation.js";
 import { LOOP_NODES } from "./workflow-def.js";
 import { LoopState, type LoopStateType } from "./types.js";
@@ -73,11 +73,24 @@ function cancelNode(_state: LoopStateType): Partial<LoopStateType> {
 }
 
 /**
+ * `NoChange` — issue #47's third terminal state: a `draft` round whose
+ * `coderOutput.status === "no_change"` routes straight here instead of into
+ * `g1`/the tester review (both of which only make sense once there's an
+ * actual diff to send). Symmetric to `applyNode`/`cancelNode` — marks the
+ * run's distinct `noChange` flag, no other side effect. Not broken out into
+ * its own `nodes/no-change.ts` file, same reasoning as `applyNode`/`cancelNode`.
+ */
+function noChangeNode(_state: LoopStateType): Partial<LoopStateType> {
+  return { noChange: true };
+}
+
+/**
  * Unconnected-to-a-checkpointer graph builder — pure structure, matching
  * DESIGN §4's full state machine (A4a shipped everything except the
- * Escalation subtree; A4b, PRD §0/§4.1, completes it):
+ * Escalation subtree; A4b, PRD §0/§4.1, completes it; issue #47 adds the
+ * `no_change` branch below):
  *
- * `START -> draft -> g1 -{approved}-> review -{pass}-> g3 -{approved}-> apply -> END`
+ * `START -> draft -{changed}-> g1 -{approved}-> review -{pass}-> g3 -{approved}-> apply -> END`
  *
  * with reject/rejected edges looping back to `draft`, `review`'s `"reject"`
  * verdict routing through `g2` (below threshold) or straight to
@@ -85,11 +98,19 @@ function cancelNode(_state: LoopStateType): Partial<LoopStateType> {
  * "proactively escalate" decision also reaching `escalation`, and
  * `escalation`'s human three-way decision routing to `draft`/`g3`/`cancel`.
  *
+ * Issue #47: `draft -{no_change}-> noChange -> END` is a second, distinct
+ * path out of `draft` — a round whose `coderOutput.status === "no_change"`
+ * (a read-only/already-satisfied task with nothing to send to review) never
+ * enters `g1`/`review`/`g3` at all, instead of looping through them with a
+ * degenerate empty diff.
+ *
  * **Deliberately not adding a plain `addEdge(LOOP_NODES.g1, LOOP_NODES.review)`
  * alongside the `addConditionalEdges(LOOP_NODES.g1, ...)` call below** — the
  * conditional edges' target set already covers `{review, draft}` (PRD §5's
  * explicit warning: "an easy mistake to make when writing this the first
- * time").
+ * time"). Same reasoning is why `draft`'s own out-edge below is now
+ * `addConditionalEdges` too, not a plain `addEdge(LOOP_NODES.draft,
+ * LOOP_NODES.g1)` — its target set is `{g1, noChange}`, not just `g1` alone.
  */
 export function buildLoopGraph(deps: LoopGraphDeps) {
   return new StateGraph(LoopState)
@@ -101,8 +122,12 @@ export function buildLoopGraph(deps: LoopGraphDeps) {
     .addNode(LOOP_NODES.apply, applyNode)
     .addNode(LOOP_NODES.escalation, createEscalationNode())
     .addNode(LOOP_NODES.cancel, cancelNode)
+    .addNode(LOOP_NODES.noChange, noChangeNode)
     .addEdge(START, LOOP_NODES.draft)
-    .addEdge(LOOP_NODES.draft, LOOP_NODES.g1)
+    .addConditionalEdges(LOOP_NODES.draft, routeAfterDraft, {
+      g1: LOOP_NODES.g1,
+      no_change: LOOP_NODES.noChange,
+    })
     .addConditionalEdges(LOOP_NODES.g1, routeAfterG1, {
       review: LOOP_NODES.review,
       draft: LOOP_NODES.draft,
@@ -126,7 +151,8 @@ export function buildLoopGraph(deps: LoopGraphDeps) {
       cancel: LOOP_NODES.cancel,
     })
     .addEdge(LOOP_NODES.apply, END)
-    .addEdge(LOOP_NODES.cancel, END);
+    .addEdge(LOOP_NODES.cancel, END)
+    .addEdge(LOOP_NODES.noChange, END);
 }
 
 /**

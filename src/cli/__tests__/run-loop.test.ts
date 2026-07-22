@@ -42,6 +42,7 @@ class FakeCoderAdapter implements ModelAdapter {
   async invoke(_req: InvokeRequest): Promise<InvokeResult> {
     this.calls += 1;
     const payload: CoderOutput = {
+      status: "changed",
       diff: `--- a/example.ts\n+++ b/example.ts\n@@ -1 +1 @@\n-old\n+round${this.calls}\n`,
       claims: [{ claimText: "the change compiles", confidence: "verified", sourceRef: "tsc" }],
       confidence: "verified",

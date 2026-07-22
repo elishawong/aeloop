@@ -17,6 +17,7 @@
 import { interrupt } from "@langchain/langgraph";
 import { GATE_TYPES } from "./workflow-def.js";
 import { UnhandledGateDecisionError } from "./errors.js";
+import { isCoderOutputChanged } from "../prompt/schema.js";
 import type { GateLogEntry, GatePayload, GateResumeValue, GateType, LoopStateType } from "./types.js";
 
 type GateDecisionField = "g1Decision" | "g2Decision" | "g3Decision";
@@ -66,6 +67,24 @@ function createGateNode(
   };
 }
 
+/**
+ * `draft`'s own out-edge router (issue #47, DESIGN §4's `Draft -> G1`, now
+ * split): a `coderOutput.status === "changed"` round still routes to `g1`
+ * exactly as before; a `"no_change"` round routes to `graph.ts`'s new
+ * `noChange` terminal instead, skipping `g1`/`review`/`g3` entirely (none of
+ * them make sense without an actual diff to send). `draft` always sets
+ * `coderOutput` before this router runs (`nodes/coder.ts`'s `SchemaValidator`
+ * fail-closed guarantee), so the `undefined` case here is the same kind of
+ * defensive, should-never-happen backstop as `routeAfterReview`'s missing-
+ * `testerOutput` guard just below.
+ */
+export function routeAfterDraft(state: LoopStateType): "g1" | "no_change" {
+  if (!state.coderOutput) {
+    throw new Error("routeAfterDraft called without a coderOutput in state");
+  }
+  return isCoderOutputChanged(state.coderOutput) ? "g1" : "no_change";
+}
+
 /** G1: approve sending the coder's diff to the tester (DESIGN §4's `Draft -> G1 -> Review`). Rejection feedback is just whatever the human typed — there's no more context to add. */
 export function createG1Node(): (state: LoopStateType) => Partial<LoopStateType> {
   return createGateNode(
@@ -73,7 +92,7 @@ export function createG1Node(): (state: LoopStateType) => Partial<LoopStateType>
     "g1Decision",
     (state) => ({
       question: "approve sending this diff to the tester?",
-      ...(state.coderOutput?.diff !== undefined ? { diffRef: state.coderOutput.diff } : {}),
+      ...(state.coderOutput && isCoderOutputChanged(state.coderOutput) ? { diffRef: state.coderOutput.diff } : {}),
     }),
     (_state, resume) => resume.reasoningText,
   );
@@ -100,7 +119,7 @@ export function createG3Node(): (state: LoopStateType) => Partial<LoopStateType>
     "g3Decision",
     (state) => ({
       question: "final sign-off: apply this diff?",
-      ...(state.coderOutput?.diff !== undefined ? { diffRef: state.coderOutput.diff } : {}),
+      ...(state.coderOutput && isCoderOutputChanged(state.coderOutput) ? { diffRef: state.coderOutput.diff } : {}),
     }),
     (_state, resume) => resume.reasoningText,
   );

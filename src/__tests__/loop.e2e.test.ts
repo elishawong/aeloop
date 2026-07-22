@@ -55,6 +55,7 @@ import { createSqliteCheckpointer } from "../loop/checkpoint.js";
 import { AuditStore } from "../loop/audit-store.js";
 import { startRun, resumeRun, type RunHandle } from "../loop/runner.js";
 import type { GateResumeValue, LoopNodeName, LoopStateType } from "../loop/types.js";
+import type { CoderOutput } from "../prompt/schema.js";
 
 const NOW = "2026-07-21T00:00:00.000Z";
 const SUBSCRIPTION_PERSONAS_DIR = path.join(resolveProfileDir("subscription"), "personas");
@@ -70,6 +71,11 @@ type RealGraphNode = Exclude<LoopNodeName, "__end__">;
 
 function resumeCommand(resume: GateResumeValue) {
   return new Command<GateResumeValue, Record<string, unknown>, RealGraphNode>({ resume });
+}
+
+/** This suite's fixtures always exercise the `"changed"` path — this just narrows the assertion access, not a production helper. */
+function changedDiff(output: CoderOutput | undefined): string | undefined {
+  return output?.status === "changed" ? output.diff : undefined;
 }
 
 const openStores: MemoryStore[] = [];
@@ -163,13 +169,14 @@ describe("Context -> Prompt -> Harness (real cli-bridge fixtures) -> Loop (real 
       rejectThreshold: 2,
       escalationDecision: undefined,
       cancelled: false,
+      noChange: false,
     };
 
     // ---- 5. First invoke: real coder cli-bridge call, should stop at G1 ----
     await compiled.invoke(initialState, cfg);
     const afterDraft = await compiled.getState(cfg);
     expect(afterDraft.next).toEqual(["g1"]);
-    expect(afterDraft.values.coderOutput?.diff).toContain("+new");
+    expect(changedDiff(afterDraft.values.coderOutput)).toContain("+new");
     expect(afterDraft.values.coderResult?.provider).toBe("claude-cli");
 
     // ---- 6. Resume G1 (approve): real tester cli-bridge call, should stop at G3 ----
@@ -186,7 +193,7 @@ describe("Context -> Prompt -> Harness (real cli-bridge fixtures) -> Loop (real 
     expect(final.applied).toBe(true);
 
     // Typed, schema-valid results — not raw JSON.
-    expect(final.coderOutput?.diff).toContain("+new");
+    expect(changedDiff(final.coderOutput)).toContain("+new");
     expect(final.coderOutput?.confidence).toBe("verified");
     expect(final.testerOutput?.verdict).toBe("pass");
 

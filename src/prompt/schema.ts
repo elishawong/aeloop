@@ -64,16 +64,102 @@ export const ClaimSchema = z.object({
 export type Claim = z.infer<typeof ClaimSchema>;
 
 /**
- * Coder's structured output (DESIGN §3 sequence: `Coder-->>Orc: {diff, claims[], confidence}`).
+ * Fields both `CoderOutput` variants share (DESIGN §3 sequence:
+ * `Coder-->>Orc: {diff, claims[], confidence}` — `claims[]`/`confidence` are
+ * common to both outcomes, only the "what changed" payload differs).
  */
-export const CoderOutput = z.object({
-  /** The change itself, as a unified diff or equivalent patch text. */
-  diff: z.string().min(1),
+const CoderOutputCommon = {
   claims: z.array(ClaimSchema),
   /** Overall confidence across the whole change, not any single claim. */
   confidence: ClaimConfidence,
-});
+};
+
+/**
+ * The "there's a real change" variant — DESIGN §3's original, only shape of
+ * `CoderOutput` before issue #47. `.strict()` so this variant can't silently
+ * also carry a `no_change`-shaped `reason`/`evidence` field (mirrors
+ * `CoderOutputNoChange`'s own `.strict()`, which exists precisely so it
+ * can't carry a fabricated `diff`).
+ */
+export const CoderOutputChanged = z
+  .object({
+    status: z.literal("changed"),
+    /**
+     * The change itself, as a unified diff or equivalent patch text.
+     * `.min(1)` alone would still accept a whitespace-only string (e.g.
+     * `" "`) as "non-empty" — issue #47's acceptance criterion is a diff
+     * that's actually blank in substance, not merely non-zero-length, hence
+     * the `refine()` below on top of `.min(1)`.
+     */
+    diff: z
+      .string()
+      .min(1)
+      .refine((value) => value.trim().length > 0, { message: "diff must not be empty or whitespace-only" }),
+    ...CoderOutputCommon,
+  })
+  .strict();
+export type CoderOutputChanged = z.infer<typeof CoderOutputChanged>;
+
+/**
+ * The "nothing to change" variant (issue #47): a read-only or
+ * already-satisfied task legitimately produces no diff. `reason` (why no
+ * change was needed) and `evidence` (what the coder actually checked to
+ * reach that conclusion) are both required non-empty prose, mirroring
+ * `ClaimSchema.claimText`'s "a claim needs a knowable basis" convention
+ * rather than accepting a bare "no changes needed" with nothing backing it.
+ * `.strict()` means this variant **cannot** carry a `diff` field at all —
+ * accepting one alongside `reason`/`evidence` would let a model fabricate a
+ * "no_change" completion that's secretly also claiming a diff, exactly the
+ * ambiguity this variant exists to rule out.
+ */
+export const CoderOutputNoChange = z
+  .object({
+    status: z.literal("no_change"),
+    /** Why no code change was needed (e.g. "the requested behavior was already implemented"). */
+    reason: z
+      .string()
+      .min(1)
+      .refine((value) => value.trim().length > 0, { message: "reason must not be empty or whitespace-only" }),
+    /** What was actually checked to reach that conclusion (e.g. a file path read, a command run, a test that already passes). */
+    evidence: z
+      .string()
+      .min(1)
+      .refine((value) => value.trim().length > 0, { message: "evidence must not be empty or whitespace-only" }),
+    ...CoderOutputCommon,
+  })
+  .strict();
+export type CoderOutputNoChange = z.infer<typeof CoderOutputNoChange>;
+
+/**
+ * Coder's structured output (DESIGN §3 sequence: `Coder-->>Orc: {diff,
+ * claims[], confidence}`), now a discriminated union on `status` (issue #47:
+ * "Support no-change workflow completion without G1 loop" — a read-only or
+ * already-satisfied task can legitimately produce no diff at all, and
+ * forcing that through G1/the tester review, both of which only make sense
+ * once there's an actual diff, was the bug this issue fixes).
+ *
+ * **Backward compatibility**: every `CoderOutput` produced before this
+ * change (every existing model call, adapter fixture, and persisted
+ * `structured_claims` row) is shaped exactly like `CoderOutputChanged` minus
+ * the `status` field — `status` didn't exist yet. `z.preprocess()` below
+ * defaults a *missing* `status` to `"changed"` before the discriminated
+ * union ever runs, so that legacy shape still parses successfully as
+ * `CoderOutputChanged`, without requiring every existing caller/fixture to
+ * be rewritten. A payload that already carries an explicit `status` (either
+ * variant) passes through unchanged.
+ */
+export const CoderOutput = z.preprocess((value) => {
+  if (value !== null && typeof value === "object" && !("status" in value)) {
+    return { ...value, status: "changed" };
+  }
+  return value;
+}, z.discriminatedUnion("status", [CoderOutputChanged, CoderOutputNoChange]));
 export type CoderOutput = z.infer<typeof CoderOutput>;
+
+/** Narrows a `CoderOutput` to its `"changed"` variant — the one place every `.diff`-reading call site (`loop/gates.ts`/`loop/escalation.ts`/`loop/nodes/tester.ts`/`loop/runner.ts`) should go through, rather than re-checking `output.status === "changed"` independently in each. */
+export function isCoderOutputChanged(output: CoderOutput): output is CoderOutputChanged {
+  return output.status === "changed";
+}
 
 /**
  * Tester's structured output (DESIGN §3 sequence: `Tester-->>Orc: {verdict, issues[], confidence}`).

@@ -77,7 +77,7 @@ class FakeCoderAdapter implements ModelAdapter {
   async invoke(req: InvokeRequest): Promise<InvokeResult> {
     this.calls += 1;
     this.receivedRequests.push(req);
-    const payload: CoderOutput = { diff: FAKE_DIFF, claims: [], confidence: "verified" };
+    const payload: CoderOutput = { status: "changed", diff: FAKE_DIFF, claims: [], confidence: "verified" };
     return { content: JSON.stringify(payload), provider: this.id, model: "fake-model-v1" };
   }
 }
@@ -164,6 +164,7 @@ function initialState(overrides: Partial<LoopStateType> = {}): LoopStateType {
     rejectThreshold: 2,
     escalationDecision: undefined,
     cancelled: false,
+    noChange: false,
     ...overrides,
   };
 }

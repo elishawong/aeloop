@@ -24,7 +24,7 @@ import type { Prompter } from "./prompter.js";
 import { stripControlSequences } from "./sanitize-terminal.js";
 import type { CliDeps } from "./assemble.js";
 import { resumeRun, type RunHandle } from "../loop/runner.js";
-import { GATE_TYPES } from "../loop/workflow-def.js";
+import { GATE_TYPES, LOOP_NODES } from "../loop/workflow-def.js";
 import type { EscalationDecision, EscalationResumeValue, GateDecision, GatePayload, GateResumeValue, GateType } from "../loop/types.js";
 
 /**
@@ -119,7 +119,17 @@ async function decideForGate(prompter: Prompter, gate: GateType, rawQuestion: st
 
 function printFinalSummary(deps: CliDeps, runId: number): void {
   const run = deps.audit.getRunById(runId);
-  if (run?.status === "completed") {
+  if (run?.status === "completed" && run.currentState === LOOP_NODES.noChange) {
+    // Issue #47's other completed shape: the coder's own draft round decided
+    // there was nothing to change (`coderOutput.status === "no_change"`), so
+    // this run never went through G1/G2/G3 at all — `currentState` is
+    // `"no_change"`, not `"apply"` (graph.ts's `draft -{no_change}-> noChange
+    // -> END` path, runner.ts's own `currentState = LOOP_NODES.noChange`).
+    // Saying "G3 approved" here would be actively wrong (no gate ever ran),
+    // so this gets its own message rather than falling into the `"completed"`
+    // branch below.
+    console.log(ok(`Run #${runId} completed — no code change was needed, audit trail closed.`));
+  } else if (run?.status === "completed") {
     // "applied" would be misleading here (Zorro re-review "顺手修" item, P0-1's real finding):
     // `applyNode()` is a no-op (graph.ts's `{applied:true}` audit-only marker, A4a's documented
     // downgrade), so completion means the audit trail/gate history is finished, not that any file

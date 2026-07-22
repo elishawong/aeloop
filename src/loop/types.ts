@@ -168,6 +168,17 @@ export const LoopState = Annotation.Root({
   escalationDecision: Annotation<EscalationDecision | undefined>(),
   /** `Cancel` node's terminal marker, symmetric to `applied` (A4b PRD §4.1). */
   cancelled: Annotation<boolean>({ reducer: (_a, b) => b, default: () => false }),
+  /**
+   * `NoChange` node's terminal marker (issue #47), symmetric to
+   * `applied`/`cancelled` — set once the graph routes a `coderOutput.status
+   * === "no_change"` draft round straight to its own terminal node instead
+   * of into `g1`/`review`. A distinct field (not a third `applied` value)
+   * so `runner.ts`'s `computeRunProgress()` can tell "applied" and
+   * "no_change" apart even though both end the run with `status:
+   * "completed"` (issue #47's acceptance: persisted as `completed`, but
+   * `current_state: "no_change"`, not the `g1`/`apply` path's state).
+   */
+  noChange: Annotation<boolean>({ reducer: (_a, b) => b, default: () => false }),
 });
 
 /**

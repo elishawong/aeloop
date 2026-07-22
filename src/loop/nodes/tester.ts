@@ -8,7 +8,7 @@
 import { SchemaValidator } from "../../harness/schema-validator.js";
 import type { ProviderRouter } from "../../harness/provider-router.js";
 import type { PromptComposer } from "../../prompt/composer.js";
-import { TesterOutput, type Claim, type CoderOutput } from "../../prompt/schema.js";
+import { TesterOutput, isCoderOutputChanged, type Claim, type CoderOutput } from "../../prompt/schema.js";
 import type { LoopStateType } from "../types.js";
 
 export interface ReviewNodeDeps {
@@ -32,7 +32,14 @@ export interface ReviewNodeDeps {
  *    should not trust that implicitly (PRD §5: "a node function shouldn't
  *    implicitly trust that the graph structure already guarantees this").
  *    Missing → throws a plain, explicit
- *    `Error`, never a bare `undefined.diff` crash.
+ *    `Error`, never a bare `undefined.diff` crash. Issue #47: `review` only
+ *    runs on `graph.ts`'s `changed` path (`routeAfterDraft` routes
+ *    `"no_change"` rounds to the `noChange` terminal, never through here) —
+ *    a `coderOutput.status === "no_change"` reaching this node would mean
+ *    that routing invariant broke, so it gets the same explicit-`Error`
+ *    treatment as a missing `coderOutput` altogether, rather than a bare
+ *    `undefined.diff`/`undefined.claims` crash reading a field `"no_change"`
+ *    doesn't have.
  * 2. Build the tester's task text: original task + coder's diff + coder's
  *    claims — the tester persona's house rules
  *    (profiles/subscription/personas/tester.md) explicitly say to verify
@@ -50,6 +57,9 @@ export function createReviewNode(deps: ReviewNodeDeps): (state: LoopStateType) =
   return async (state) => {
     if (!state.coderOutput) {
       throw new Error("review node invoked without a coderOutput in state");
+    }
+    if (!isCoderOutputChanged(state.coderOutput)) {
+      throw new Error('review node invoked with a "no_change" coderOutput — routeAfterDraft should have routed this round to the noChange terminal instead');
     }
     const coderOutput = state.coderOutput;
 
