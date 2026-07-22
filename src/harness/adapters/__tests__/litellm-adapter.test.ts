@@ -326,4 +326,232 @@ describe("LiteLLMAdapter", () => {
     expect(result.available).toBe(false);
     expect(result.reason).toContain("base_url");
   });
+
+  describe("usage/latency normalization (issue #48)", () => {
+    it("invoke(): OpenAI-style response with strict prompt_tokens/completion_tokens/total_tokens normalizes to ProviderUsage with source 'provider'", async () => {
+      activeServer = await startFakeServer((_req, res) => {
+        sendJson(res, 200, {
+          model: "gpt-4o-mini",
+          choices: [{ message: { content: "hi" } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        });
+      });
+
+      const adapter = new LiteLLMAdapter("litellm", {
+        base_url: activeServer.baseUrl,
+        model: "gpt-4o-mini",
+      });
+
+      const result = await adapter.invoke(fakeRequest);
+
+      expect(result.usage).toEqual({
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        source: "provider",
+      });
+    });
+
+    it("invoke(): OpenAI-style response missing total_tokens computes it from prompt_tokens + completion_tokens", async () => {
+      activeServer = await startFakeServer((_req, res) => {
+        sendJson(res, 200, {
+          model: "gpt-4o-mini",
+          choices: [{ message: { content: "hi" } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        });
+      });
+
+      const adapter = new LiteLLMAdapter("litellm", {
+        base_url: activeServer.baseUrl,
+        model: "gpt-4o-mini",
+      });
+
+      const result = await adapter.invoke(fakeRequest);
+
+      expect(result.usage?.totalTokens).toBe(15);
+    });
+
+    it("invoke(): OpenAI-style response's prompt_tokens_details.cached_tokens normalizes to cacheReadTokens", async () => {
+      activeServer = await startFakeServer((_req, res) => {
+        sendJson(res, 200, {
+          model: "gpt-4o-mini",
+          choices: [{ message: { content: "hi" } }],
+          usage: {
+            prompt_tokens: 100,
+            completion_tokens: 20,
+            total_tokens: 120,
+            prompt_tokens_details: { cached_tokens: 40 },
+          },
+        });
+      });
+
+      const adapter = new LiteLLMAdapter("litellm", {
+        base_url: activeServer.baseUrl,
+        model: "gpt-4o-mini",
+      });
+
+      const result = await adapter.invoke(fakeRequest);
+
+      expect(result.usage?.cacheReadTokens).toBe(40);
+      expect(result.usage?.cacheWriteTokens).toBeUndefined();
+    });
+
+    it("invoke(): LiteLLM Anthropic-passthrough variant (cache_creation_input_tokens/cache_read_input_tokens inside an OpenAI-shaped usage block) normalizes to cache fields", async () => {
+      activeServer = await startFakeServer((_req, res) => {
+        sendJson(res, 200, {
+          model: "claude-opus-4",
+          choices: [{ message: { content: "hi" } }],
+          usage: {
+            prompt_tokens: 200,
+            completion_tokens: 30,
+            total_tokens: 230,
+            cache_creation_input_tokens: 50,
+            cache_read_input_tokens: 25,
+          },
+        });
+      });
+
+      const adapter = new LiteLLMAdapter("litellm", {
+        base_url: activeServer.baseUrl,
+        model: "claude-opus-4",
+      });
+
+      const result = await adapter.invoke(fakeRequest);
+
+      expect(result.usage?.cacheWriteTokens).toBe(50);
+      expect(result.usage?.cacheReadTokens).toBe(25);
+    });
+
+    it("invoke(): Anthropic-style response normalizes input_tokens/output_tokens/cache_* fields, computing totalTokens as input+output only", async () => {
+      activeServer = await startFakeServer((_req, res) => {
+        sendJson(res, 200, {
+          model: "claude-opus-4",
+          content: [{ type: "text", text: "hi" }],
+          usage: {
+            input_tokens: 12,
+            output_tokens: 8,
+            cache_creation_input_tokens: 100,
+            cache_read_input_tokens: 50,
+          },
+        });
+      });
+
+      const adapter = new LiteLLMAdapter("litellm", {
+        base_url: activeServer.baseUrl,
+        model: "claude-opus-4",
+        api_style: "anthropic",
+      });
+
+      const result = await adapter.invoke(fakeRequest);
+
+      expect(result.usage).toEqual({
+        inputTokens: 12,
+        outputTokens: 8,
+        totalTokens: 20,
+        cacheWriteTokens: 100,
+        cacheReadTokens: 50,
+        source: "provider",
+      });
+    });
+
+    it("invoke(): Anthropic-style response missing usage entirely omits InvokeResult.usage rather than throwing or fabricating zeros", async () => {
+      activeServer = await startFakeServer((_req, res) => {
+        sendJson(res, 200, {
+          model: "claude-opus-4",
+          content: [{ type: "text", text: "hi" }],
+        });
+      });
+
+      const adapter = new LiteLLMAdapter("litellm", {
+        base_url: activeServer.baseUrl,
+        model: "claude-opus-4",
+        api_style: "anthropic",
+      });
+
+      const result = await adapter.invoke(fakeRequest);
+
+      expect(result.usage).toBeUndefined();
+      expect(result.content).toBe("hi");
+    });
+
+    it("invoke(): malformed usage block (wrong types / negative values) is fail-safe — invoke() still succeeds and usage is omitted", async () => {
+      activeServer = await startFakeServer((_req, res) => {
+        sendJson(res, 200, {
+          model: "gpt-4o-mini",
+          choices: [{ message: { content: "hi" } }],
+          usage: { prompt_tokens: "ten", completion_tokens: -5, total_tokens: null },
+        });
+      });
+
+      const adapter = new LiteLLMAdapter("litellm", {
+        base_url: activeServer.baseUrl,
+        model: "gpt-4o-mini",
+      });
+
+      const result = await adapter.invoke(fakeRequest);
+
+      expect(result.usage).toBeUndefined();
+      expect(result.content).toBe("hi");
+    });
+
+    it("invoke(): usage as a non-object (e.g. a string) is fail-safe — usage omitted, invoke() still succeeds", async () => {
+      activeServer = await startFakeServer((_req, res) => {
+        sendJson(res, 200, {
+          model: "gpt-4o-mini",
+          choices: [{ message: { content: "hi" } }],
+          usage: "not-an-object",
+        });
+      });
+
+      const adapter = new LiteLLMAdapter("litellm", {
+        base_url: activeServer.baseUrl,
+        model: "gpt-4o-mini",
+      });
+
+      const result = await adapter.invoke(fakeRequest);
+
+      expect(result.usage).toBeUndefined();
+    });
+
+    it("invoke(): partial usage (only prompt_tokens present) keeps totalTokens undefined rather than guessing", async () => {
+      activeServer = await startFakeServer((_req, res) => {
+        sendJson(res, 200, {
+          model: "gpt-4o-mini",
+          choices: [{ message: { content: "hi" } }],
+          usage: { prompt_tokens: 10 },
+        });
+      });
+
+      const adapter = new LiteLLMAdapter("litellm", {
+        base_url: activeServer.baseUrl,
+        model: "gpt-4o-mini",
+      });
+
+      const result = await adapter.invoke(fakeRequest);
+
+      expect(result.usage?.inputTokens).toBe(10);
+      expect(result.usage?.outputTokens).toBeUndefined();
+      expect(result.usage?.totalTokens).toBeUndefined();
+    });
+
+    it("invoke(): populates a non-negative latencyMs measured across the real network round trip", async () => {
+      activeServer = await startFakeServer((_req, res) => {
+        sendJson(res, 200, {
+          model: "gpt-4o-mini",
+          choices: [{ message: { content: "hi" } }],
+        });
+      });
+
+      const adapter = new LiteLLMAdapter("litellm", {
+        base_url: activeServer.baseUrl,
+        model: "gpt-4o-mini",
+      });
+
+      const result = await adapter.invoke(fakeRequest);
+
+      expect(typeof result.latencyMs).toBe("number");
+      expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+      expect(Number.isFinite(result.latencyMs)).toBe(true);
+    });
+  });
 });

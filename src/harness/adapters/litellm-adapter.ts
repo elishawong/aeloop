@@ -27,7 +27,7 @@
  */
 
 import { AdapterInvokeError } from "../errors.js";
-import type { AvailabilityResult, InvokeRequest, InvokeResult, ModelAdapter } from "../types.js";
+import type { AvailabilityResult, InvokeRequest, InvokeResult, ModelAdapter, ProviderUsage } from "../types.js";
 
 /**
  * Shape of the constructor config this adapter needs — a subset of
@@ -52,12 +52,57 @@ export interface LiteLLMAdapterConfig {
 interface ChatCompletionsResponse {
   model?: unknown;
   choices?: unknown;
+  usage?: unknown;
 }
 
 /** Minimal shape this adapter reads out of an Anthropic-compatible messages response. */
 interface AnthropicMessagesResponse {
   model?: unknown;
   content?: unknown;
+  usage?: unknown;
+}
+
+/**
+ * Anthropic `/v1/messages` response's `usage` block (Anthropic Messages API
+ * docs). `input_tokens`/`output_tokens` are the "fresh" (non-cached) token
+ * counts; `cache_creation_input_tokens`/`cache_read_input_tokens` are
+ * separate, additive categories — a cache read/write is never already
+ * counted inside `input_tokens` (issue #48 contract decision, see
+ * `ProviderUsage` doc in `types.ts` for why that matters for `totalTokens`).
+ */
+interface AnthropicUsageRaw {
+  input_tokens?: unknown;
+  output_tokens?: unknown;
+  cache_creation_input_tokens?: unknown;
+  cache_read_input_tokens?: unknown;
+}
+
+/**
+ * OpenAI chat/completions `usage` block, plus the LiteLLM-specific variants
+ * this adapter has actually been observed to need (issue #48):
+ * - Strict OpenAI shape: `prompt_tokens`/`completion_tokens`/`total_tokens`,
+ *   optionally `prompt_tokens_details.cached_tokens` for a cache-read count
+ *   (OpenAI's own prompt-caching docs) — that cached count is a *subset* of
+ *   `prompt_tokens`, not additional to it.
+ * - LiteLLM Anthropic-passthrough variant: when LiteLLM proxies an
+ *   Anthropic model through its OpenAI-compatible `/chat/completions`
+ *   endpoint, it has been observed carrying the Anthropic-native
+ *   `cache_creation_input_tokens`/`cache_read_input_tokens` field names
+ *   straight through inside the otherwise-OpenAI-shaped `usage` object
+ *   (LiteLLM's own cost-tracking needs the Anthropic-specific split, so it
+ *   doesn't collapse it away even in the OpenAI-compatible response). Those
+ *   are additive to `prompt_tokens`, matching Anthropic's own semantics,
+ *   *not* OpenAI's `prompt_tokens_details.cached_tokens` subset semantics —
+ *   the two are deliberately read into different `ProviderUsage` fields
+ *   only when unambiguous (see `extractOpenAIUsage`).
+ */
+interface OpenAIUsageRaw {
+  prompt_tokens?: unknown;
+  completion_tokens?: unknown;
+  total_tokens?: unknown;
+  prompt_tokens_details?: { cached_tokens?: unknown } | unknown;
+  cache_creation_input_tokens?: unknown;
+  cache_read_input_tokens?: unknown;
 }
 
 function describeCause(cause: unknown): string {
@@ -135,6 +180,101 @@ function extractModel(parsed: unknown): string | undefined {
   return model.trim().length > 0 ? model : undefined;
 }
 
+/**
+ * Guards a single raw usage field: only a finite, non-negative `number`
+ * counts as a real token count. Anything else (missing, `null`, a string,
+ * `NaN`/`Infinity`, negative) is treated as "provider didn't tell us this"
+ * and mapped to `undefined` rather than coerced/guessed — the fail-safe
+ * posture issue #48 asks for (a malformed field never crashes `invoke()`,
+ * it's just silently absent from `ProviderUsage`).
+ */
+function toTokenCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * Builds the `ProviderUsage` `invoke()` returns, or `undefined` when none
+ * of the five counters could be read at all — an all-`undefined`-fields
+ * `{ source: "provider" }` object would be a degenerate, useless value to
+ * hand back, so this omits `usage` from `InvokeResult` entirely in that
+ * case rather than returning that shell (same "leave it honestly unknown"
+ * choice `InvokeResult.usage`'s doc in `types.ts` describes).
+ */
+function buildUsage(fields: {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+}): ProviderUsage | undefined {
+  const hasAnyField = Object.values(fields).some((value) => value !== undefined);
+  if (!hasAnyField) return undefined;
+  return { ...fields, source: "provider" };
+}
+
+/**
+ * Anthropic `/v1/messages` usage parsing (issue #48). `totalTokens` is
+ * populated only when both `input_tokens`/`output_tokens` are present —
+ * Anthropic's response has no provider-declared total field, so this is a
+ * computed sum, and only of those two (cache tokens are deliberately never
+ * folded in; see `ProviderUsage`'s doc in `types.ts` for why).
+ */
+function extractAnthropicUsage(parsed: unknown): ProviderUsage | undefined {
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const { usage } = parsed as AnthropicMessagesResponse;
+  if (typeof usage !== "object" || usage === null) return undefined;
+  const raw = usage as AnthropicUsageRaw;
+
+  const inputTokens = toTokenCount(raw.input_tokens);
+  const outputTokens = toTokenCount(raw.output_tokens);
+  const cacheWriteTokens = toTokenCount(raw.cache_creation_input_tokens);
+  const cacheReadTokens = toTokenCount(raw.cache_read_input_tokens);
+  const totalTokens =
+    inputTokens !== undefined && outputTokens !== undefined ? inputTokens + outputTokens : undefined;
+
+  return buildUsage({ inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens });
+}
+
+/**
+ * OpenAI-compatible chat/completions usage parsing (issue #48), including
+ * the LiteLLM Anthropic-passthrough variant (see `OpenAIUsageRaw`'s doc).
+ * `totalTokens` prefers the provider's own `total_tokens` when it's a valid
+ * count (a provider-declared total is more defensible than a computed one);
+ * falls back to `prompt_tokens + completion_tokens` only when both of those
+ * are present and `total_tokens` itself wasn't usable.
+ *
+ * Cache reads: OpenAI's `prompt_tokens_details.cached_tokens` is checked
+ * first (the "official" OpenAI shape); the LiteLLM Anthropic-passthrough
+ * `cache_read_input_tokens` field is used only as a fallback when the
+ * OpenAI-shaped field isn't present, since the two are not guaranteed to
+ * mean the same thing (subset-of-prompt vs. additive-to-prompt — see
+ * `OpenAIUsageRaw`'s doc) and a response should not realistically carry
+ * both for the same underlying count.
+ */
+function extractOpenAIUsage(parsed: unknown): ProviderUsage | undefined {
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const { usage } = parsed as ChatCompletionsResponse;
+  if (typeof usage !== "object" || usage === null) return undefined;
+  const raw = usage as OpenAIUsageRaw;
+
+  const inputTokens = toTokenCount(raw.prompt_tokens);
+  const outputTokens = toTokenCount(raw.completion_tokens);
+  const cacheWriteTokens = toTokenCount(raw.cache_creation_input_tokens);
+
+  const promptDetails =
+    typeof raw.prompt_tokens_details === "object" && raw.prompt_tokens_details !== null
+      ? (raw.prompt_tokens_details as { cached_tokens?: unknown })
+      : undefined;
+  const cacheReadTokens = toTokenCount(promptDetails?.cached_tokens) ?? toTokenCount(raw.cache_read_input_tokens);
+
+  const declaredTotal = toTokenCount(raw.total_tokens);
+  const totalTokens =
+    declaredTotal ??
+    (inputTokens !== undefined && outputTokens !== undefined ? inputTokens + outputTokens : undefined);
+
+  return buildUsage({ inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens });
+}
+
 export class LiteLLMAdapter implements ModelAdapter {
   readonly kind = "direct-api" as const;
 
@@ -179,6 +319,18 @@ export class LiteLLMAdapter implements ModelAdapter {
       responseShapeError = "chat/completions shape (choices[0].message.content)";
     }
 
+    // `performance.now()` (monotonic, immune to wall-clock adjustments —
+    // the "non-brittle" measurement issue #48 asks for, unlike `Date.now()`
+    // which can jump backwards/forwards on NTP sync) brackets exactly the
+    // network round trip: from immediately before `fetch()` is issued to
+    // immediately after the full response body has been read. Deliberately
+    // excludes request-body serialization before it and `JSON.parse`/
+    // content-shape validation after it — those are this process's own CPU
+    // work, not time spent waiting on the provider, so folding them in
+    // would make `latencyMs` overstate the actual network latency it's
+    // meant to report.
+    const requestStartedAt = performance.now();
+
     let response: Response;
     try {
       response = await fetch(url, {
@@ -217,6 +369,8 @@ export class LiteLLMAdapter implements ModelAdapter {
       );
     }
 
+    const latencyMs = Math.round(performance.now() - requestStartedAt);
+
     let parsed: unknown;
     try {
       parsed = JSON.parse(rawBody);
@@ -239,10 +393,19 @@ export class LiteLLMAdapter implements ModelAdapter {
       );
     }
 
+    // Usage parsing is fail-safe by construction (`extractAnthropicUsage`/
+    // `extractOpenAIUsage` never throw — malformed/missing usage yields
+    // `undefined`, not an error), so no try/catch is needed here; a bad
+    // usage block must never take down an otherwise-successful `invoke()`.
+    const usage =
+      apiStyle === "anthropic" ? extractAnthropicUsage(parsed) : extractOpenAIUsage(parsed);
+
     return {
       content,
       provider: providerId,
       model: extractModel(parsed) ?? model,
+      ...(usage !== undefined ? { usage } : {}),
+      latencyMs,
     };
   }
 

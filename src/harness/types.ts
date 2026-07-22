@@ -80,6 +80,57 @@ export interface InvokeRequest {
 export type ToolExecChecked = "pass" | "fail" | "na";
 
 /**
+ * Where a `ProviderUsage` value came from. This slice (issue #48) only ever
+ * produces `"provider"` — a value read verbatim out of a provider's own
+ * response body. `"estimate"` is reserved for a future slice that derives
+ * usage locally (e.g. tokenizing `content` when a provider gives no usage
+ * block at all); no adapter sets it yet, and none of this slice's parsing
+ * helpers fabricate one. Keeping the literal in the union now (rather than
+ * adding it later) means `ProviderUsage.source` doesn't need a breaking
+ * widen when that estimator lands.
+ */
+export type UsageSource = "provider" | "estimate";
+
+/**
+ * Normalized token-usage counters for one `invoke()` call, issue #48
+ * (`docs/feature/issue-48-provider-usage-telemetry/README.md` — see adapter
+ * files for the per-provider parsing contract). Every counter is optional and independent
+ * — a provider that reports some fields and omits others (e.g. Anthropic
+ * never sends a `total_tokens`-equivalent) must have exactly the fields it
+ * actually reported populated, never a guessed/zero-filled value for the
+ * rest (PRD's "omit unknown values" / fail-safe posture, same honesty
+ * stance as `InvokeResult.model`'s "unknown" fallback documented above).
+ *
+ * `cacheReadTokens`/`cacheWriteTokens` are Anthropic-native concepts
+ * (`cache_read_input_tokens`/`cache_creation_input_tokens`) that some
+ * OpenAI-compatible LiteLLM responses also surface (either nested under
+ * `prompt_tokens_details.cached_tokens` for reads, or as the same
+ * Anthropic-named top-level fields when LiteLLM is proxying an Anthropic
+ * model through its OpenAI-compatible endpoint) — normalized into this one
+ * shared shape regardless of which wire format they arrived in.
+ *
+ * `totalTokens` is populated only when it can be stated without guessing:
+ * either the provider handed back an explicit total (OpenAI's
+ * `total_tokens`), or both `inputTokens` and `outputTokens` are present and
+ * their sum is used. Cache tokens are deliberately never folded into this
+ * sum — cache accounting isn't uniform across providers/response shapes (in
+ * some shapes a cache-read count is already included inside the reported
+ * input tokens, in others it's additional), so adding it in would risk a
+ * silently wrong total. Cache counts are always available separately via
+ * `cacheReadTokens`/`cacheWriteTokens` for a caller that wants to reason
+ * about them explicitly.
+ */
+export interface ProviderUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  /** Always `"provider"` in this slice — see `UsageSource` doc. */
+  source: UsageSource;
+}
+
+/**
  * PRD §5 / DESIGN §8.5#4: `provider`/`model` must always be populated (not
  * optional, not empty-string) — this is what lets audit/logging answer
  * "who actually responded" instead of a prior internal implementation's M3 gap where `InvokeResult`
@@ -94,12 +145,27 @@ export type ToolExecChecked = "pass" | "fail" | "na";
  * verification capability, and I used it: there was nothing to check"),
  * so a cli-bridge adapter must never leave this field `undefined` the way
  * a direct-api adapter does (A3 PRD §4).
+ *
+ * `usage`/`latencyMs` are issue #48 fields, both optional and additive —
+ * every existing adapter/consumer that never sets or reads them keeps
+ * working unchanged (backward-compatible extension, not a breaking one).
+ * `usage` is `undefined` whenever a provider's response has no usage block
+ * at all, or the block is present but malformed in a way that yields zero
+ * readable counters (fail-safe: never thrown, never a fabricated all-zero
+ * `ProviderUsage`) — same "leave it honestly unknown" posture as
+ * `toolExecChecked`. `latencyMs` is the wall-clock duration of the
+ * underlying network round trip (not `invoke()`'s total time, which can
+ * include request-building work before and validation after it) — omitted
+ * only when an adapter has no round trip to measure at all (none exist
+ * yet; every current adapter's `invoke()` does one).
  */
 export interface InvokeResult {
   content: string;
   provider: string;
   model: string;
   toolExecChecked?: ToolExecChecked;
+  usage?: ProviderUsage;
+  latencyMs?: number;
 }
 
 export interface AvailabilityResult {
