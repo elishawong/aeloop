@@ -21,10 +21,10 @@
 
 方案文档：
 
-- [Aeloop / Personal 完整方案](./aeloop/docs/optional/conductor-personal/SOLUTION-DESIGN.zh-CN.md)
-- [Company Work 方案](./aeloop/docs/architecture/conductor-work/SOLUTION-DESIGN.zh-CN.md)
-- [四层与三目标设计](./AEOLOOP-LAYER-DESIGN.zh-CN.md)
-- [Token 优化设计](./TOKEN-OPTIMIZATION-PLAN.zh-CN.md)
+- [Aeloop / Personal 完整方案](./optional/conductor-personal/SOLUTION-DESIGN.zh-CN.md)
+- [Company Work 方案](./architecture/conductor-work/SOLUTION-DESIGN.zh-CN.md)
+- [四层与三目标设计](./architecture/AEOLOOP-LAYER-DESIGN.zh-CN.md)
+- [Token 优化设计](./architecture/TOKEN-OPTIMIZATION-PLAN.zh-CN.md)
 
 ## 1. 当前基线与发布状态
 
