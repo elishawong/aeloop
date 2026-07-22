@@ -14,6 +14,15 @@ import type { LoopStateType } from "../types.js";
 export interface ReviewNodeDeps {
   router: ProviderRouter;
   composer: PromptComposer;
+  /**
+   * Optional (issue #45 follow-up): same field, same default-fallback
+   * contract as `DraftNodeDeps.schemaMaxAttempts` (`../nodes/coder.js`) —
+   * the tester's `TesterOutput` response goes through the exact same
+   * `SchemaValidator#validate()` retry mechanism as the coder's
+   * `CoderOutput`, so it needs the same configurable attempt count.
+   * Forwarded straight to `new SchemaValidator({ maxAttempts: ... })` below.
+   */
+  schemaMaxAttempts?: number;
 }
 
 /**
@@ -50,7 +59,7 @@ export function createReviewNode(deps: ReviewNodeDeps): (state: LoopStateType) =
 
     const prompt = deps.composer.compose("tester", state.injectedContext, task);
     const adapter = deps.router.route("tester");
-    const validator = new SchemaValidator();
+    const validator = new SchemaValidator({ maxAttempts: deps.schemaMaxAttempts });
 
     const { data, result } = await validator.validate({
       schema: TesterOutput,

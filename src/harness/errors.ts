@@ -98,20 +98,23 @@ export class InvalidProviderConfigError extends Error {
 }
 
 /**
- * `SchemaValidator.validate()` retried once (PRD §5/§8.5#3 — feeding the
- * prior validation failure back into the retry prompt) and still failed to
- * produce output matching the schema. Carries both attempts' raw `content`
- * plus both failure descriptions so a caller/log can diagnose what the
- * model actually returned, rather than validate() silently returning
- * `null`/`undefined`.
+ * `SchemaValidator.validate()` exhausted every attempt it was configured for
+ * (PRD §5/§8.5#3 — feeding the prior validation failure back into the retry
+ * prompt; issue #45 follow-up: the attempt count itself is now configurable
+ * via `harness.schema_max_attempts` instead of being hardcoded at 2, see
+ * `SchemaValidator`'s own header) and still failed to produce output
+ * matching the schema. Carries every attempt's raw `content` plus its
+ * failure description so a caller/log can diagnose what the model actually
+ * returned, rather than validate() silently returning `null`/`undefined`.
+ *
+ * `attempts` was previously typed as a fixed 2-tuple (back when the retry
+ * count was hardcoded at exactly 2) — now a variable-length, non-empty
+ * array so it can carry 1..N entries for any configured `maxAttempts`.
  */
 export class SchemaValidationError extends Error {
-  readonly attempts: readonly [
-    { content: string; error: string },
-    { content: string; error: string },
-  ];
+  readonly attempts: readonly { content: string; error: string }[];
 
-  constructor(attempts: [{ content: string; error: string }, { content: string; error: string }]) {
+  constructor(attempts: { content: string; error: string }[]) {
     super(
       `Schema validation failed after ${attempts.length} attempts. ` +
         `Last error: ${attempts[attempts.length - 1]?.error}`,

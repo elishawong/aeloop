@@ -17,6 +17,7 @@ import {
   assembleSubscriptionDeps,
   resolveContextBudgetManager,
   resolveRejectThreshold,
+  resolveSchemaMaxAttempts,
   type CliDeps,
 } from "../assemble.js";
 import { UnsupportedProfileError } from "../errors.js";
@@ -405,5 +406,75 @@ describe("resolveRejectThreshold", () => {
     } finally {
       store.close();
     }
+  });
+});
+
+describe("resolveSchemaMaxAttempts (issue #45 follow-up)", () => {
+  it("defaults to 2 when profileConfig.harness is entirely absent (backward compatibility)", () => {
+    const profileConfig: ProfileConfig = { profile: "subscription", providers: {}, roles: {} };
+    expect(resolveSchemaMaxAttempts(profileConfig)).toBe(2);
+  });
+
+  it("defaults to 2 when profileConfig.harness is present but schema_max_attempts is absent", () => {
+    const profileConfig: ProfileConfig = { profile: "subscription", providers: {}, roles: {}, harness: {} };
+    expect(resolveSchemaMaxAttempts(profileConfig)).toBe(2);
+  });
+
+  it("uses profileConfig.harness.schema_max_attempts when it's a valid positive integer", () => {
+    const profileConfig: ProfileConfig = {
+      profile: "subscription",
+      providers: {},
+      roles: {},
+      harness: { schema_max_attempts: 3 },
+    };
+    expect(resolveSchemaMaxAttempts(profileConfig)).toBe(3);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, "3", null, [], {}])(
+    "fails closed to 2 for a malformed schema_max_attempts value (%j) — never throws, never allows a larger/unbounded count",
+    (bad) => {
+      const profileConfig: ProfileConfig = {
+        profile: "subscription",
+        providers: {},
+        roles: {},
+        harness: { schema_max_attempts: bad as unknown as number },
+      };
+      expect(() => resolveSchemaMaxAttempts(profileConfig)).not.toThrow();
+      expect(resolveSchemaMaxAttempts(profileConfig)).toBe(2);
+    },
+  );
+});
+
+describe("assembleProfileDeps — harness.schema_max_attempts wiring end-to-end (issue #45 follow-up)", () => {
+  it("with no harness.schema_max_attempts in config.yaml, the assembled deps default to 2 (backward compatibility)", () => {
+    const profilesRoot = makeProfilesRoot("subscription"); // VALID_CONFIG_YAML has no `harness:` key at all
+    const deps = assembleSubscriptionDeps({ AI_AGENT_PROFILE: "subscription" }, profilesRoot);
+    openDeps = deps;
+
+    expect(deps.schemaMaxAttempts).toBe(2);
+  });
+
+  it("with a valid harness.schema_max_attempts in config.yaml, the assembled deps carry that value through", () => {
+    const configWithHarness = `${VALID_CONFIG_YAML}
+harness:
+  schema_max_attempts: 3
+`;
+    const profilesRoot = makeProfilesRoot("subscription", configWithHarness);
+    const deps = assembleSubscriptionDeps({ AI_AGENT_PROFILE: "subscription" }, profilesRoot);
+    openDeps = deps;
+
+    expect(deps.schemaMaxAttempts).toBe(3);
+  });
+
+  it("with a malformed harness.schema_max_attempts (e.g. 0) in config.yaml, assembly fails closed to 2 rather than throwing or assembly failing", () => {
+    const configWithBadHarness = `${VALID_CONFIG_YAML}
+harness:
+  schema_max_attempts: 0
+`;
+    const profilesRoot = makeProfilesRoot("subscription", configWithBadHarness);
+    const deps = assembleSubscriptionDeps({ AI_AGENT_PROFILE: "subscription" }, profilesRoot);
+    openDeps = deps;
+
+    expect(deps.schemaMaxAttempts).toBe(2);
   });
 });

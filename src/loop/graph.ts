@@ -37,6 +37,18 @@ import type { PromptComposer } from "../prompt/composer.js";
 export interface LoopGraphDeps {
   router: ProviderRouter;
   composer: PromptComposer;
+  /**
+   * Optional (issue #45 follow-up): total model attempts `SchemaValidator`
+   * allows the coder/tester adapters when validating a response against
+   * `CoderOutput`/`TesterOutput`. Threaded straight through to
+   * `createDraftNode`/`createReviewNode`, which default it to
+   * `DEFAULT_SCHEMA_MAX_ATTEMPTS` (2) when omitted — same "optional,
+   * backward-compatible" posture as `StartRunDeps.events` above it in
+   * `runner.ts`, and completely separate from `LoopStateType.rejectThreshold`
+   * (tester-rejection escalation count, not a schema-validation attempt
+   * count).
+   */
+  schemaMaxAttempts?: number;
 }
 
 /**

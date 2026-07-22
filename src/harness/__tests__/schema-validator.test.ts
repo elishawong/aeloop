@@ -99,10 +99,54 @@ describe("SchemaValidator — both attempts fail schema validation", () => {
     expect(thrown).toBeInstanceOf(SchemaValidationError);
     const error = thrown as SchemaValidationError;
     expect(error.attempts).toHaveLength(2);
-    expect(error.attempts[0].content).toContain("still-not-a-boolean");
-    expect(error.attempts[1].content).toContain("still-not-a-boolean");
-    expect(error.attempts[0].error.length).toBeGreaterThan(0);
-    expect(error.attempts[1].error.length).toBeGreaterThan(0);
+    expect(error.attempts[0]?.content).toContain("still-not-a-boolean");
+    expect(error.attempts[1]?.content).toContain("still-not-a-boolean");
+    expect(error.attempts[0]?.error.length).toBeGreaterThan(0);
+    expect(error.attempts[1]?.error.length).toBeGreaterThan(0);
+  });
+});
+
+describe("SchemaValidator — retry prompt full-output requirement (issue #45 regression)", () => {
+  it("retry prompt explicitly demands a single, complete JSON object with no prose/partial content", async () => {
+    const calls: InvokeRequest[] = [];
+    let call = 0;
+    const invoke = async (req: InvokeRequest): Promise<InvokeResult> => {
+      calls.push(req);
+      call += 1;
+      if (call === 1) {
+        return resultWith(JSON.stringify({ ok: "not-a-boolean" }));
+      }
+      return resultWith(JSON.stringify({ ok: true, note: "corrected" }));
+    };
+
+    const validator = new SchemaValidator();
+    await validator.validate({ schema: TestSchema, request: baseRequest, invoke });
+
+    const retryPrompt = calls[1]?.prompt ?? "";
+    expect(retryPrompt).toContain("single, complete JSON object");
+    expect(retryPrompt).toContain("no prose wrapper");
+    expect(retryPrompt).toContain("no partial or truncated fields");
+  });
+
+  it("still fail-closed throws SchemaValidationError when the model repeats a prose-only, non-JSON response on both attempts (does not weaken validation)", async () => {
+    const invoke = async (): Promise<InvokeResult> =>
+      resultWith("Sure, here is a description of the fix I made, in prose, without any JSON.");
+
+    const validator = new SchemaValidator();
+
+    await expect(
+      validator.validate({ schema: TestSchema, request: baseRequest, invoke }),
+    ).rejects.toBeInstanceOf(SchemaValidationError);
+  });
+
+  it("still fail-closed throws SchemaValidationError when the model repeats a truncated/partial JSON snippet on both attempts", async () => {
+    const invoke = async (): Promise<InvokeResult> => resultWith('{"ok": true, "note": "partial fix, see rest below...');
+
+    const validator = new SchemaValidator();
+
+    await expect(
+      validator.validate({ schema: TestSchema, request: baseRequest, invoke }),
+    ).rejects.toBeInstanceOf(SchemaValidationError);
   });
 });
 
@@ -127,5 +171,109 @@ describe("SchemaValidator — first response body is not valid JSON (not a schem
     expect(calls).toHaveLength(2);
     expect(calls[1]?.prompt).not.toBe(calls[0]?.prompt);
     expect(calls[1]?.prompt).toContain("valid JSON");
+  });
+});
+
+describe("SchemaValidator — configurable maxAttempts (issue #45 follow-up)", () => {
+  it("default construction (no maxAttempts passed) still behaves as exactly 2 total attempts, same as before this option existed", async () => {
+    const calls: InvokeRequest[] = [];
+    let call = 0;
+    const invoke = async (req: InvokeRequest): Promise<InvokeResult> => {
+      calls.push(req);
+      call += 1;
+      if (call < 2) {
+        return resultWith(JSON.stringify({ ok: "not-a-boolean" }));
+      }
+      return resultWith(JSON.stringify({ ok: true, note: "recovered on attempt 2" }));
+    };
+
+    const validator = new SchemaValidator();
+    const outcome = await validator.validate({ schema: TestSchema, request: baseRequest, invoke });
+
+    expect(outcome.attempts).toBe(2);
+    expect(calls).toHaveLength(2);
+
+    // And a validator that never succeeds still stops at exactly 2 attempts.
+    let neverSucceedsCallCount = 0;
+    const alwaysFailing = new SchemaValidator();
+    await expect(
+      alwaysFailing.validate({
+        schema: TestSchema,
+        request: baseRequest,
+        invoke: async () => {
+          neverSucceedsCallCount += 1;
+          return resultWith(JSON.stringify({ ok: "still-not-a-boolean" }));
+        },
+      }),
+    ).rejects.toBeInstanceOf(SchemaValidationError);
+    expect(neverSucceedsCallCount).toBe(2);
+  });
+
+  it("maxAttempts: 3 succeeds on the third attempt, having called invoke exactly 3 times with a growing retry prompt", async () => {
+    const calls: InvokeRequest[] = [];
+    let call = 0;
+    const invoke = async (req: InvokeRequest): Promise<InvokeResult> => {
+      calls.push(req);
+      call += 1;
+      if (call < 3) {
+        return resultWith(JSON.stringify({ ok: "not-a-boolean", attempt: call }));
+      }
+      return resultWith(JSON.stringify({ ok: true, note: "recovered on attempt 3" }));
+    };
+
+    const validator = new SchemaValidator({ maxAttempts: 3 });
+    const outcome = await validator.validate({ schema: TestSchema, request: baseRequest, invoke });
+
+    expect(outcome.attempts).toBe(3);
+    expect(outcome.data).toEqual({ ok: true, note: "recovered on attempt 3" });
+    expect(calls).toHaveLength(3);
+    // Each retry prompt is strictly longer than the last, carrying forward
+    // every prior failure description (not just the original prompt +
+    // most-recent failure).
+    expect(calls[1]?.prompt).not.toBe(calls[0]?.prompt);
+    expect(calls[2]?.prompt).not.toBe(calls[1]?.prompt);
+    expect(calls[2]?.prompt.length).toBeGreaterThan(calls[1]?.prompt.length ?? 0);
+  });
+
+  it("maxAttempts: 3, all 3 attempts fail — throws SchemaValidationError carrying all 3 attempts' content/error, still fail-closed (issue #45)", async () => {
+    let call = 0;
+    const invoke = async (): Promise<InvokeResult> => {
+      call += 1;
+      return resultWith(JSON.stringify({ ok: "not-a-boolean", attempt: call }));
+    };
+
+    const validator = new SchemaValidator({ maxAttempts: 3 });
+
+    let thrown: unknown;
+    try {
+      await validator.validate({ schema: TestSchema, request: baseRequest, invoke });
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(SchemaValidationError);
+    const error = thrown as SchemaValidationError;
+    expect(error.attempts).toHaveLength(3);
+    expect(call).toBe(3);
+    for (const attempt of error.attempts) {
+      expect(attempt.content).toContain("not-a-boolean");
+      expect(attempt.error.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("malformed maxAttempts (0, negative, non-integer) fails closed to the default of 2, never throws and never allows more attempts", async () => {
+    for (const bad of [0, -1, 1.5, Number.NaN]) {
+      let call = 0;
+      const invoke = async (): Promise<InvokeResult> => {
+        call += 1;
+        return resultWith(JSON.stringify({ ok: "not-a-boolean" }));
+      };
+
+      const validator = new SchemaValidator({ maxAttempts: bad });
+      await expect(
+        validator.validate({ schema: TestSchema, request: baseRequest, invoke }),
+      ).rejects.toBeInstanceOf(SchemaValidationError);
+      expect(call).toBe(2);
+    }
   });
 });

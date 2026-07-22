@@ -418,9 +418,17 @@ providers:
 roles:
   coder:  { provider: claude-cli }
   tester: { provider: codex-cli }    # must be a different model than coder's (independent perspective)
+harness:
+  schema_max_attempts: 2               # default 2; positive integer
 workflow:
   reject_threshold: 2
 ```
+
+**Profile boundary — `harness.schema_max_attempts` vs `workflow.reject_threshold`** (issue #45): these are two independent knobs, not aliases of each other.
+- `harness.schema_max_attempts` (default `2`, must be a positive integer): the **total number of model attempts allowed per schema validation** inside `SchemaValidator` — i.e. how many times the harness retries a single structured-output call when the model's response fails to parse/validate against the expected schema, before giving up on that call.
+- `workflow.reject_threshold` (default `2`): a **tester rejection escalation** counter at the G1/G2/G3 loop level — how many times the tester can reject the coder's work (tracked as `reject_count` against the run's snapshotted `reject_threshold`, see §schema `WORKFLOW_RUN`) before the run forces escalation.
+
+They live in different layers (harness/adapter call retries vs. the LangGraph review loop) and must not be conflated when tuning either profile.
 
 ---
 

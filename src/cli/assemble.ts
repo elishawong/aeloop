@@ -64,6 +64,7 @@ import { ContextInjector } from "../context/injector.js";
 import { PromptComposer } from "../prompt/composer.js";
 import { buildAdapterRegistry } from "../harness/config.js";
 import { ProviderRouter } from "../harness/provider-router.js";
+import { DEFAULT_SCHEMA_MAX_ATTEMPTS } from "../harness/schema-validator.js";
 import { createSqliteCheckpointer } from "../loop/checkpoint.js";
 import { AuditStore } from "../loop/audit-store.js";
 import type { StartRunDeps } from "../loop/runner.js";
@@ -149,7 +150,22 @@ export function assembleProfileDeps(
     checkpointer = createSqliteCheckpointer(workflowDbPath);
     const audit = new AuditStore(workflowDbPath);
 
-    return { router, composer, audit, checkpointer, profileConfig: config, injector, memoryStore, profileDir };
+    // Issue #45 follow-up: resolved once here, fail-closed, and threaded
+    // through `StartRunDeps`/`LoopGraphDeps` into `createDraftNode`/
+    // `createReviewNode` — see `resolveSchemaMaxAttempts()` below.
+    const schemaMaxAttempts = resolveSchemaMaxAttempts(config);
+
+    return {
+      router,
+      composer,
+      audit,
+      checkpointer,
+      profileConfig: config,
+      injector,
+      memoryStore,
+      profileDir,
+      schemaMaxAttempts,
+    };
   } catch (err) {
     checkpointer?.db.close();
     memoryStore.close();
@@ -199,4 +215,33 @@ export function resolveRejectThreshold(profileConfig: ProfileConfig, systemConfi
   if (fromSystemConfig !== null) return fromSystemConfig;
 
   return 2;
+}
+
+/**
+ * Resolves `profileConfig.harness?.schema_max_attempts` fail-closed to
+ * `DEFAULT_SCHEMA_MAX_ATTEMPTS` (2, matching `SchemaValidator`'s own
+ * pre-existing hardcoded default) whenever the configured value is anything
+ * other than a positive integer — not just absent, but also a non-number, a
+ * non-integer (e.g. `2.5`), zero, or negative. "Fail-closed" here means: a
+ * malformed value never throws (a typo in `config.yaml` shouldn't crash CLI
+ * startup) and never silently falls back to something larger/unbounded
+ * (which would let a broken config quietly multiply model spend/retries) —
+ * it always falls back to the same safe default a missing field would.
+ *
+ * **Deliberately independent of `resolveRejectThreshold()` above** — issue
+ * #45 follow-up's explicit ask: `workflow.reject_threshold` (three-tier
+ * chain: profile -> `SystemConfig` default -> hardcoded 2) governs how many
+ * tester *rejections* trigger escalation to a human; `harness.
+ * schema_max_attempts` governs how many total model *attempts*
+ * `SchemaValidator` allows when validating a single coder/tester response
+ * against its output schema. Neither reads the other's config key, and
+ * `schema_max_attempts` has no `SystemConfig`-backed middle tier — only
+ * "profile value if valid" -> "hardcoded default".
+ */
+export function resolveSchemaMaxAttempts(profileConfig: ProfileConfig): number {
+  const fromProfile = profileConfig.harness?.schema_max_attempts;
+  if (typeof fromProfile === "number" && Number.isInteger(fromProfile) && fromProfile >= 1) {
+    return fromProfile;
+  }
+  return DEFAULT_SCHEMA_MAX_ATTEMPTS;
 }
