@@ -1,0 +1,51 @@
+# Conductor Work / Aeloop 诚实能力地图
+
+> 用途:pitch 的**诚实底牌**——被领导尖锐提问时,照这张表答,不过度声称。分级沿用 pitch 页图例:
+> `● 已证明`(有 merged PR + 测试/真跑)· `◐ 部分`(建了但仅设计/adapter/fixture,未端到端真跑)· `○ 规划`(未建)· `⚠️ 已知限制`。
+>
+> 基准:origin/main `fed3214`,57 files / 594 tests 全绿(Node 24)。来源逐条可追 merged PR / open issue,非自述。
+
+## ● 已证明(可当面演示 / 有测试铁证)
+
+| 能力 | 证据 |
+|---|---|
+| 四层引擎 A0–A5(Prompt⊂Context⊂Harness⊂Loop + profile overlay) | PR #3/#5/#7/#12/#15/#20/#33 已合并 |
+| coder/tester 闭环 + G1/G2/G3 + 升级门 + 跨进程 resume | PR #15/#20;`no_change` 终态 PR #49 |
+| CLI/TUI 真人入口(start/resume/list + 交互门审) | PR #33,全套 594 测试绿 |
+| 事件体系(LoopEvent 可观测性) | PR #29(issue-29-events) |
+| EvidenceBundle + Token 账本 | PR #57(provider usage → 事件 → EvidenceBundle) |
+| fail-closed 安全策略 + TaskContract 校验/注入 | PR #34/#56 |
+| 无凭证公司 demo(`pnpm run demo:company`) | 确定性校验 + 选中 workflow,不调模型/不碰仓库/不带凭证 |
+| 公司 `conductor-work run`(candidate-only,pending gate,不自动 approve) | PR #52,禁 commit/push/PR/merge |
+
+## ◐ 部分(建了 / 有单测,但未端到端真跑)
+
+| 能力 | 缺口 | 关联 |
+|---|---|---|
+| **公司 LiteLLM / apikey 路径** | adapter + 路由已建、单测覆盖,**但从未对真实模型跑过一次** | ⇒ A6(见 runbook) |
+| 多模型独立复核 | 机制真、fixture/单测过,真·双不同模型端到端未跑 | ⇒ A6 |
+| Prompt cache / delta | 仅设计契约(PromptSnapshot/PromptDelta) | PR #41,运行时未启用;issue #36 |
+| Context 预算/压缩 | 预算接入 + omission 投影已落,delta/cache 待做 | PR #38/#39 |
+| 可视化 UI demo | 真 `EvidenceEventProjector` 投影,但**输入是 fixture,非 live stream** | 已标 DEMO DATA |
+| gate-controller(点 approve→真 resume 的桥) | 代码在(resume-only,start/stop fail-closed),未提交、未接 CLI/UI | worktree company-gate-controller |
+
+## ○ 规划(未建,不得声称已做)
+
+- **A6 双 profile 真实验收** —— 核心铁证,待指挥官在公司电脑跑(runbook 已备)。
+- research / prd-authoring / design-compliance / release-readiness workflow —— 仅路线图名字,零实现。
+- 声明式 YAML/JSON DSL。
+- usage_records 落库 / 跨进程持久化(issue #59)、逐 attempt token + retry-waste 核算(issue #58)。
+- 协议版本兼容运行时校验(issue #37,仅文档层)。
+- live UI 事件流、外部 GateCommand 通道(gate-controller 是其半成品)。
+
+## ⚠️ 已知限制(被问安全/正确性时,主动诚实答)
+
+| 限制 | 说明 | issue |
+|---|---|---|
+| coder 在人类批准前理论可写盘 | `bypassPermissions` + `Bash` 非只读;Harness 层未做真沙箱 | #31 |
+| 同 run 并发 resume 无锁 | 并发/重复 resume 可能记相反决策 | #19 |
+| A4b 未经独立复审 | 治理债,待补审或指挥官明确接受 | #32 |
+
+---
+
+**一句话对外定性:** 引擎骨架(四层 + 闭环 + 门 + 证据 + fail-closed)**已真跑通、有测试**;公司 LiteLLM 侧**架构就绪、真实验收在即(A6)**;更多 workflow 是**路线图**。—— 说到这个程度,任何提问都戳不穿。
