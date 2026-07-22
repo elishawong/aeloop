@@ -1,0 +1,2503 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Verity — AI 开发搭档操作系统</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=DotGothic16&display=swap");
+
+      /* ── Custom Scrollbar ── */
+      ::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #050510;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #00f5ff;
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #a855f7;
+      }
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: #00f5ff #050510;
+      }
+
+      /* ── Variables ── */
+      :root {
+        --bg: #050510;
+        --bg2: #080820;
+        --bg3: #0d0d2a;
+        --cyan: #00f5ff;
+        --purple: #a855f7;
+        --green: #00ff88;
+        --orange: #ff8c42;
+        --red: #ff4466;
+        --text: #c8d8e8;
+        --text-dim: #6a7a9a;
+        --border: rgba(0, 245, 255, 0.12);
+        --glass: rgba(13, 13, 42, 0.7);
+        --mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+        --sans: "Sora", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+        --pixel: "DotGothic16", var(--mono);
+      }
+
+      /* ── Reset ── */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        font-size: 17px;
+        line-height: 1.75;
+        overflow-x: hidden;
+      }
+
+      /* ── Noise overlay ── */
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+        pointer-events: none;
+        z-index: 0;
+        opacity: 0.4;
+      }
+
+      /* ── Nav ── */
+      nav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 100;
+        background: rgba(5, 5, 16, 0.85);
+        backdrop-filter: blur(20px);
+        border-bottom: 1px solid var(--border);
+        padding: 0 48px;
+        height: 60px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      nav .nav-logo {
+        font-family: var(--mono);
+        font-size: 15px;
+        color: var(--cyan);
+        letter-spacing: 0.15em;
+        margin-right: 24px;
+        white-space: nowrap;
+      }
+      nav a {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--text-dim);
+        text-decoration: none;
+        padding: 5px 13px;
+        border-radius: 4px;
+        letter-spacing: 0.05em;
+        transition: all 0.2s;
+        white-space: nowrap;
+      }
+      nav a:hover {
+        color: var(--cyan);
+      }
+      nav a.active {
+        color: var(--cyan);
+        background: rgba(0, 245, 255, 0.08);
+      }
+
+      /* ── Sections ── */
+      section {
+        position: relative;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 130px 56px 96px;
+      }
+      section.full-width {
+        max-width: none;
+      }
+
+      /* ── Fade-in on scroll ── */
+      .reveal {
+        opacity: 0;
+        transform: translateY(28px);
+        transition:
+          opacity 0.7s ease,
+          transform 0.7s ease;
+      }
+      .reveal.visible {
+        opacity: 1;
+        transform: none;
+      }
+
+      /* ── Hero ── */
+      #hero {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding-top: 100px;
+      }
+      .hero-eyebrow {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--cyan);
+        letter-spacing: 0.25em;
+        text-transform: uppercase;
+        margin-bottom: 24px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .hero-eyebrow::before {
+        content: "";
+        display: inline-block;
+        width: 32px;
+        height: 1px;
+        background: var(--cyan);
+      }
+      .hero-title {
+        font-family: var(--mono);
+        font-size: clamp(72px, 14vw, 140px);
+        font-weight: 700;
+        color: #fff;
+        letter-spacing: -0.02em;
+        line-height: 0.9;
+        position: relative;
+        display: inline-block;
+      }
+      .hero-title .glow {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(135deg, var(--cyan), var(--purple));
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        filter: blur(0px);
+      }
+      .hero-subtitle {
+        font-size: 21px;
+        color: var(--text-dim);
+        margin-top: 28px;
+        max-width: 680px;
+        line-height: 1.6;
+      }
+      .hero-subtitle span {
+        color: var(--cyan);
+      }
+      .version-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--text-dim);
+        border: 1px solid var(--border);
+        padding: 4px 12px;
+        border-radius: 20px;
+        margin-top: 32px;
+      }
+      .version-badge::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        background: var(--green);
+        border-radius: 50%;
+        box-shadow: 0 0 8px var(--green);
+        animation: pulse 2s infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+      .pain-cards {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        margin-top: 56px;
+        max-width: 1160px;
+      }
+      .pain-card {
+        background: var(--glass);
+        border: 1px solid rgba(255, 68, 102, 0.2);
+        border-radius: 12px;
+        padding: 24px;
+        backdrop-filter: blur(12px);
+        position: relative;
+        overflow: hidden;
+      }
+      .pain-card::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          var(--red),
+          transparent
+        );
+      }
+      .pain-card-label {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--red);
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      .pain-card h3 {
+        font-size: 18px;
+        font-weight: 600;
+        color: #fff;
+        margin-bottom: 10px;
+      }
+      .pain-card p {
+        font-size: 15px;
+        color: var(--text-dim);
+        line-height: 1.65;
+      }
+      .solve-bar {
+        margin-top: 20px;
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+      .solve-tag {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--cyan);
+      }
+      .solve-tag::before {
+        content: "✓";
+        width: 20px;
+        height: 20px;
+        background: rgba(0, 245, 255, 0.12);
+        border: 1px solid rgba(0, 245, 255, 0.3);
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+      }
+
+      /* ── Section Headers ── */
+      .section-label {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--purple);
+        letter-spacing: 0.25em;
+        text-transform: uppercase;
+        margin-bottom: 14px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .section-label::before {
+        content: "";
+        display: inline-block;
+        width: 24px;
+        height: 1px;
+        background: var(--purple);
+      }
+      .section-title {
+        font-size: clamp(28px, 4vw, 42px);
+        font-weight: 700;
+        color: #fff;
+        margin-bottom: 48px;
+        line-height: 1.2;
+      }
+      .section-title em {
+        font-style: normal;
+        color: var(--cyan);
+      }
+
+      /* ── Is / Is Not ── */
+      .is-not-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+      }
+      .is-col,
+      .isnot-col {
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .col-header {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        padding: 14px 24px;
+        font-weight: 700;
+      }
+      .is-col .col-header {
+        background: rgba(0, 255, 136, 0.08);
+        color: var(--green);
+        border: 1px solid rgba(0, 255, 136, 0.2);
+        border-bottom: none;
+      }
+      .isnot-col .col-header {
+        background: rgba(255, 68, 102, 0.08);
+        color: var(--red);
+        border: 1px solid rgba(255, 68, 102, 0.2);
+        border-bottom: none;
+      }
+      .is-col .col-items {
+        border: 1px solid rgba(0, 255, 136, 0.2);
+        border-top: none;
+        border-radius: 0 0 12px 12px;
+      }
+      .isnot-col .col-items {
+        border: 1px solid rgba(255, 68, 102, 0.2);
+        border-top: none;
+        border-radius: 0 0 12px 12px;
+      }
+      .col-item {
+        padding: 16px 28px;
+        font-size: 16px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+      }
+      .col-item:last-child {
+        border-bottom: none;
+      }
+      .is-col .col-item::before {
+        content: "→";
+        color: var(--green);
+        font-family: var(--mono);
+        flex-shrink: 0;
+        margin-top: 1px;
+      }
+      .isnot-col .col-item {
+        color: var(--text-dim);
+        text-decoration: line-through;
+        text-decoration-color: rgba(255, 68, 102, 0.4);
+      }
+      .isnot-col .col-item::before {
+        content: "✕";
+        color: var(--red);
+        font-family: var(--mono);
+        flex-shrink: 0;
+        text-decoration: none;
+        margin-top: 1px;
+      }
+
+      /* ── Orchestration: current vs vision (row-paired: 右N 解决 左N) ── */
+      .orch-columns {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        column-gap: 28px;
+        row-gap: 16px;
+        align-items: stretch;
+      }
+      .orch-col-header {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        padding: 14px 20px;
+        font-weight: 700;
+        border-radius: 12px;
+      }
+      .orch-current-header {
+        background: rgba(255, 68, 102, 0.08);
+        color: var(--red);
+        border: 1px solid rgba(255, 68, 102, 0.2);
+      }
+      .orch-future-header {
+        background: rgba(0, 245, 255, 0.08);
+        color: var(--cyan);
+        border: 1px solid rgba(0, 245, 255, 0.2);
+      }
+      .orch-current-item {
+        background: var(--glass);
+        border: 1px solid rgba(255, 68, 102, 0.2);
+        border-radius: 10px;
+        padding: 18px 20px;
+        font-size: 14px;
+        color: var(--text-dim);
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+      }
+      .orch-current-item::before {
+        content: "✕";
+        color: var(--red);
+        font-family: var(--mono);
+        flex-shrink: 0;
+        margin-top: 1px;
+      }
+      .vision-card {
+        background: var(--glass);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 18px 20px;
+      }
+      .vision-card-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+      .vision-card-icon {
+        font-size: 20px;
+      }
+      .vision-card-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: #fff;
+      }
+      .vision-card p {
+        font-size: 13px;
+        color: var(--text-dim);
+        line-height: 1.6;
+        margin-bottom: 8px;
+      }
+
+      /* ── Hero background decoration: concurrency chat demo ── */
+      .chat-demo {
+        position: absolute;
+        top: 130px;
+        right: 40px;
+        width: 32vw;
+        opacity: 0.5;
+        pointer-events: none;
+        z-index: 0;
+        font-family: var(--pixel);
+      }
+      .chat-window {
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        gap: 10px;
+        padding: 16px;
+        height: 300px;
+        overflow: hidden;
+        mask-image: linear-gradient(to bottom, transparent, black 18%);
+      }
+      .chat-bubble {
+        max-width: 88%;
+        padding: 8px 12px;
+        border-radius: 10px;
+        font-family: var(--pixel);
+        font-size: 15px;
+        line-height: 1.55;
+        opacity: 0;
+        transform: translateY(6px);
+        transition:
+          opacity 0.3s,
+          transform 0.3s;
+        flex-shrink: 0;
+      }
+      .chat-bubble.show {
+        opacity: 1;
+        transform: none;
+      }
+      .chat-bubble.user {
+        align-self: flex-end;
+        background: rgba(0, 245, 255, 0.08);
+        /* border: 1px solid rgba(0, 245, 255, 0.2); */
+        color: var(--text);
+        border-bottom-right-radius: 4px;
+      }
+      .chat-bubble.agent {
+        align-self: flex-start;
+        background: rgba(168, 85, 247, 0.06);
+        /* border: 1px solid rgba(168, 85, 247, 0.2); */
+        color: var(--text);
+        border-bottom-left-radius: 4px;
+      }
+      .chat-sender {
+        display: block;
+        font-family: var(--pixel);
+        font-size: 9px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        opacity: 0.55;
+        margin-bottom: 3px;
+      }
+      .chat-cursor {
+        display: inline-block;
+        width: 2px;
+        height: 11px;
+        background: var(--cyan);
+        margin-left: 2px;
+        vertical-align: -1px;
+        animation: chatBlink 0.8s steps(1) infinite;
+      }
+      @keyframes chatBlink {
+        50% {
+          opacity: 0;
+        }
+      }
+      @media (max-width: 900px) {
+        .chat-demo {
+          display: none;
+        }
+      }
+
+      /* ── Team Cards ── */
+      .agent-card {
+        border-radius: 14px;
+        padding: 14px 20px;
+        background: var(--glass);
+        backdrop-filter: blur(12px);
+        position: relative;
+        overflow: hidden;
+        transition:
+          transform 0.3s,
+          box-shadow 0.3s;
+        cursor: default;
+      }
+      .agent-card:hover {
+        transform: translateY(-4px);
+      }
+      .agent-card::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+      }
+      .agent-vera::before {
+        background: linear-gradient(90deg, var(--cyan), rgba(0, 245, 255, 0));
+      }
+      .agent-coda::before {
+        background: linear-gradient(
+          90deg,
+          var(--purple),
+          rgba(168, 85, 247, 0)
+        );
+      }
+      .agent-radar::before {
+        background: linear-gradient(90deg, var(--green), rgba(0, 255, 136, 0));
+      }
+      .agent-vera {
+        border: 1px solid rgba(0, 245, 255, 0.15);
+      }
+      .agent-coda {
+        border: 1px solid rgba(168, 85, 247, 0.15);
+      }
+      .agent-radar {
+        border: 1px solid rgba(0, 255, 136, 0.15);
+      }
+      .agent-vera:hover {
+        box-shadow: 0 12px 40px rgba(0, 245, 255, 0.08);
+      }
+      .agent-coda:hover {
+        box-shadow: 0 12px 40px rgba(168, 85, 247, 0.08);
+      }
+      .agent-radar:hover {
+        box-shadow: 0 12px 40px rgba(0, 255, 136, 0.08);
+      }
+      .agent-icon {
+        font-size: 22px;
+        margin-bottom: 8px;
+        display: block;
+      }
+      .agent-name {
+        font-size: 18px;
+        font-weight: 700;
+        color: #fff;
+        margin-bottom: 2px;
+      }
+      .agent-vera .agent-name {
+        color: var(--cyan);
+      }
+      .agent-coda .agent-name {
+        color: var(--purple);
+      }
+      .agent-radar .agent-name {
+        color: var(--green);
+      }
+      .agent-role {
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .agent-features {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .agent-features li {
+        font-size: 12px;
+        line-height: 1.3;
+        color: var(--text-dim);
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+      }
+      .agent-features li::before {
+        content: "·";
+        font-family: var(--mono);
+        flex-shrink: 0;
+      }
+      .agent-vera .agent-features li::before {
+        color: var(--cyan);
+      }
+      .agent-coda .agent-features li::before {
+        color: var(--purple);
+      }
+      .agent-radar .agent-features li::before {
+        color: var(--green);
+      }
+
+      /* ── Team Org Chart ── */
+      .org-chart {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .org-node-dev {
+        text-align: center;
+        padding: 8px 22px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--glass);
+      }
+      .org-node-dev .org-name {
+        font-size: 14px;
+        font-weight: 700;
+        color: #fff;
+      }
+      .org-node-dev .org-role {
+        font-family: var(--mono);
+        font-size: 9px;
+        color: var(--text-dim);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        margin-top: 2px;
+      }
+      .org-connector {
+        width: 1px;
+        height: 18px;
+        background: linear-gradient(to bottom, var(--border), var(--cyan));
+      }
+      .org-verity-wrap {
+        width: 100%;
+        max-width: 300px;
+      }
+      .org-branch {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 100%;
+      }
+      .org-branch-h {
+        width: 46%;
+        max-width: 460px;
+        height: 1px;
+        background: var(--border);
+      }
+      .org-branch-row {
+        display: flex;
+        gap: 24px;
+        width: 100%;
+        max-width: 700px;
+        justify-content: center;
+      }
+      .org-branch-item {
+        flex: 1;
+        max-width: 320px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .org-branch-stub {
+        width: 1px;
+        height: 14px;
+        background: var(--border);
+      }
+      @media (max-width: 768px) {
+        .org-branch-row {
+          flex-direction: column;
+          align-items: center;
+          max-width: 380px;
+        }
+      }
+      #team {
+        padding-top: 96px;
+        padding-bottom: 56px;
+      }
+      #team .section-title {
+        margin-bottom: 24px;
+      }
+
+      /* ── Directions ── */
+      .phase-tabs {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 28px;
+      }
+      .phase-tab {
+        font-family: var(--mono);
+        font-size: 13px;
+        padding: 10px 24px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--text-dim);
+        cursor: pointer;
+        transition: all 0.2s;
+        letter-spacing: 0.05em;
+      }
+      .phase-tab.active-tab {
+        background: rgba(0, 245, 255, 0.08);
+        border-color: rgba(0, 245, 255, 0.4);
+        color: var(--cyan);
+      }
+      .phase-panel {
+        display: none;
+      }
+      .phase-panel.active {
+        display: block;
+      }
+      .direction-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .direction-item {
+        background: var(--glass);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+        transition: border-color 0.2s;
+      }
+      .direction-item:hover {
+        border-color: rgba(0, 245, 255, 0.25);
+      }
+      .direction-header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 20px 24px;
+        cursor: pointer;
+        user-select: none;
+        transition: background 0.2s;
+      }
+      .direction-header:hover {
+        background: rgba(0, 245, 255, 0.03);
+      }
+      .direction-num {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--text-dim);
+        width: 28px;
+        flex-shrink: 0;
+      }
+      .direction-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #fff;
+        flex: 1;
+      }
+      .direction-desc {
+        font-size: 14px;
+        color: var(--text-dim);
+        flex: 2;
+        display: none;
+      }
+      @media (min-width: 700px) {
+        .direction-desc {
+          display: block;
+        }
+      }
+      .direction-badge {
+        font-family: var(--mono);
+        font-size: 9px;
+        padding: 3px 8px;
+        border-radius: 4px;
+        flex-shrink: 0;
+        letter-spacing: 0.1em;
+      }
+      .badge-p1 {
+        background: rgba(0, 245, 255, 0.1);
+        color: var(--cyan);
+        border: 1px solid rgba(0, 245, 255, 0.25);
+      }
+      .badge-p2 {
+        background: rgba(168, 85, 247, 0.1);
+        color: var(--purple);
+        border: 1px solid rgba(168, 85, 247, 0.25);
+      }
+      .direction-chevron {
+        color: var(--text-dim);
+        font-size: 12px;
+        transition: transform 0.3s;
+        flex-shrink: 0;
+        font-family: var(--mono);
+      }
+      .direction-item.open .direction-chevron {
+        transform: rotate(180deg);
+      }
+      .direction-body {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      .direction-body-inner {
+        padding: 18px 24px 24px 68px;
+        font-size: 15px;
+        color: var(--text-dim);
+        line-height: 1.75;
+        border-top: 1px solid var(--border);
+      }
+      .direction-body-inner strong {
+        color: var(--text);
+      }
+      .detail-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 10px;
+      }
+      .chip {
+        font-family: var(--mono);
+        font-size: 10px;
+        padding: 3px 9px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: var(--text-dim);
+      }
+
+      /* ── Scale section ── */
+      .scale-flow {
+        display: flex;
+        align-items: center;
+        gap: 0;
+        margin-bottom: 48px;
+        flex-wrap: wrap;
+      }
+      .scale-node {
+        flex: 1;
+        min-width: 160px;
+        text-align: center;
+        padding: 24px 16px;
+        border-radius: 12px;
+        background: var(--glass);
+        border: 1px solid var(--border);
+        position: relative;
+      }
+      .scale-node-icon {
+        font-size: 28px;
+        margin-bottom: 8px;
+      }
+      .scale-node-label {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--text-dim);
+        letter-spacing: 0.1em;
+      }
+      .scale-node-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: #fff;
+        margin-top: 4px;
+      }
+      .scale-arrow {
+        font-family: var(--mono);
+        color: var(--cyan);
+        font-size: 18px;
+        padding: 0 12px;
+        flex-shrink: 0;
+      }
+      .scale-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 16px;
+      }
+      .scale-card {
+        background: var(--glass);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 26px;
+        transition:
+          border-color 0.2s,
+          transform 0.2s;
+      }
+      .scale-card:hover {
+        border-color: rgba(168, 85, 247, 0.35);
+        transform: translateY(-2px);
+      }
+      .scale-card-num {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--purple);
+        margin-bottom: 10px;
+        letter-spacing: 0.1em;
+      }
+      .scale-card-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #fff;
+        margin-bottom: 8px;
+      }
+      .scale-card p {
+        font-size: 14px;
+        color: var(--text-dim);
+        line-height: 1.65;
+      }
+      .scale-arrow-inline {
+        font-family: var(--mono);
+        color: var(--cyan);
+        font-size: 11px;
+        padding: 0 4px;
+      }
+
+      /* ── Roadmap ── */
+      .roadmap-phases {
+        display: flex;
+        flex-direction: column;
+        gap: 48px;
+      }
+      .roadmap-phase-title {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--cyan);
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .roadmap-phase-title::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: var(--border);
+      }
+      .roadmap-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .roadmap-table th {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--text-dim);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        text-align: left;
+        padding: 12px 20px;
+        border-bottom: 1px solid var(--border);
+      }
+      .roadmap-table td {
+        padding: 15px 20px;
+        font-size: 15px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        vertical-align: middle;
+      }
+      .roadmap-table tr:hover td {
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .roadmap-num {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--text-dim);
+        width: 60px;
+      }
+      .roadmap-name {
+        color: #fff;
+        font-weight: 500;
+      }
+      .roadmap-output {
+        color: var(--text-dim);
+        font-size: 12px;
+      }
+      .effort-badge {
+        font-family: var(--mono);
+        font-size: 10px;
+        padding: 3px 10px;
+        border-radius: 4px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+      .effort-m {
+        background: rgba(255, 140, 66, 0.1);
+        color: var(--orange);
+        border: 1px solid rgba(255, 140, 66, 0.3);
+      }
+      .effort-s {
+        background: rgba(0, 255, 136, 0.08);
+        color: var(--green);
+        border: 1px solid rgba(0, 255, 136, 0.25);
+      }
+
+      /* ── Footer ── */
+      footer {
+        text-align: center;
+        padding: 56px 40px;
+        border-top: 1px solid var(--border);
+        font-family: var(--mono);
+        font-size: 14px;
+        color: var(--text-dim);
+        letter-spacing: 0.1em;
+        position: relative;
+      }
+      footer span {
+        color: var(--cyan);
+      }
+
+      /* ── Glow divider ── */
+      .glow-divider {
+        width: 100%;
+        height: 1px;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          var(--cyan),
+          transparent
+        );
+        opacity: 0.2;
+        margin: 0;
+      }
+
+      /* ── Scan line animation on hero ── */
+      .scanline {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          rgba(0, 245, 255, 0.3),
+          transparent
+        );
+        animation: scan 6s linear infinite;
+        pointer-events: none;
+      }
+      @keyframes scan {
+        0% {
+          top: 0;
+          opacity: 0;
+        }
+        5% {
+          opacity: 1;
+        }
+        95% {
+          opacity: 1;
+        }
+        100% {
+          top: 100%;
+          opacity: 0;
+        }
+      }
+
+      /* ── Grid background on hero ── */
+      #hero::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(0, 245, 255, 0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(0, 245, 255, 0.03) 1px, transparent 1px);
+        background-size: 60px 60px;
+        mask-image: radial-gradient(
+          ellipse 80% 60% at 50% 0%,
+          black 30%,
+          transparent 100%
+        );
+        pointer-events: none;
+        z-index: 0;
+      }
+      #hero > * {
+        position: relative;
+        z-index: 1;
+      }
+      #hero > .chat-demo {
+        display: none;
+        position: absolute;
+        z-index: 0;
+      }
+
+      /* ── Responsive ── */
+      @media (max-width: 768px) {
+        nav {
+          padding: 0 16px;
+          gap: 2px;
+        }
+        nav a {
+          display: none;
+        }
+        nav a:nth-child(-n + 4) {
+          display: block;
+        }
+        section {
+          padding: 100px 20px 60px;
+        }
+        .pain-cards {
+          grid-template-columns: 1fr;
+        }
+        .is-not-grid {
+          grid-template-columns: 1fr;
+        }
+        .orch-columns {
+          grid-template-columns: 1fr;
+        }
+        .scale-flow {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .scale-arrow {
+          transform: rotate(90deg);
+          text-align: center;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Nav -->
+    <nav>
+      <div class="nav-logo">Verity AI</div>
+      <a href="#hero" data-section="hero">概览</a>
+      <a href="#identity" data-section="identity">定义</a>
+      <a href="#team" data-section="team">团队</a>
+      <a href="#orchestration" data-section="orchestration">编排愿景</a>
+      <a href="#architecture" data-section="architecture">架构现状</a>
+      <a href="#directions" data-section="directions">18 方向</a>
+      <a href="#scale" data-section="scale">规模化</a>
+      <a href="#roadmap" data-section="roadmap">路线图</a>
+    </nav>
+
+    <!-- ─── HERO ─── -->
+    <section id="hero">
+      <div class="scanline"></div>
+
+      <!-- 背景装饰：并发调度效果演示（模拟对话，非真实产出） -->
+      <div class="chat-demo" id="chat-demo">
+        <div class="chat-window" id="chat-window"></div>
+      </div>
+
+      <div class="reveal">
+        <div class="hero-eyebrow">AI 开发搭档操作系统</div>
+        <div style="position: relative; display: inline-block; z-index: 9999">
+          <h1 class="hero-title">Verity AI</h1>
+        </div>
+
+        <p class="hero-subtitle">
+          <span>有记忆</span
+          >、<span>有宪法</span>、<span>有自我修正能力</span>的 AI
+          开发搭档操作系统
+        </p>
+        <div class="version-badge">v1.2 · 2026-07-16 · Elisha Wong</div>
+      </div>
+
+      <div class="pain-cards reveal" style="transition-delay: 0.15s">
+        <div class="pain-card">
+          <div class="pain-card-label">问题 01 / 幻觉疲惫</div>
+          <h3>AI 自信地给出错误答案</h3>
+          <p>
+            不存在的路径、猜测的参数、脑补的接口。你发现了，改掉，下次它还犯。你比没用
+            AI 还累——花额外精力校验它的每一句话。
+          </p>
+        </div>
+        <div class="pain-card">
+          <div class="pain-card-label">问题 02 / 上下文疲惫</div>
+          <h3>每次对话 AI 什么都不记得</h3>
+          <p>
+            重新介绍项目背景、技术栈、上次做到哪。你不是在和搭档合作，你是在不停给一个失忆的临时工做入职培训。
+          </p>
+        </div>
+        <div class="pain-card">
+          <div class="pain-card-label">问题 03 / 工具割裂疲惫</div>
+          <h3>每个工具都聪明，但没人管它们怎么接起来</h3>
+          <p>
+            公司的 AI 操作现在分散在一堆独立 skill/tool
+            里——文档、设计稿转代码、测试用例生成，每个单独都好用。但一个项目做下来，「决定用哪个工具、把上一个工具的产出改成下一个能读的格式、跑完再手动拼结果」本身占用的时间越来越多。工具越多，这层拼接成本涨得越快，且没人管。
+          </p>
+        </div>
+      </div>
+
+      <div class="solve-bar reveal" style="transition-delay: 0.25s">
+        <span
+          style="
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--text-dim);
+          "
+          >Verity 同时解决：</span
+        >
+        <div class="solve-tag">零幻觉</div>
+        <div class="solve-tag" style="color: var(--purple)">有记忆</div>
+      </div>
+    </section>
+
+    <div class="glow-divider"></div>
+
+    <!-- ─── IDENTITY ─── -->
+    <section id="identity">
+      <div class="reveal">
+        <div class="section-label">定义</div>
+        <h2 class="section-title">Verity <em>是什么</em>，不是什么</h2>
+      </div>
+
+      <div class="is-not-grid reveal" style="transition-delay: 0.1s">
+        <div class="is-col">
+          <div class="col-header">Verity 是</div>
+          <div class="col-items">
+            <div class="col-item">一套运行在 AI 之上的协作操作系统</div>
+            <div class="col-item">一套强制执行规则的工程框架</div>
+            <div class="col-item">一个有版本化宪法的治理层</div>
+            <div class="col-item">一个会主动复盘和进化的搭档</div>
+          </div>
+        </div>
+        <div class="isnot-col">
+          <div class="col-header">Verity 不是</div>
+          <div class="col-items">
+            <div class="col-item">一个 AI 模型</div>
+            <div class="col-item">一个聊天机器人</div>
+            <div class="col-item">一个 prompt 集合</div>
+            <div class="col-item">一个静态工具</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="glow-divider"></div>
+
+    <!-- ─── TEAM ─── -->
+    <section id="team">
+      <div class="reveal">
+        <div class="section-label">团队架构</div>
+        <h2 class="section-title">一个 <em>调度员</em>，两个 <em>Agent</em></h2>
+      </div>
+
+      <div class="org-chart reveal" style="transition-delay: 0.1s">
+        <div class="org-node-dev">
+          <div class="org-name">开发者</div>
+          <div class="org-role">开发者</div>
+        </div>
+        <div class="org-connector"></div>
+
+        <div class="org-verity-wrap">
+          <div class="agent-card agent-vera">
+            <span class="agent-icon">◈</span>
+            <div class="agent-name">Verity</div>
+            <div class="agent-role">AI 调度员 · 全局视角</div>
+            <ul class="agent-features">
+              <li>状态管理 — 记录当前做到哪、有什么待决策</li>
+              <li>检索式记忆库 — FTS5 按需召回，不靠人脑式空间隐喻</li>
+              <li>宪法 — 行为边界、红线清单、进化规则</li>
+              <li>强制 Hook — 宪法的执行层，不靠自觉</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="org-connector"></div>
+        <div class="org-branch-h"></div>
+
+        <div class="org-branch-row">
+          <div class="org-branch-item">
+            <div class="org-branch-stub"></div>
+            <div class="agent-card agent-coda">
+              <span class="agent-icon">◇</span>
+              <div class="agent-name">Coder</div>
+              <div class="agent-role">执行官 · 代码实现</div>
+              <ul class="agent-features">
+                <li>写代码，严格按 PRD + Figma</li>
+                <li>每个步骤完成后输出结构化报告</li>
+                <li>不加功能，不减功能，有疑问先报告</li>
+                <li>完成后上报变更给 Verity</li>
+              </ul>
+            </div>
+          </div>
+          <div class="org-branch-item">
+            <div class="org-branch-stub"></div>
+            <div class="agent-card agent-radar">
+              <span class="agent-icon">◉</span>
+              <div class="agent-name">Tester</div>
+              <div class="agent-role">审核官 · 代码 Review</div>
+              <ul class="agent-features">
+                <li>接收 diff + map 上下文由 Verity 打包</li>
+                <li>输出 🔴阻塞级 / 🟡提示级 / 🟢通过项</li>
+                <li>最多打回 2 次，超过升级给 Verity</li>
+                <li>超 2 次说明问题在需求理解，非代码</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="glow-divider"></div>
+
+    <!-- ─── ORCHESTRATION VISION ─── -->
+    <section id="orchestration">
+      <div class="reveal">
+        <div class="section-label">编排愿景</div>
+        <h2 class="section-title">
+          谁来<em>串联</em>这些工具，谁来<em>选</em>模型
+        </h2>
+        <p
+          style="
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--text-dim);
+            margin-top: 12px;
+          "
+        >
+          提案阶段 · 尚未落地
+        </p>
+      </div>
+
+      <!-- 现状 vs 愿景 两栏结构 -->
+      <div
+        class="orch-columns reveal"
+        style="transition-delay: 0.1s; margin-top: 40px"
+      >
+        <!-- 表头：左现状 / 右愿景 -->
+        <div class="orch-col-header orch-current-header">
+          现状 — 手动 · 串行 · 单一模型
+        </div>
+        <div class="orch-col-header orch-future-header">
+          愿景 — 3 个提案方向（右N 解决左N）
+        </div>
+
+        <!-- 第 1 行：烦恼 1 ↔ 解法 1 -->
+        <div class="orch-current-item">
+          记住该用哪个 skill、手动调用、手动转换格式、手动拼接产出——四步全靠
+          开发者
+        </div>
+        <div class="vision-card">
+          <div class="vision-card-head">
+            <span class="vision-card-icon">🧩</span>
+            <span class="vision-card-title">Skill 编排层</span>
+          </div>
+          <p>
+            Verity 判断任务类型、查 skill
+            能力登记表、自动调用并传递中间产出，开发者
+            只在异常或需决策时才被叫起。
+          </p>
+          <div class="detail-chips">
+            <span class="chip">自动判断任务类型</span>
+            <span class="chip">skill 能力登记表</span>
+            <span class="chip">自动传递中间产出</span>
+          </div>
+        </div>
+
+        <!-- 第 2 行：烦恼 2 ↔ 解法 2 -->
+        <div class="orch-current-item">
+          Verity → Coder → Tester 严格一条线走到底，Tester 要等 Coder
+          全部做完才开始审
+        </div>
+        <div class="vision-card">
+          <div class="vision-card-head">
+            <span class="vision-card-icon">🧵</span>
+            <span class="vision-card-title">并发调度</span>
+          </div>
+          <p>
+            互不依赖的子任务真并发跑，耗时压缩到最慢那条线，缺的是"什么时候该拆"的固定规则。
+          </p>
+          <div class="detail-chips">
+            <span class="chip">并发能力已验证</span>
+            <span class="chip">缺拆分规则</span>
+            <span class="chip">见页面顶部演示</span>
+          </div>
+        </div>
+
+        <!-- 第 3 行：烦恼 3 ↔ 解法 3 -->
+        <div class="orch-current-item">
+          模型固定一档一家，不按任务规模、风险、厂商可用性切换
+        </div>
+        <div class="vision-card">
+          <div class="vision-card-head">
+            <span class="vision-card-icon">🎛</span>
+            <span class="vision-card-title">model-router 自动选模型</span>
+          </div>
+          <p>
+            按影响范围 / 性能红线 / 是否跨项目自动选 Opus/Sonnet/Haiku
+            档位；红线变更强制 Claude × Codex 双视角；选型结果写入报告，可追溯。
+          </p>
+          <div class="detail-chips">
+            <span class="chip">内部档位自动选</span>
+            <span class="chip">红线强制双视角</span>
+            <span class="chip">选型结果可追溯</span>
+          </div>
+        </div>
+      </div>
+
+      <div
+        class="reveal"
+        style="
+          transition-delay: 0.2s;
+          margin-top: 40px;
+          color: var(--text-dim);
+          font-size: 14px;
+          line-height: 1.75;
+          max-width: 900px;
+        "
+      >
+        <p>
+          这三条（skill
+          编排层、并发调度、model-router）都是观察到的真实缺口，方向合理，但目前<strong
+            style="color: var(--text)"
+            >没有设计落地方案，也没有在实际调度中验证过</strong
+          >——需要开发者决定是否投入。
+        </p>
+      </div>
+    </section>
+
+    <div class="glow-divider"></div>
+
+    <!-- ─── ARCHITECTURE ─── -->
+    <section id="architecture">
+      <div class="reveal">
+        <div class="section-label">机制层</div>
+        <h2 class="section-title">不是纸面规则，是<em>真实在跑</em>的代码</h2>
+      </div>
+
+      <div class="reveal" style="transition-delay: 0.1s">
+        <div class="direction-item" style="margin-bottom: 24px">
+          <div class="direction-body-inner" style="padding: 24px 28px">
+            <p
+              style="
+                color: var(--text-dim);
+                font-size: 14px;
+                margin-bottom: 14px;
+                letter-spacing: 0.02em;
+              "
+            >
+              目录结构（真实存在的文件，非规划）
+            </p>
+            <pre
+              style="
+                font-family: var(--mono);
+                font-size: 13px;
+                color: var(--text);
+                line-height: 1.7;
+                overflow-x: auto;
+              "
+            >
+ai-agent/
+├── CLAUDE.md              # session 启动指令
+├── VERITY.md            # 人格宪法
+├── .claude/settings.json  # Hook 接线配置
+├── scripts/
+│   ├── inject-context.py  # SessionStart Hook
+│   ├── auto-snapshot.py   # SessionEnd Hook
+│   └── memory_db.py       # agent.db 读写封装
+├── state/
+│   ├── active.md / ideas.md / snapshot.md
+│   ├── agent.db            # SQLite + FTS5 检索式记忆库
+│   └── .snapshot-failed    # 失败留痕标记（存在即代表上次未成功）
+├── maps/                  # 每项目一张地图
+└── archive/               # decisions / constraints / postmortem</pre
+            >
+          </div>
+        </div>
+
+        <div class="direction-list">
+          <div class="direction-item open">
+            <div class="direction-header" style="cursor: default">
+              <span class="direction-num">①</span>
+              <span class="direction-title"
+                >SessionStart → inject-context.py</span
+              >
+              <span class="direction-desc">对话开始时，状态自动注入上下文</span>
+            </div>
+            <div class="direction-body" style="max-height: none">
+              <div class="direction-body-inner">
+                <p>
+                  <strong>identity / snapshot / active_task</strong>
+                  始终全量注入——量小，是"当下必须知道"的状态。用户消息里的关键词额外触发
+                  FTS5 检索，从 decision / postmortem / map / idea
+                  等类型里按需召回，不再无差别读全部 md 文件。
+                </p>
+                <div class="detail-chips">
+                  <span class="chip">UserPromptSubmit Hook</span>
+                  <span class="chip">全量注入 3 类</span>
+                  <span class="chip">FTS5 关键词检索</span>
+                  <span class="chip">stale 超 14 天提示</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="direction-item open">
+            <div class="direction-header" style="cursor: default">
+              <span class="direction-num">②</span>
+              <span class="direction-title">SessionEnd → auto-snapshot.py</span>
+              <span class="direction-desc"
+                >对话结束时，读真实 transcript 生成摘要</span
+              >
+            </div>
+            <div class="direction-body" style="max-height: none">
+              <div class="direction-body-inner">
+                <p>
+                  Hook 拿到的是 <strong>transcript_path</strong>（指向
+                  <code>.jsonl</code>
+                  会话记录），不是对话内容本身。脚本逐行解析、过滤子代理会话，取最近
+                  20 轮 user/assistant 消息喂给 Claude API 生成摘要，写回
+                  <code>snapshot.md</code> 并同步 <code>agent.db</code>。
+                </p>
+                <div class="detail-chips">
+                  <span class="chip">transcript_path 解析</span>
+                  <span class="chip">跳过 isSidechain</span>
+                  <span class="chip">写 snapshot.md + agent.db</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="direction-item open">
+            <div class="direction-header" style="cursor: default">
+              <span class="direction-num">③</span>
+              <span class="direction-title">失败留痕，而不是静默假绿</span>
+              <span class="direction-desc"
+                >摘要生成失败时，下次对话开场就会看到警告</span
+              >
+            </div>
+            <div class="direction-body" style="max-height: none">
+              <div class="direction-body-inner">
+                <p>
+                  没有 transcript、没有 API key、或调用失败——任何一种失败都会写
+                  <code>state/.snapshot-failed</code>。下次
+                  <code>inject-context.py</code>
+                  注入时会把这条警告一起带上，并在 snapshot
+                  内容里标注「过期状态，非最新对话的真实反映」。AI
+                  生成的摘要本身也带 <code>unconfirmed</code> 标记，直到 开发者
+                  在下次对话里确认或纠正才算数——这是「零幻觉」原则在机制层的落地，不只是写在宪法里的一句话。
+                </p>
+                <div class="detail-chips">
+                  <span class="chip">.snapshot-failed</span>
+                  <span class="chip">unconfirmed 标记</span>
+                  <span class="chip">人工确认才算数</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="reveal" style="transition-delay: 0.15s; margin-top: 56px">
+          <p
+            style="
+              font-family: var(--mono);
+              font-size: 12px;
+              color: var(--purple);
+              letter-spacing: 0.15em;
+              text-transform: uppercase;
+              margin-bottom: 16px;
+            "
+          >
+            记忆库设计理念 — agent.db 为什么这么设计
+          </p>
+          <p
+            style="
+              color: var(--text-dim);
+              font-size: 15px;
+              line-height: 1.75;
+              margin-bottom: 24px;
+              max-width: 900px;
+            "
+          >
+            AI 的检索方式是语义/关键词匹配，不是走房间路径——因此选择一个 SQLite
+            文件 + FTS5 全文索引，配合两个 Hook 分管注入和写回。
+          </p>
+          <div class="direction-list">
+            <div class="direction-item open">
+              <div class="direction-header" style="cursor: default">
+                <span class="direction-num">①</span>
+                <span class="direction-title">分层而非平铺</span>
+                <span class="direction-desc">不是所有记忆一个权重</span>
+              </div>
+              <div class="direction-body" style="max-height: none">
+                <div class="direction-body-inner">
+                  <p>
+                    <code>identity / snapshot / active_task</code>
+                    是「当下必须知道」的状态，量小，无条件全量注入。<code
+                      >decision / postmortem / map / idea</code
+                    >
+                    等体量会持续增长，靠用户消息里的关键词触发 FTS5
+                    检索才召回——上下文消耗不随记忆库变大而线性膨胀。
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div class="direction-item open">
+              <div class="direction-header" style="cursor: default">
+                <span class="direction-num">②</span>
+                <span class="direction-title">新鲜度是记忆的一部分</span>
+                <span class="direction-desc"
+                  >记忆不只有「有没有」，还有「还能信多少」</span
+                >
+              </div>
+              <div class="direction-body" style="max-height: none">
+                <div class="direction-body-inner">
+                  <p>
+                    召回的记忆若超过
+                    <code>STALE_DAYS = 14</code> 天未更新，会带着「⚠️ 该记忆已 N
+                    天未更新，内容可能已过期」一起注入，而不是原样呈现让人误以为是最新状态。
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div class="direction-item open">
+              <div class="direction-header" style="cursor: default">
+                <span class="direction-num">③</span>
+                <span class="direction-title">AI 写的记忆是草稿，不是事实</span>
+                <span class="direction-desc"
+                  >unconfirmed 标记 + 人工确认循环</span
+                >
+              </div>
+              <div class="direction-body" style="max-height: none">
+                <div class="direction-body-inner">
+                  <p>
+                    每条自动生成的 snapshot 都打
+                    <code>unconfirmed</code> 标记，下次对话开场必须经 开发者
+                    过一遍才算数。理由：自动摘要一旦被当事实无差别注入，错误会自我强化——一步错，步步错。
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p
+            style="color: var(--text-dim); font-size: 14px; margin: 32px 0 14px"
+          >
+            与常见做法的区别
+          </p>
+          <table class="roadmap-table">
+            <thead>
+              <tr>
+                <th>常见做法</th>
+                <th>Verity 的方案</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="roadmap-output">
+                  每次对话全量重读所有 md 文件，随文件增多线性变慢
+                </td>
+                <td class="roadmap-name">
+                  3
+                  类核心状态全量注入，其余按关键词检索，不随历史堆积拖慢单次对话
+                </td>
+              </tr>
+              <tr>
+                <td class="roadmap-output">用向量 embedding 做语义检索</td>
+                <td class="roadmap-name">
+                  SQLite FTS5 关键词全文检索——本地、零外部依赖、零 embedding
+                  成本
+                </td>
+              </tr>
+              <tr>
+                <td class="roadmap-output">
+                  AI 生成的总结直接当事实覆盖旧状态
+                </td>
+                <td class="roadmap-name">
+                  强制 unconfirmed 标记 + 人工确认循环，防止错误摘要自我强化
+                </td>
+              </tr>
+              <tr>
+                <td class="roadmap-output">
+                  静默失败，下次直接用旧状态，没人知道
+                </td>
+                <td class="roadmap-name">
+                  .snapshot-failed 显式留痕，下次开场白连同警告一起注入
+                </td>
+              </tr>
+              <tr>
+                <td class="roadmap-output">
+                  md 文件既是存储也是检索源，两者耦合
+                </td>
+                <td class="roadmap-name">
+                  md 是人读的镜像，agent.db 是机器读的真相源，解耦互不阻塞
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p
+            style="
+              color: var(--text-dim);
+              font-size: 14px;
+              margin-top: 24px;
+              line-height: 1.75;
+              max-width: 900px;
+            "
+          >
+            核心区别一句话：这不是「给 AI 一个更大的记忆容器」，而是「承认 AI
+            的记忆会错、会过期、会漂移，然后把这三件事都做成可见的机制，而不是假装它们不存在」。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <div class="glow-divider"></div>
+
+    <!-- ─── DIRECTIONS ─── -->
+    <section id="directions">
+      <div class="reveal">
+        <div class="section-label">设计方向</div>
+        <h2 class="section-title">18 条<em>核心设计方向</em></h2>
+      </div>
+
+      <div class="phase-tabs reveal" style="transition-delay: 0.05s">
+        <button class="phase-tab active-tab" onclick="switchPhase(1)">
+          Phase 1 — 核心骨架 (9条)
+        </button>
+        <button class="phase-tab" onclick="switchPhase(2)">
+          Phase 2 — 精细化 (9条)
+        </button>
+      </div>
+
+      <div
+        id="phase1-panel"
+        class="phase-panel active reveal"
+        style="transition-delay: 0.1s"
+      >
+        <div class="direction-list" id="dir-list-1"></div>
+      </div>
+      <div
+        id="phase2-panel"
+        class="phase-panel reveal"
+        style="transition-delay: 0.1s"
+      >
+        <div class="direction-list" id="dir-list-2"></div>
+      </div>
+    </section>
+
+    <div class="glow-divider"></div>
+
+    <!-- ─── SCALE ─── -->
+    <section id="scale">
+      <div class="reveal">
+        <div class="section-label">规模化路径</div>
+        <h2 class="section-title">个人工具 <em>→</em> 公司治理层</h2>
+      </div>
+
+      <div class="scale-flow reveal" style="transition-delay: 0.05s">
+        <div class="scale-node">
+          <div class="scale-node-icon">👤</div>
+          <div class="scale-node-label">当前</div>
+          <div class="scale-node-title">个人 AI 操作系统</div>
+        </div>
+        <div class="scale-arrow">──→</div>
+        <div class="scale-node" style="border-color: rgba(168, 85, 247, 0.2)">
+          <div class="scale-node-icon">👥</div>
+          <div class="scale-node-label">中期</div>
+          <div class="scale-node-title">团队协作框架</div>
+        </div>
+        <div class="scale-arrow">──→</div>
+        <div class="scale-node" style="border-color: rgba(0, 255, 136, 0.2)">
+          <div class="scale-node-icon">🏢</div>
+          <div class="scale-node-label">长期</div>
+          <div class="scale-node-title">公司 AI 治理层</div>
+        </div>
+      </div>
+
+      <div
+        class="scale-cards reveal"
+        style="transition-delay: 0.15s"
+        id="scale-cards"
+      ></div>
+    </section>
+
+    <div class="glow-divider"></div>
+
+    <!-- ─── ROADMAP ─── -->
+    <section id="roadmap">
+      <div class="reveal">
+        <div class="section-label">实施路线图</div>
+        <h2 class="section-title">分两期<em>落地</em></h2>
+      </div>
+
+      <div class="roadmap-phases reveal" style="transition-delay: 0.1s">
+        <div>
+          <div class="roadmap-phase-title">Phase 1 — 稳固骨架</div>
+          <table class="roadmap-table">
+            <thead>
+              <tr>
+                <th>方向</th>
+                <th>产出物</th>
+                <th>工作量</th>
+              </tr>
+            </thead>
+            <tbody id="roadmap-p1"></tbody>
+          </table>
+        </div>
+        <div>
+          <div class="roadmap-phase-title" style="color: var(--purple)">
+            Phase 2 — 精细化
+          </div>
+          <table class="roadmap-table">
+            <thead>
+              <tr>
+                <th>方向</th>
+                <th>产出物</th>
+                <th>工作量</th>
+              </tr>
+            </thead>
+            <tbody id="roadmap-p2"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <span>Verity</span> v1.2 · Built by <span>Elisha Wong</span> ·
+      以真实为地基
+    </footer>
+
+    <script>
+      // ── Data ──────────────────────────────────────────────────────
+      const directions = [
+        {
+          phase: 1,
+          num: "01",
+          badge: "P1",
+          title: "零幻觉机制",
+          desc: "[?] 标注强制，未标注的断言自动报警",
+          detail:
+            "所有不确定内容必须显式打标记。不允许：不 grep 就声称路径存在、不读类型定义就声称参数类型、不读源码就声称函数行为。",
+          chips: [
+            "[?] 标注",
+            "[verified]",
+            "[inferred]",
+            "[stale]",
+            "PostToolUse Hook",
+          ],
+        },
+        {
+          phase: 1,
+          num: "02",
+          badge: "P1",
+          title: "决策可追溯",
+          desc: "方案取舍必须写 decisions.md，格式化归档",
+          detail:
+            "凡是两个以上方案选其一、需求裁剪、架构取舍、依赖引入，必须写入 archive/decisions.md，包含备选方案、选择原因、风险评估，开发者签字。",
+          chips: ["decisions.md", "备选方案记录", "签字机制", "Hook 提醒触发"],
+        },
+        {
+          phase: 1,
+          num: "03",
+          badge: "P1",
+          title: "上下文永不断链",
+          desc: "maps/ 新鲜度 stale 检测，超期自动报警",
+          detail:
+            "每个 map 文件带元数据头（last_updated / stale_after）。Verity 启动时检查所有 map 新鲜度，超期报警。Coder 完成任务后强制检查是否需要更新 map。",
+          chips: ["stale_after: 30d", "启动时检查", "Stop Hook 提示更新"],
+        },
+        {
+          phase: 1,
+          num: "04",
+          badge: "P1",
+          title: "强 Hook 强制执行宪法",
+          desc: "三类 Hook 已接入（已落地，强制力如实分级，非全硬拦截）",
+          detail:
+            "PreToolUse（scripts/guard-pretool.py）真硬拦截 git push / rm -rf / .env 类文件，permissionDecision=deny 无旁路。PostToolUse（check-report.py）和 Stop③（check-file-limits.py 的 check_state_staleness）只能做弱信号非阻塞提醒——机制上看不到模型文本回复内容，无法验证报告是否真的完整、状态是否真的同步，如实标注边界而非装作硬拦截，详见 agents/enforcement.md。「改 VERITY.md 非提案区」这条因缺少提案区标记机制，明确未实现，留 [?] 待补，不强行拦。",
+          chips: [
+            "PreToolUse 真硬拦截",
+            "PostToolUse 弱提醒",
+            "Stop③ 弱提醒",
+            "enforcement.md",
+            "已落地",
+          ],
+        },
+        {
+          phase: 1,
+          num: "05",
+          badge: "P1",
+          title: "必读文档大小管控",
+          desc: "各文件软硬上限，超限阻止退出（已落地）",
+          detail:
+            "VERITY.md 软上限150行/硬上限200行，snapshot.md 50/80行，active.md 30/50行。scripts/check-file-limits.py 作为 Stop Hook 接入，超软上限提示不阻塞，超硬上限用 hookSpecificOutput.decision=block 阻止本轮结束，连续拦3次自动放行避免死循环。",
+          chips: ["软上限提示", "硬上限阻断", "Stop Hook 已接入", "已完成"],
+        },
+        {
+          phase: 1,
+          num: "06",
+          badge: "P1",
+          title: "检索式记忆库",
+          desc: "agent.db（SQLite + FTS5），按需检索，不用人脑式空间隐喻",
+          detail:
+            "identity/snapshot/active_task 始终全量注入；decision/postmortem/map/idea 等按用户消息关键词触发 FTS5 检索召回。SessionEnd 自动写入 DB，md 文件保留作人类可读镜像。",
+          chips: [
+            "agent.db",
+            "FTS5 检索",
+            "按需召回",
+            "inject-context.py",
+            "auto-snapshot.py",
+          ],
+        },
+        {
+          phase: 1,
+          num: "07",
+          badge: "P1",
+          title: "三级自我完善机制",
+          desc: "🔴 红线违规 / 🟡 轻度偏差 / 🟢 正常，修宪提案标准化",
+          detail:
+            "红线违规：立即停止 → postmortem → 修宪提案 → 开发者签字。轻度偏差：标记 → 下次开场白提出改进。修宪提案格式标准化，版本历史永久保留。",
+          chips: [
+            "三级响应",
+            "postmortem",
+            "修宪提案",
+            "开发者签字",
+            "版本历史",
+          ],
+        },
+        {
+          phase: 1,
+          num: "08",
+          badge: "P1",
+          title: "PRD 覆盖矩阵",
+          desc: "每个需求点逐一核对，不能静默裁剪",
+          detail:
+            "Step 2 报告强制包含 PRD 覆盖矩阵：每个需求点 → 是否实现 / 是否超出范围。PRD 没有的功能不实现但可提建议，PRD 有的功能必须实现，超出范围必须在 Step 2 提出。",
+          chips: ["PRD 覆盖矩阵", "Step 2 必填", "超出范围显式标注"],
+        },
+        {
+          phase: 1,
+          num: "09",
+          badge: "P1",
+          title: "Figma × PRD 交叉表",
+          desc: "交互缺失必须报告，不能静默跳过",
+          detail:
+            "Step 2 增加 Figma × PRD 交叉核查表：Figma 有但 PRD 没有 → 标[?]等决策；PRD 有但 Figma 没有 → 提示可能需要补稿；两者描述不一致 → 阻塞。",
+          chips: ["Figma × PRD 交叉表", "[?] 阻塞项", "figma-to-code 截图对比"],
+        },
+        {
+          phase: 2,
+          num: "10",
+          badge: "P2",
+          title: "统一报告模板",
+          desc: "每步报告强制套模板，时间戳 / 文件 / 不确定项",
+          detail:
+            "新建 agents/report-template.md，所有报告强制套用：时间戳 / 节点名称 / 完成内容（具体文件路径+行号）/ 未确认项 / 性能 Checklist / 变更上报 / 下一步。",
+          chips: [
+            "report-template.md",
+            "文件路径+行号",
+            "性能 Checklist",
+            "变更上报",
+          ],
+        },
+        {
+          phase: 2,
+          num: "11",
+          badge: "P2",
+          title: "红线操作清单",
+          desc: "git push / rm / .env 等显式枚举，Hook grep 拦截",
+          detail:
+            "constraints.md 中维护显式红线清单：git push / rm / --force / CI/CD 配置 / VERITY.md 正文 / .env / migration 等。PreToolUse Hook grep 命令特征，命中即 Block。",
+          chips: [
+            "git push",
+            "rm / rimraf",
+            "--force",
+            ".env / secret",
+            "migration",
+          ],
+        },
+        {
+          phase: 2,
+          num: "12",
+          badge: "P2",
+          title: "会话间一致性校验",
+          desc: "snapshot vs active.md 启动时 diff，冲突不能静默",
+          detail:
+            "Verity 启动时 diff：snapshot 记录 OPEN 的任务是否在 active 中存在，BLOCKED 原因是否一致，DONE 的任务是否已删除。有冲突不能静默接受，等开发者裁决。",
+          chips: ["启动 diff", "冲突报警", "等待裁决", "异常退出恢复"],
+        },
+        {
+          phase: 2,
+          num: "13",
+          badge: "P2",
+          title: "Idea 生命周期",
+          desc: "UNREVIEWED → ACCEPTED / DEFERRED / REJECTED 状态机",
+          detail:
+            "ideas.md 每条 idea 带状态机。每次对话结束时 Verity 带过 UNREVIEWED 的 idea（超 3 条提醒），不允许无限期堆积。ACCEPTED 的 idea 建任务后关联 Task 编号。",
+          chips: [
+            "UNREVIEWED",
+            "ACCEPTED",
+            "DEFERRED",
+            "REJECTED",
+            "每次对话复盘",
+          ],
+        },
+        {
+          phase: 2,
+          num: "14",
+          badge: "P2",
+          title: "测试覆盖门控",
+          desc: "核心流程改动必须附 testcase，无测试不能标 DONE",
+          detail:
+            "涉及核心业务逻辑（支付/链上交易/权限）、共享组件、接口层的改动，Coder Step 3 必须附带 testcase 清单（使用 testcase skill 生成）。无 testcase 不能标 DONE。",
+          chips: [
+            "核心业务 = 必须",
+            "testcase skill",
+            "Step 3 门控",
+            "DONE 前检查",
+          ],
+        },
+        {
+          phase: 2,
+          num: "15",
+          badge: "P2",
+          title: "依赖关系图更新",
+          desc: "Coder 上报时必填跨项目依赖变更",
+          detail:
+            "Coder Step 4 上报增加必填项：跨项目依赖变更（新增/移除/无变化）。有新增依赖，Verity 必须在接收报告后更新 project-relations.md，不能跳过。",
+          chips: ["Step 4 必填", "project-relations.md", "新增依赖即时更新"],
+        },
+        {
+          phase: 2,
+          num: "16",
+          badge: "P2",
+          title: "断网恢复 + 临时文件",
+          desc: "先写 .tmp 验证，断点检查点机制，网络中断可恢复",
+          detail:
+            "高风险文件操作（大文件截断/awk/sed/批量替换）必须先写 .tmp 验证，断言通过再 mv 替换。超 3 步的任务每步写检查点到 state/checkpoints/，断网后可从断点继续。",
+          chips: [
+            ".tmp 验证前置",
+            "mv 原子替换",
+            "checkpoints/",
+            "断点恢复",
+            "Stop Hook 清理",
+          ],
+        },
+        {
+          phase: 1,
+          num: "17",
+          badge: "P1",
+          title: "在途需求读取与追踪",
+          desc: "需求快照绑定任务，一键带入全上下文（已落地）",
+          detail:
+            "state/requirements/{项目ID}/ 存储需求快照，写入 agent.db（type=requirement）供 FTS5 检索。agents/requirements.md 定义完整机制：active.md 任务绑定需求源、启动时逐条检查快照是否存在、7天 stale 检测、「Verity，处理 Task-XXX」一键读快照+map 直接进 Step 1。已用真实 Task-010 验证需求落库和检索。",
+          chips: [
+            "需求快照",
+            "state/requirements/",
+            "agent.db type=requirement",
+            "7天 stale 检测",
+            "一键启动",
+            "已落地",
+          ],
+        },
+        {
+          phase: 1,
+          num: "18",
+          badge: "P1",
+          title: "项目知识库 + 项目表",
+          desc: "PROJECTS.md + 4 个项目组件/接口地图全部落地（已完成）",
+          detail:
+            "PROJECTS.md 已建成：4 个项目（rwa-landing/rwa-wiki/dex/onchain）的本地路径、技术栈全部经 Explore agent 实读代码核实。四份 map 均已补充「组件地图」（精确到文件路径+被哪些页面使用），dex/onchain 还原了历史遗留的 <MODEL_KEY> 占位符真实路径；rwa-landing/dex 的接口地图调研中发现多处真实死代码和接口路径/参数不一致（已如实记录进对应 map 的高风险区域，不是编造）。agents/project-lookup.md 落地「报项目名/报文件路径→自动定位项目+带上下文进 Step 1」协议。仓库地址字段仍未验证，如实标 [?]。",
+          chips: [
+            "PROJECTS.md",
+            "4份组件地图",
+            "占位符还原",
+            "真实死代码发现",
+            "project-lookup.md",
+            "已完成",
+          ],
+        },
+      ];
+
+      const scaleItems = [
+        {
+          num: "①",
+          title: "宪法机制",
+          arrow: "AI 使用治理政策",
+          desc: "公司 AI 使用宪法，版本化管理，谁能修改、如何修改、历史记录全部在案。",
+        },
+        {
+          num: "②",
+          title: "检索式记忆库",
+          arrow: "团队知识图谱",
+          desc: "项目知识不绑定在人脑，离职不流失。新人读 3 个文件就能接手任何项目。",
+        },
+        {
+          num: "③",
+          title: "状态管理",
+          arrow: "团队交接标准",
+          desc: "snapshot + active + map 格式化，任何人接手都能快速读懂当前状态。",
+        },
+        {
+          num: "④",
+          title: "三层 Agent",
+          arrow: "团队 AI 协作框架",
+          desc: "执行/审核分离原则，跨项目信息隔离，AI 不能跨项目读数据。",
+        },
+        {
+          num: "⑤",
+          title: "可追溯机制",
+          arrow: "合规审计日志",
+          desc: "AI 操作有记录，决策可追溯，满足合规要求，不可篡改。",
+        },
+        {
+          num: "⑥",
+          title: "Hook 护栏",
+          arrow: "公司 AI 操作边界",
+          desc: "接入公司 CI/CD，AI 不能自动 push 到 main，高风险操作有审批记录。",
+        },
+        {
+          num: "⑦",
+          title: "PRD × Figma",
+          arrow: "产品交付标准",
+          desc: "设计还原有验收标准，AI 不能擅自做产品决策，超出范围必须显式报告。",
+        },
+      ];
+
+      const roadmapP1 = [
+        {
+          num: "18",
+          name: "项目知识库 + 项目表",
+          output: "PROJECTS.md + 4份组件地图 + agents/project-lookup.md",
+          effort: "M（已完成）",
+        },
+        {
+          num: "17",
+          name: "在途需求读取与追踪",
+          output: "state/requirements/ + agents/requirements.md + agent.db type=requirement",
+          effort: "M（已完成）",
+        },
+        {
+          num: "04",
+          name: "强 Hook 强制执行宪法",
+          output: "guard-pretool.py + check-report.py + check-file-limits.py③",
+          effort: "M（已完成，强制力分级见 enforcement.md）",
+        },
+        {
+          num: "16",
+          name: "断网恢复 + 临时文件",
+          output: "checkpoints/ 机制 + tmp 验证流程 + Stop Hook 检查",
+          effort: "M",
+        },
+        {
+          num: "06",
+          name: "检索式记忆库",
+          output: "agent.db（FTS5）+ inject-context.py + auto-snapshot.py",
+          effort: "S（已完成）",
+        },
+        {
+          num: "11",
+          name: "红线操作清单",
+          output: "constraints.md 显式清单",
+          effort: "S",
+        },
+        {
+          num: "05",
+          name: "必读文档大小管控",
+          output: "scripts/check-file-limits.py + Stop Hook 接入",
+          effort: "S（已完成）",
+        },
+        {
+          num: "02",
+          name: "决策可追溯",
+          output: "decisions.md 格式 + 触发条件",
+          effort: "S",
+        },
+        {
+          num: "12",
+          name: "会话间一致性校验",
+          output: "VERITY.md 中加启动校验规则",
+          effort: "S",
+        },
+      ];
+
+      const roadmapP2 = [
+        {
+          num: "08",
+          name: "PRD 覆盖矩阵",
+          output: "Coder.md Step 2 报告模板更新",
+          effort: "S",
+        },
+        {
+          num: "09",
+          name: "Figma × PRD 交叉表",
+          output: "Coder.md Step 2 报告模板更新",
+          effort: "S",
+        },
+        {
+          num: "10",
+          name: "统一报告模板",
+          output: "agents/report-template.md",
+          effort: "S",
+        },
+        {
+          num: "07",
+          name: "三级自我完善机制",
+          output: "VERITY.md 进化机制扩展 + 提案模板",
+          effort: "M",
+        },
+        {
+          num: "13",
+          name: "Idea 生命周期",
+          output: "ideas.md 格式 + VERITY.md 维护规则",
+          effort: "S",
+        },
+        {
+          num: "14",
+          name: "测试覆盖门控",
+          output: "Coder.md Step 3 更新",
+          effort: "S",
+        },
+        {
+          num: "03",
+          name: "上下文永不断链",
+          output: "所有 map 文件加元数据头 + Hook 检查",
+          effort: "S",
+        },
+        {
+          num: "15",
+          name: "依赖关系图更新",
+          output: "Coder.md Step 4 更新",
+          effort: "S",
+        },
+      ];
+
+      // ── Render Directions ─────────────────────────────────────────
+      function renderDirections() {
+        const list1 = document.getElementById("dir-list-1");
+        const list2 = document.getElementById("dir-list-2");
+
+        directions.forEach((d) => {
+          const el = document.createElement("div");
+          el.className = "direction-item";
+          el.innerHTML = `
+      <div class="direction-header" onclick="toggleDir(this)">
+        <span class="direction-num">${d.num}</span>
+        <span class="direction-title">${d.title}</span>
+        <span class="direction-desc">${d.desc}</span>
+        <span class="direction-badge ${d.phase === 1 ? "badge-p1" : "badge-p2"}">P${d.phase}</span>
+        <span class="direction-chevron">▾</span>
+      </div>
+      <div class="direction-body">
+        <div class="direction-body-inner">
+          <p>${d.detail}</p>
+          <div class="detail-chips">${d.chips.map((c) => `<span class="chip">${c}</span>`).join("")}</div>
+        </div>
+      </div>
+    `;
+          (d.phase === 1 ? list1 : list2).appendChild(el);
+        });
+      }
+
+      function toggleDir(header) {
+        const item = header.parentElement;
+        const body = item.querySelector(".direction-body");
+        const isOpen = item.classList.contains("open");
+        item.classList.toggle("open", !isOpen);
+        body.style.maxHeight = isOpen ? "0" : body.scrollHeight + "px";
+      }
+
+      function switchPhase(n) {
+        document
+          .querySelectorAll(".phase-tab")
+          .forEach((t, i) => t.classList.toggle("active-tab", i + 1 === n));
+        document
+          .getElementById("phase1-panel")
+          .classList.toggle("active", n === 1);
+        document
+          .getElementById("phase2-panel")
+          .classList.toggle("active", n === 2);
+      }
+
+      // ── Render Scale Cards ────────────────────────────────────────
+      function renderScale() {
+        const container = document.getElementById("scale-cards");
+        scaleItems.forEach((s) => {
+          const el = document.createElement("div");
+          el.className = "scale-card";
+          el.innerHTML = `
+      <div class="scale-card-num">${s.num}</div>
+      <div class="scale-card-title">
+        ${s.title}
+        <span class="scale-arrow-inline">→</span>
+        ${s.arrow}
+      </div>
+      <p>${s.desc}</p>
+    `;
+          container.appendChild(el);
+        });
+      }
+
+      // ── Render Roadmap ────────────────────────────────────────────
+      function renderRoadmap() {
+        function row(item) {
+          return `<tr>
+      <td class="roadmap-num">#${item.num}</td>
+      <td class="roadmap-name">${item.name}</td>
+      <td class="roadmap-output">${item.output}</td>
+      <td><span class="effort-badge ${item.effort.startsWith("M") ? "effort-m" : "effort-s"}">${item.effort.replace("M", "中等").replace("S", "小")}</span></td>
+    </tr>`;
+        }
+        document.getElementById("roadmap-p1").innerHTML = roadmapP1
+          .map(row)
+          .join("");
+        document.getElementById("roadmap-p2").innerHTML = roadmapP2
+          .map(row)
+          .join("");
+      }
+
+      // ── Orchestration: concurrency chat demo ────────────────────────
+      // 3 个任务：2 个互不依赖可并发，1 个有依赖需排后 —— 复刻本项目真实建立的调度习惯
+      const chatScript = [
+        { sender: "user", text: "你好" },
+        {
+          sender: "agent",
+          text: "意识已加载。我是 Verity。上次做到 html 编排愿景重排，现在在途 2 个任务。",
+        },
+        {
+          sender: "user",
+          text: "帮我查一下这个接口文档，再测一下这个组件性能，再改一下这段文案",
+        },
+        {
+          sender: "agent",
+          text: "查接口文档、测组件性能互不依赖，可以并发；改文案要等接口文档确认才能对措辞，排后面。先并发前两个吗？",
+        },
+        { sender: "user", text: "做" },
+        {
+          sender: "agent",
+          text: "①②已并发完成，③开始处理。在途/待办：✅ 接口文档 ✅ 组件性能 🟡 文案",
+        },
+      ];
+
+      function typeChatText(el, text, done) {
+        let idx = 0;
+        const cursor = document.createElement("span");
+        cursor.className = "chat-cursor";
+        el.parentElement.appendChild(cursor);
+        function step() {
+          if (idx < text.length) {
+            el.textContent += text[idx++];
+            setTimeout(step, 26);
+          } else {
+            cursor.remove();
+            setTimeout(done, 1000);
+          }
+        }
+        step();
+      }
+
+      function playChatDemo() {
+        const container = document.getElementById("chat-window");
+        if (!container) return;
+        let i = 0;
+        function next() {
+          if (i >= chatScript.length) return;
+          const msg = chatScript[i++];
+          const bubble = document.createElement("div");
+          bubble.className = "chat-bubble " + msg.sender;
+          const senderLabel = document.createElement("span");
+          senderLabel.className = "chat-sender";
+          senderLabel.textContent = msg.sender === "user" ? "ELISHA" : "VERITY";
+          const textSpan = document.createElement("span");
+          bubble.appendChild(senderLabel);
+          bubble.appendChild(textSpan);
+          container.appendChild(bubble);
+          requestAnimationFrame(() => bubble.classList.add("show"));
+          typeChatText(textSpan, msg.text, next);
+        }
+        next();
+      }
+
+      function initChatDemo() {
+        const el = document.getElementById("chat-demo");
+        if (!el) return;
+        const obs = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((e) => {
+              if (e.isIntersecting) {
+                playChatDemo();
+                obs.unobserve(e.target);
+              }
+            });
+          },
+          { threshold: 0.3 },
+        );
+        obs.observe(el);
+      }
+
+      // ── Scroll Reveal ─────────────────────────────────────────────
+      function initReveal() {
+        const obs = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((e) => {
+              if (e.isIntersecting) {
+                e.target.classList.add("visible");
+                obs.unobserve(e.target);
+              }
+            });
+          },
+          { threshold: 0.08 },
+        );
+        document.querySelectorAll(".reveal").forEach((el) => obs.observe(el));
+      }
+
+      // ── Nav highlight ─────────────────────────────────────────────
+      function initNav() {
+        const sections = [
+          "hero",
+          "identity",
+          "team",
+          "orchestration",
+          "architecture",
+          "directions",
+          "scale",
+          "roadmap",
+        ];
+        const obs = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((e) => {
+              if (e.isIntersecting) {
+                document.querySelectorAll("nav a").forEach((a) => {
+                  a.classList.toggle(
+                    "active",
+                    a.dataset.section === e.target.id,
+                  );
+                });
+              }
+            });
+          },
+          { rootMargin: "-40% 0px -55% 0px" },
+        );
+        sections.forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) obs.observe(el);
+        });
+      }
+
+      // ── Init ──────────────────────────────────────────────────────
+      renderDirections();
+      renderScale();
+      renderRoadmap();
+      initReveal();
+      initNav();
+      initChatDemo();
+    </script>
+  </body>
+</html>
