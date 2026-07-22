@@ -1398,6 +1398,78 @@
         font-weight: 650;
       }
 
+      /* ============ Observed drawbacks ============ */
+      .drawbacks {
+        margin-top: 40px;
+      }
+      .drawbacks-head {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--denied);
+        letter-spacing: 0.04em;
+        margin-bottom: 16px;
+      }
+      .drawback-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+      }
+      @media (max-width: 820px) {
+        .drawback-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .drawback {
+        border: 1px solid rgba(242, 85, 122, 0.28);
+        border-radius: 13px;
+        padding: 20px;
+        background: var(--panel);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .drawback .db-k {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--denied);
+      }
+      .drawback h4 {
+        color: var(--head);
+        font-size: 15px;
+        font-weight: 650;
+      }
+      .db-evidence {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--denied);
+        background: var(--denied-soft);
+        border: 1px solid rgba(242, 85, 122, 0.2);
+        border-radius: 7px;
+        padding: 10px 12px;
+        line-height: 1.6;
+        word-break: break-word;
+      }
+      .db-fix {
+        display: flex;
+        gap: 9px;
+        font-size: 13px;
+        color: var(--text);
+        line-height: 1.55;
+        margin-top: auto;
+      }
+      .db-fix::before {
+        content: "→";
+        color: var(--verified);
+        font-family: var(--mono);
+        flex-shrink: 0;
+      }
+      .db-fix b {
+        color: var(--verified);
+        font-weight: 650;
+      }
+
       /* ============ Why aeloop first ============ */
       .why-grid {
         display: grid;
@@ -2195,6 +2267,59 @@
           一句话:<b>Ruflo 赌广度,社区已经在替我们跑</b>;Aeloop
           的赌注是<b>「深度 + 治理」</b>——把「AI 干活但每一步可审、可拦、不能靠嘴糊弄」这件事做成确定性能力,这是买不来、也是
           Ruflo 那条路线不优先解决的。
+        </p>
+      </div>
+
+      <div class="drawbacks reveal">
+        <div class="drawbacks-head">
+          // 实测:RuFlo 跑起来撞到的三堵墙(真实终端输出)
+        </div>
+        <div class="drawback-grid">
+          <div class="drawback">
+            <span class="db-k">依赖生态</span>
+            <h4>绑死在 Claude Code 上</h4>
+            <div class="db-evidence">
+              Sonnet 5 · API Usage Billing<br />from .claude/settings.json
+            </div>
+            <div class="db-fix">
+              <span
+                ><b>Aeloop 模型无关</b>——换 Profile / Adapter(LiteLLM),不绑单一厂商与计费</span
+              >
+            </div>
+          </div>
+          <div class="drawback">
+            <span class="db-k">上下文膨胀</span>
+            <h4>CLAUDE.md 撑爆上限</h4>
+            <div class="db-evidence">
+              ⚠ CLAUDE.md is over the 40.0k-char limit (59.5k chars)<br />🧠
+              context 60%
+            </div>
+            <div class="db-fix">
+              <span
+                ><b>Aeloop 分层注入 + Context 预算</b>——引擎只存本次 Run
+                快照,省略量投影进证据,不随记忆膨胀</span
+              >
+            </div>
+          </div>
+          <div class="drawback">
+            <span class="db-k">成本失控</span>
+            <h4>Swarm 无封顶,烧穿预算</h4>
+            <div class="db-evidence">
+              429 Budget exceeded!<br />Current cost: 503.01 · Max:
+              500.0<br />Retrying… attempt 8/10
+            </div>
+            <div class="db-fix">
+              <span
+                ><b>Aeloop 阈值升级给人 + Token 账本</b>——失败达阈值停下问人,按任务记账,不无限烧</span
+              >
+            </div>
+          </div>
+        </div>
+        <p class="nest-note" style="margin-top: 16px">
+          第三条正好印证调研结论:RuFlo 的 swarm / autopilot
+          <b style="color: var(--text-dim)"
+            >只按迭代次数和时钟封顶,没有 token / 成本闸门</b
+          >——所以能一路冲到 $503 &gt; $500 才被外部计费拦下。
         </p>
       </div>
     </section>
