@@ -141,6 +141,324 @@ describe("EvidenceEventProjector — issue #54 usage and no-change evidence", ()
   });
 });
 
+describe("EvidenceEventProjector — issue #81 batch1+2 real claim wiring", () => {
+  it("projects a changed round's coder+tester claims into claims[]/evidence[], deriving source from the independent tool_exec check, not model self-report", () => {
+    const projector = new EvidenceEventProjector(new EvidenceBundleBuilder({ runId: 20 }));
+    projector.accept({
+      type: "agent_completed",
+      runId: 20,
+      threadId: "thread-20",
+      ts: "2026-01-01T00:00:00.000Z",
+      node: "draft",
+      actor: "coder",
+      stepRef: "draft#1",
+      claimCount: 2,
+      provider: "litellm-deepseek",
+      model: "deepseek-v4-pro",
+      outcome: "changed",
+      toolExecChecked: "pass",
+      claims: [
+        { claimText: "added a null check", confidence: "verified", sourceRef: "tsc", verifiedBy: "tool_execution" },
+        { claimText: "matches requested behavior", confidence: "inferred" },
+      ],
+    });
+    projector.accept({
+      type: "agent_completed",
+      runId: 20,
+      threadId: "thread-20",
+      ts: "2026-01-01T00:00:01.000Z",
+      node: "review",
+      actor: "tester",
+      stepRef: "review#1",
+      claimCount: 1,
+      provider: "litellm-openai",
+      model: "gpt-5-high",
+      verdict: "pass",
+      toolExecChecked: "pass",
+      claims: [{ claimText: "ran the tests", confidence: "verified", sourceRef: "test output", verifiedBy: "tool_execution" }],
+    });
+
+    const bundle = projector.snapshot();
+
+    // All three claims (2 coder + 1 tester) became evidence, with `source`
+    // decided by the independent tool_exec check, never by `confidence`.
+    expect(bundle.evidence).toHaveLength(3);
+    expect(bundle.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ content: "added a null check", kind: "tool", source: "verified" }),
+        expect.objectContaining({ content: "matches requested behavior", kind: "source", source: "model-reported" }),
+        expect.objectContaining({ content: "ran the tests", kind: "tool", source: "verified" }),
+      ]),
+    );
+
+    // Only the coder's 2 claims are judged (tester's own claim is evidence, not a judged claim).
+    expect(bundle.claims).toHaveLength(2);
+    expect(bundle.claims).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ text: "added a null check", status: "supported" }),
+        expect.objectContaining({ text: "matches requested behavior", status: "supported" }),
+      ]),
+    );
+    // Each projected claim's evidenceRefs points at its own coder EvidenceItem — not a shared/guessed one.
+    for (const claim of bundle.claims) {
+      expect(claim.evidenceRefs).toHaveLength(1);
+      const evidenceItem = bundle.evidence.find((e) => e.id === claim.evidenceRefs[0]);
+      expect(evidenceItem).toBeDefined();
+      expect(evidenceItem?.content).toBe(claim.text);
+    }
+  });
+
+  it("a reject verdict marks the round's coder claims rejected, not supported", () => {
+    const projector = new EvidenceEventProjector(new EvidenceBundleBuilder({ runId: 21 }));
+    projector.accept({
+      type: "agent_completed",
+      runId: 21,
+      threadId: "thread-21",
+      ts: "2026-01-01T00:00:00.000Z",
+      node: "draft",
+      actor: "coder",
+      stepRef: "draft#1",
+      claimCount: 1,
+      outcome: "changed",
+      claims: [{ claimText: "fixed the bug", confidence: "verified" }],
+    });
+    projector.accept({
+      type: "agent_completed",
+      runId: 21,
+      threadId: "thread-21",
+      ts: "2026-01-01T00:00:01.000Z",
+      node: "review",
+      actor: "tester",
+      stepRef: "review#1",
+      claimCount: 1,
+      verdict: "reject",
+      claims: [{ claimText: "found a regression", confidence: "verified", verifiedBy: "tool_execution" }],
+    });
+    const bundle = projector.snapshot();
+    expect(bundle.claims).toEqual([expect.objectContaining({ text: "fixed the bug", status: "rejected" })]);
+  });
+
+  it("fails closed on a round mismatch: a tester event whose stepRef round doesn't match the last coder round projects no claims[] entry", () => {
+    const projector = new EvidenceEventProjector(new EvidenceBundleBuilder({ runId: 22 }));
+    projector.accept({
+      type: "agent_completed",
+      runId: 22,
+      threadId: "thread-22",
+      ts: "2026-01-01T00:00:00.000Z",
+      node: "draft",
+      actor: "coder",
+      stepRef: "draft#1",
+      claimCount: 1,
+      outcome: "changed",
+      claims: [{ claimText: "round 1 claim", confidence: "verified" }],
+    });
+    // A stray review event stamped round 2, with no matching draft#2 ever seen by this builder.
+    projector.accept({
+      type: "agent_completed",
+      runId: 22,
+      threadId: "thread-22",
+      ts: "2026-01-01T00:00:01.000Z",
+      node: "review",
+      actor: "tester",
+      stepRef: "review#2",
+      claimCount: 1,
+      verdict: "pass",
+      claims: [{ claimText: "tester claim", confidence: "verified" }],
+    });
+    const bundle = projector.snapshot();
+    expect(bundle.claims).toEqual([]);
+    // Both sides' claims are still independently recorded as evidence — only the addClaim() pairing is skipped.
+    expect(bundle.evidence.some((e) => e.content === "round 1 claim")).toBe(true);
+    expect(bundle.evidence.some((e) => e.content === "tester claim")).toBe(true);
+  });
+});
+
+describe("EvidenceEventProjector — issue #81 red line: EvidenceItem.source is independent of tester verdict and model self-confidence", () => {
+  it("a claim with verifiedBy:tool_execution but no independent tool_exec confirmation stays model-reported even when the tester passes it", () => {
+    const projector = new EvidenceEventProjector(new EvidenceBundleBuilder({ runId: 30 }));
+    projector.accept({
+      type: "agent_completed",
+      runId: 30,
+      threadId: "thread-30",
+      ts: "2026-01-01T00:00:00.000Z",
+      node: "draft",
+      actor: "coder",
+      stepRef: "draft#1",
+      claimCount: 1,
+      outcome: "changed",
+      // toolExecChecked deliberately absent — mirrors a FakeAdapter/non-CLI
+      // adapter (this codebase's own test doubles) that never sets it, even
+      // though the claim itself self-reports verifiedBy: "tool_execution".
+      claims: [{ claimText: "ran the tests", confidence: "verified", verifiedBy: "tool_execution" }],
+    });
+    projector.accept({
+      type: "agent_completed",
+      runId: 30,
+      threadId: "thread-30",
+      ts: "2026-01-01T00:00:01.000Z",
+      node: "review",
+      actor: "tester",
+      stepRef: "review#1",
+      claimCount: 0,
+      verdict: "pass",
+      claims: [],
+    });
+    const bundle = projector.snapshot();
+    const item = bundle.evidence.find((e) => e.content === "ran the tests");
+    expect(item).toBeDefined();
+    expect(item?.source).toBe("model-reported");
+    // ClaimStatus ("supported", the tester's verdict) and EvidenceItem.source
+    // ("model-reported", no independent check) are orthogonal — the former
+    // being true must never leak into/upgrade the latter.
+    const claim = bundle.claims.find((c) => c.text === "ran the tests");
+    expect(claim?.status).toBe("supported");
+  });
+
+  it("toolExecChecked: 'fail' also stays model-reported, not verified, even though the claim self-reports verifiedBy: tool_execution", () => {
+    const projector = new EvidenceEventProjector(new EvidenceBundleBuilder({ runId: 31 }));
+    projector.accept({
+      type: "agent_completed",
+      runId: 31,
+      threadId: "thread-31",
+      ts: "2026-01-01T00:00:00.000Z",
+      node: "draft",
+      actor: "coder",
+      stepRef: "draft#1",
+      claimCount: 1,
+      outcome: "changed",
+      toolExecChecked: "fail",
+      claims: [{ claimText: "ran a tool that actually failed", confidence: "verified", verifiedBy: "tool_execution" }],
+    });
+    const bundle = projector.snapshot();
+    const item = bundle.evidence.find((e) => e.content === "ran a tool that actually failed");
+    expect(item?.source).toBe("model-reported");
+  });
+
+  it("a claim with confidence:'verified' but verifiedBy:'unverified' never becomes EvidenceItem.source:'verified'", () => {
+    const projector = new EvidenceEventProjector(new EvidenceBundleBuilder({ runId: 32 }));
+    projector.accept({
+      type: "agent_completed",
+      runId: 32,
+      threadId: "thread-32",
+      ts: "2026-01-01T00:00:00.000Z",
+      node: "draft",
+      actor: "coder",
+      stepRef: "draft#1",
+      claimCount: 1,
+      outcome: "changed",
+      toolExecChecked: "pass", // even with an independent pass on the round, verifiedBy itself is what gates it.
+      claims: [{ claimText: "very confident but never actually checked", confidence: "verified", verifiedBy: "unverified" }],
+    });
+    const bundle = projector.snapshot();
+    const item = bundle.evidence.find((e) => e.content === "very confident but never actually checked");
+    expect(item?.source).toBe("model-reported");
+  });
+
+  it("toolExecChecked: 'na' also stays model-reported, not verified, even though the claim self-reports verifiedBy: tool_execution", () => {
+    const projector = new EvidenceEventProjector(new EvidenceBundleBuilder({ runId: 33 }));
+    projector.accept({
+      type: "agent_completed",
+      runId: 33,
+      threadId: "thread-33",
+      ts: "2026-01-01T00:00:00.000Z",
+      node: "draft",
+      actor: "coder",
+      stepRef: "draft#1",
+      claimCount: 1,
+      outcome: "changed",
+      toolExecChecked: "na",
+      claims: [{ claimText: "tool exec was not applicable this round", confidence: "verified", verifiedBy: "tool_execution" }],
+    });
+    const bundle = projector.snapshot();
+    const item = bundle.evidence.find((e) => e.content === "tool exec was not applicable this round");
+    expect(item?.source).toBe("model-reported");
+  });
+
+  it("a claim with verifiedBy:'human' never becomes EvidenceItem.source:'verified', even with an independent toolExecChecked:'pass' on the round", () => {
+    const projector = new EvidenceEventProjector(new EvidenceBundleBuilder({ runId: 34 }));
+    projector.accept({
+      type: "agent_completed",
+      runId: 34,
+      threadId: "thread-34",
+      ts: "2026-01-01T00:00:00.000Z",
+      node: "draft",
+      actor: "coder",
+      stepRef: "draft#1",
+      claimCount: 1,
+      outcome: "changed",
+      toolExecChecked: "pass", // a mechanized check happened this round, but not the kind this claim itself claims backs it.
+      claims: [{ claimText: "a human reviewed this manually", confidence: "verified", verifiedBy: "human" }],
+    });
+    const bundle = projector.snapshot();
+    const item = bundle.evidence.find((e) => e.content === "a human reviewed this manually");
+    expect(item?.source).toBe("model-reported");
+    expect(item?.kind).toBe("human");
+  });
+
+  it("a claim with verifiedBy entirely absent never becomes EvidenceItem.source:'verified', even with an independent toolExecChecked:'pass' on the round", () => {
+    const projector = new EvidenceEventProjector(new EvidenceBundleBuilder({ runId: 35 }));
+    projector.accept({
+      type: "agent_completed",
+      runId: 35,
+      threadId: "thread-35",
+      ts: "2026-01-01T00:00:00.000Z",
+      node: "draft",
+      actor: "coder",
+      stepRef: "draft#1",
+      claimCount: 1,
+      outcome: "changed",
+      toolExecChecked: "pass",
+      claims: [{ claimText: "no verification method given at all", confidence: "verified" }],
+    });
+    const bundle = projector.snapshot();
+    const item = bundle.evidence.find((e) => e.content === "no verification method given at all");
+    expect(item?.source).toBe("model-reported");
+    expect(item?.kind).toBe("source");
+  });
+});
+
+describe("EvidenceEventProjector — issue #81 batch2 hardening: round-pairing also requires a matching runId (Zorro review)", () => {
+  it("does not fold a tester verdict onto a same-numbered round that belongs to a different runId", () => {
+    // One builder fed two different runs' event streams (not how the real
+    // ConductorWorkApp.projectEvents() call site uses it today, but
+    // EvidenceBundleBuilder/recordEvent() are public surface with no
+    // single-run contract enforced on the caller) — round #1 must not be
+    // paired across runId 40 and runId 41 just because the round numbers
+    // happen to coincide.
+    const projector = new EvidenceEventProjector(new EvidenceBundleBuilder());
+    projector.accept({
+      type: "agent_completed",
+      runId: 40,
+      threadId: "thread-40",
+      ts: "2026-01-01T00:00:00.000Z",
+      node: "draft",
+      actor: "coder",
+      stepRef: "draft#1",
+      claimCount: 1,
+      outcome: "changed",
+      claims: [{ claimText: "run 40's claim", confidence: "verified" }],
+    });
+    projector.accept({
+      type: "agent_completed",
+      runId: 41,
+      threadId: "thread-41",
+      ts: "2026-01-01T00:00:01.000Z",
+      node: "review",
+      actor: "tester",
+      stepRef: "review#1",
+      claimCount: 1,
+      verdict: "pass",
+      claims: [{ claimText: "run 41's tester claim", confidence: "verified" }],
+    });
+    const bundle = projector.snapshot();
+    // No addClaim() projection happened at all — the round numbers matched but the runIds didn't.
+    expect(bundle.claims).toEqual([]);
+    // Both sides' claims are still recorded as independent evidence.
+    expect(bundle.evidence.some((e) => e.content === "run 40's claim")).toBe(true);
+    expect(bundle.evidence.some((e) => e.content === "run 41's tester claim")).toBe(true);
+  });
+});
+
 describe("TokenBudgetLedger", () => {
   it("stops a run before it exceeds its allocated budget", () => {
     const ledger = new TokenBudgetLedger({ inputTokens: 5, outputTokens: 5, retryTokens: 1 });

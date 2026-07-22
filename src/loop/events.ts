@@ -12,7 +12,8 @@
  */
 
 import type { EscalationDecision, GateDecision, GatePayload, GateType, LoopNodeName } from "./types.js";
-import type { ProviderUsage } from "../harness/types.js";
+import type { ProviderUsage, ToolExecChecked } from "../harness/types.js";
+import type { Claim } from "../prompt/schema.js";
 
 /** Fields every `LoopEvent` carries, regardless of `type` (PRD §4.0). */
 interface LoopEventBase {
@@ -110,6 +111,35 @@ export interface AgentCompletedEvent extends LoopEventBase {
   outcome?: "changed" | "no_change";
   noChangeReason?: string;
   noChangeEvidence?: string;
+  /**
+   * Issue #81 batch1 (`docs/evidence-wiring/SCOPING.md` 接点1): the same
+   * `coderOutput.claims`/`testerOutput.claims` array `runner.ts` already had
+   * in scope when it computed `claimCount` above — carried here as real
+   * content, not just a count, so `EvidenceBundleBuilder` (batch2) has
+   * something to project into `claims[]`/`evidence[]`. `claimCount` is kept
+   * unchanged alongside this for backward compatibility with any existing
+   * subscriber that only reads the count.
+   */
+  claims?: readonly Claim[];
+  /**
+   * Issue #81 batch1: the tester's per-round verdict
+   * (`TesterOutput.verdict`, `src/prompt/schema.ts`) — only ever set on a
+   * `review`/`actor:"tester"` event; a `draft`/`actor:"coder"` event never
+   * carries this (a coder round has no verdict of its own, only the tester
+   * that reviews it does).
+   */
+  verdict?: "pass" | "reject";
+  /**
+   * Issue #81 batch1: the independent, mechanized check result for this
+   * round's underlying `InvokeResult` (`coderResult.toolExecChecked` /
+   * `testerResult.toolExecChecked`, `src/harness/types.ts`) — `ToolExecVerifier`'s
+   * verdict, **not** the model's own self-report (`Claim.verifiedBy` is the
+   * model's self-report; this field is the independent check, batch2's
+   * "verified" red line hinges on keeping the two separate). Absent
+   * whenever the underlying adapter never set it (most non-CLI adapters,
+   * e.g. `FakeAdapter`/`LiteLLMAdapter` in this codebase's own tests).
+   */
+  toolExecChecked?: ToolExecChecked;
 }
 
 /** PRD §4.2 row 5 — a gate has just paused the graph, awaiting a human decision. */

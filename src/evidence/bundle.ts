@@ -1,5 +1,6 @@
-import type { LoopEvent } from "../loop/events.js";
-import type { ProviderUsage } from "../harness/types.js";
+import type { AgentCompletedEvent, LoopEvent } from "../loop/events.js";
+import type { ProviderUsage, ToolExecChecked } from "../harness/types.js";
+import type { Claim } from "../prompt/schema.js";
 
 export type EvidenceKind = "source" | "tool" | "test" | "artifact" | "human";
 export type ClaimStatus = "supported" | "unsupported" | "unknown" | "rejected";
@@ -138,6 +139,74 @@ function addUnique(items: readonly string[], value: string): readonly string[] {
   return items.includes(value) ? items : [...items, value];
 }
 
+/**
+ * Issue #81 batch2 (`docs/evidence-wiring/SCOPING.md` 接点2): the round
+ * number `nextStepRef()`/`previewStepRef()` (`src/loop/runner.ts`) minted
+ * into a `stepRef` like `"draft#3"`/`"review#3"` — reused here, not
+ * independently re-derived, to pair a tester round's `agent_completed`
+ * event back to the coder round it reviewed (draft#N reviewed by review#N).
+ *
+ * **Honest scope of the lockstep guarantee (Zorro hardening #81)**: this
+ * only holds along the review-reject (G2) loop-back path — verified
+ * against `runner.test.ts`'s own reject-loop assertions
+ * (`coderStepRefs`/`testerStepRefs` both land on `["draft#1","draft#2"]` /
+ * `["review#1","review#2"]` together, one-for-one). It does **not** hold
+ * across a **G1 human reject** (`gates.ts` `routeAfterG1`: a `"rejected"`
+ * decision routes straight back to `"draft"`, *before* `review` ever ran
+ * for that round): `draft#1 -> G1 reject -> draft#2 -> G1 approve ->
+ * review#1` bumps the draft counter to 2 while the review counter is only
+ * about to mint its first `review#1` — permanently offsetting the two
+ * counters by one for the rest of that run. This is a **known, accepted
+ * gap, not something this function silently gets wrong**:
+ * `recordTesterClaims()`'s `coderRound.round === round` check simply stops
+ * matching once a G1 reject has desynced the counters, so that (and every
+ * later) round's coder-claim verdict-folding is skipped by design —
+ * fail-closed (no claim ever gets a *wrong* status), never a silent
+ * misattribution. Both sides' claims are still recorded as plain
+ * `EvidenceItem`s regardless of whether the pairing matched. Returns
+ * `undefined` for a `stepRef` that doesn't match the `"<node>#<n>"` shape
+ * at all — callers must fail closed on that too, not guess.
+ */
+function roundFromStepRef(stepRef: string): number | undefined {
+  const match = /#(\d+)$/.exec(stepRef);
+  if (!match) return undefined;
+  const n = Number(match[1]);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * `EvidenceKind` for one structured `Claim` (issue #81 batch2, SCOPING §接点2
+ * coder侧): `verifiedBy` maps onto the existing `EvidenceKind` vocabulary —
+ * `"tool_execution"` -> `"tool"`, `"human"` -> `"human"`, anything else
+ * (`"unverified"` or absent) -> `"source"` (the model's own claim text is
+ * the only "source" backing it).
+ */
+function evidenceKindFor(claim: Claim): EvidenceKind {
+  if (claim.verifiedBy === "tool_execution") return "tool";
+  if (claim.verifiedBy === "human") return "human";
+  return "source";
+}
+
+/**
+ * **The batch2 correctness red line** (`docs/evidence-wiring/SCOPING.md`
+ * "最大正确性风险", mirrors `EvidenceSource`'s own doc comment above):
+ * `"verified"` is returned **only** when `claim.verifiedBy ===
+ * "tool_execution"` *and* `toolExecChecked === "pass"` — i.e. an
+ * independent mechanism (`ToolExecVerifier`, computed by the harness from
+ * the real `InvokeResult`, `src/harness/types.ts`) actually confirmed it.
+ * `claim.confidence === "verified"` (the model's own self-reported
+ * confidence, `ClaimConfidence`) is a completely different, orthogonal
+ * field and is **never** read here — a model can self-report
+ * `confidence: "verified"` on a claim nobody independently checked, and
+ * that must still resolve to `"model-reported"`. Every other combination
+ * (`verifiedBy: "human"`/`"unverified"`/absent, or `"tool_execution"` with
+ * `toolExecChecked` `"fail"`/`"na"`/absent) also falls through to
+ * `"model-reported"`.
+ */
+function evidenceSourceFor(claim: Claim, toolExecChecked: ToolExecChecked | undefined): EvidenceSource {
+  return claim.verifiedBy === "tool_execution" && toolExecChecked === "pass" ? "verified" : "model-reported";
+}
+
 export class EvidenceBundleBuilder {
   private readonly requirements = new Map<string, RequirementCoverage>();
   private readonly claims = new Map<string, EvidenceClaim>();
@@ -149,6 +218,32 @@ export class EvidenceBundleBuilder {
   private readonly modelsSeen: string[] = [];
   private status: EvidenceBundle["status"] = "running";
   private omittedContext: readonly OmittedContextEntry[] = [];
+  /**
+   * Issue #81 batch2 round-pairing state (SCOPING §接点2): the most recent
+   * coder round's claims + the `EvidenceItem` id each was projected into,
+   * remembered only long enough for the *matching* tester round
+   * (`runId` **and** `roundFromStepRef` both equal — Zorro hardening #81:
+   * `runId` is carried alongside `round` even though this builder's own
+   * production call site, `ConductorWorkApp.projectEvents()`, only ever
+   * feeds it one run's events at a time and can't reach a cross-run
+   * collision today — `EvidenceBundleBuilder`/`recordEvent()` are public
+   * surface with no such single-run contract enforced on any caller, so a
+   * future/other caller replaying a multi-run event stream through one
+   * builder must not have round #1 of run A's coder claims silently paired
+   * with round #1 of run B's tester verdict just because the round numbers
+   * happen to coincide) to fold a claim status into `claims[]`. `undefined`
+   * whenever the last coder `agent_completed` event's `stepRef` didn't
+   * yield a derivable round — fail-closed, per SCOPING's "round对不上就不
+   * 建claim" guidance (and see `roundFromStepRef()`'s own doc comment for
+   * the G1-reject case this same fail-closed check also covers), rather
+   * than pairing against a stale/guessed round.
+   */
+  private lastCoderRound?: {
+    readonly runId: number;
+    readonly round: number;
+    readonly stepRef: string;
+    readonly pairs: readonly { readonly claim: Claim; readonly evidenceId: string }[];
+  };
 
   constructor(private readonly input: EvidenceBundleInput = {}) {
     for (const requirementId of input.requirementIds ?? []) {
@@ -187,6 +282,19 @@ export class EvidenceBundleBuilder {
         model: event.model ?? "unknown",
       });
     }
+    // Issue #81 batch2 (SCOPING §接点2): project real claim content —
+    // additive, alongside (not replacing) the pre-existing usage/no_change
+    // handling above/below. Guarded on `event.claims !== undefined` (not
+    // `.length > 0`) so a legally-empty round (`prompt/schema.ts`'s
+    // `CoderOutput.claims`/`TesterOutput.claims` have no `.min(1)`) still
+    // updates `lastCoderRound`'s round-tracking correctly instead of
+    // leaving a stale earlier round in place.
+    if (event.type === "agent_completed" && event.actor === "coder" && event.claims !== undefined) {
+      this.recordCoderClaims(event);
+    }
+    if (event.type === "agent_completed" && event.actor === "tester" && event.claims !== undefined) {
+      this.recordTesterClaims(event);
+    }
     if (event.type === "agent_completed" && event.outcome === "no_change" && event.noChangeReason && event.noChangeEvidence) {
       // Trust fix (issue #54 PR #57 review): `noChangeEvidence` is prose the
       // coder model itself wrote (`CoderOutputNoChange.evidence`,
@@ -210,6 +318,98 @@ export class EvidenceBundleBuilder {
       });
     }
     return this;
+  }
+
+  /**
+   * Issue #81 batch2 (SCOPING §接点2 coder侧): every claim the coder made
+   * this round becomes its own `EvidenceItem` (`content` = the claim text,
+   * `source` decided by `evidenceSourceFor()`'s red-line rule above — never
+   * `"verified"` off the model's own say-so). Also remembers this round
+   * (`lastCoderRound`) so a *matching* tester round below can fold a
+   * `ClaimStatus` on top of these same evidence ids — deliberately does
+   * **not** call `addClaim()` itself: a coder's claim has no verdict of its
+   * own yet, only the tester's review produces one (SCOPING: "tester的
+   * verdict是这一整轮的裁决").
+   */
+  private recordCoderClaims(event: AgentCompletedEvent): void {
+    const claims = event.claims ?? [];
+    const stepRefLabel = event.stepRef ?? "draft";
+    const pairs: { claim: Claim; evidenceId: string }[] = [];
+    claims.forEach((claim, i) => {
+      const evidenceId = `claim-evidence-${event.runId}-${stepRefLabel}-${i}`;
+      this.addEvidence({
+        id: evidenceId,
+        kind: evidenceKindFor(claim),
+        title: claim.claimText,
+        ref: `evidence://run/${event.runId}/${stepRefLabel}/claim-${i}`,
+        content: claim.claimText,
+        source: evidenceSourceFor(claim, event.toolExecChecked),
+      });
+      pairs.push({ claim, evidenceId });
+    });
+    const round = event.stepRef ? roundFromStepRef(event.stepRef) : undefined;
+    // Fail-closed (SCOPING "最大正确性风险" 次要风险): a stepRef this
+    // builder can't parse a round out of must not leave a *previous*
+    // round's pairing lying around for a later, unrelated tester event to
+    // accidentally match against.
+    this.lastCoderRound = round === undefined ? undefined : { runId: event.runId, round, stepRef: event.stepRef!, pairs };
+  }
+
+  /**
+   * Issue #81 batch2 (SCOPING §接点2 tester侧): the tester's own claims
+   * (what *it* checked to reach its verdict) become independent
+   * `EvidenceItem`s — never merged into/mistaken for the coder's claims
+   * ("不冒充coder的claim"). Separately, when this event's round
+   * (`roundFromStepRef(event.stepRef)`) matches `lastCoderRound`'s round
+   * *exactly*, this tester's whole-round `verdict` is folded onto each of
+   * that matching coder round's claims as an `EvidenceClaim` — `"pass"` ->
+   * `"supported"`, `"reject"` -> `"rejected"`, `evidenceRefs` pointing at
+   * that specific claim's own `EvidenceItem` id from `recordCoderClaims()`.
+   * A round or runId mismatch (or no prior coder round at all — including
+   * the G1-reject-desynced-counters case `roundFromStepRef()`'s doc comment
+   * describes) fails closed: no `addClaim()` call, rather than guessing a
+   * pairing. `runId` is checked alongside `round` (Zorro hardening #81) as
+   * an extra, purely-tightening guard: the real production call site
+   * (`ConductorWorkApp.projectEvents()`) only ever feeds one run's events
+   * through a builder, so this can never fire *stricter* than needed today
+   * — it only guards a hypothetical future/other caller that replays a
+   * multi-run event stream through one builder from a cross-run
+   * misattribution (round #1 of run A's coder claims silently paired with
+   * round #1 of run B's tester verdict, just because the round numbers
+   * happen to coincide).
+   */
+  private recordTesterClaims(event: AgentCompletedEvent): void {
+    const claims = event.claims ?? [];
+    const stepRefLabel = event.stepRef ?? "review";
+    claims.forEach((claim, i) => {
+      this.addEvidence({
+        id: `claim-evidence-${event.runId}-${stepRefLabel}-${i}`,
+        kind: evidenceKindFor(claim),
+        title: claim.claimText,
+        ref: `evidence://run/${event.runId}/${stepRefLabel}/claim-${i}`,
+        content: claim.claimText,
+        source: evidenceSourceFor(claim, event.toolExecChecked),
+      });
+    });
+
+    const round = event.stepRef ? roundFromStepRef(event.stepRef) : undefined;
+    const coderRound = this.lastCoderRound;
+    if (event.verdict && round !== undefined && coderRound && coderRound.runId === event.runId && coderRound.round === round) {
+      const status: ClaimStatus = event.verdict === "pass" ? "supported" : "rejected";
+      coderRound.pairs.forEach(({ claim, evidenceId }, i) => {
+        this.addClaim({
+          id: `claim-${event.runId}-${coderRound.stepRef}-${i}`,
+          text: claim.claimText,
+          status,
+          // Issue #81 batch3 (claim<->requirement linkage) is explicitly
+          // out of scope for this batch — `ClaimSchema` has no
+          // `requirementIds` field yet (SCOPING §接点3), so this can never
+          // be anything but `[]` here.
+          requirementIds: [],
+          evidenceRefs: [evidenceId],
+        });
+      });
+    }
   }
 
   addEvidence(item: EvidenceItem): this {

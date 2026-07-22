@@ -672,6 +672,11 @@ async function runStreamAndPersistCore(
             ...(coderResult.latencyMs === undefined ? {} : { latencyMs: coderResult.latencyMs }),
             outcome: coderOutput.status,
             ...(coderOutput.status === "no_change" ? { noChangeReason: coderOutput.reason, noChangeEvidence: coderOutput.evidence } : {}),
+            // Issue #81 batch1: the same `coderOutput.claims` the loop above
+            // just persisted to `structured_claims` — carried on the event
+            // too, so EvidenceBundleBuilder (batch2) can project it.
+            claims: coderOutput.claims,
+            ...(coderResult.toolExecChecked === undefined ? {} : { toolExecChecked: coderResult.toolExecChecked }),
           });
         }
       } else if (nodeName === LOOP_NODES.review) {
@@ -712,6 +717,12 @@ async function runStreamAndPersistCore(
             model: testerResult.model,
             ...(testerResult.usage === undefined ? {} : { usage: testerResult.usage }),
             ...(testerResult.latencyMs === undefined ? {} : { latencyMs: testerResult.latencyMs }),
+            // Issue #81 batch1: same `testerOutput.claims`/`.verdict` the
+            // loop above just persisted to `structured_claims` — carried on
+            // the event too, so EvidenceBundleBuilder (batch2) can project it.
+            claims: testerOutput.claims,
+            verdict: testerOutput.verdict,
+            ...(testerResult.toolExecChecked === undefined ? {} : { toolExecChecked: testerResult.toolExecChecked }),
           });
           // Issue #29 PRD §4.2 rows 7/8 — same guard/data this branch
           // already has in scope, no new read needed. `update.rejectCount`
