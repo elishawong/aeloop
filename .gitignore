@@ -10,6 +10,9 @@ dist/
 memory.db
 run-origins.json
 
+# Run artifacts (conductor-work run outputs: events jsonl + result json, accumulate per run)
+out/
+
 # Pipeline runtime state (advance CLI single-build working state, kept local per checkout, not tracked in git)
 .helix/
 
