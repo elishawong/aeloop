@@ -7,6 +7,7 @@ import type { LoopEvent } from "../loop/events.js";
 import { LoopEventEmitter } from "../loop/events.js";
 import type { StartRunDeps, RunHandle } from "../loop/runner.js";
 import { startRun } from "../loop/runner.js";
+import { renderTaskContract } from "../workflow/coder-tester.js";
 import type { ContextInjectionResult } from "../context/injector.js";
 import { EvidenceBundleBuilder, EvidenceEventProjector, type EvidenceBundle } from "../evidence/bundle.js";
 import type { RunPlan, TokenBudget } from "../conductor/run.js";
@@ -75,7 +76,7 @@ export class ConductorWorkApp {
     const handle = await startRun(
       { ...deps, events: emitter, schemaMaxAttempts: options.schemaMaxAttempts },
       {
-        task: plan.contract.objective,
+        task: renderTaskContract(plan.contract.objective, plan.contract),
         profile,
         workflowDefId: plan.workflow.id,
         injectedContext: options.injectedContext ?? { memories: [] },

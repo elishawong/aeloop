@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1.0",
+  "contractId": "company-a6-readonly-001",
+  "objective": "Inspect the repository and report whether the requested behavior is already implemented. Do not modify files.",
+  "requirements": [
+    {
+      "id": "REQ-READONLY-001",
+      "text": "Inspect the repository without changing any file.",
+      "acceptanceCriteria": [
+        "The run completes without a code diff.",
+        "The final result contains checked evidence."
+      ]
+    }
+  ],
+  "riskLevel": "low",
+  "policy": {
+    "allowedPaths": [],
+    "forbiddenChanges": [
+      "all file writes",
+      "git commit",
+      "git push",
+      "pull request",
+      "merge"
+    ],
+    "allowedCommands": [],
+    "allowedDependencies": [],
+    "allowNetwork": false,
+    "allowGitWrite": false,
+    "reviewerReadOnly": true
+  },
+  "sourceSnapshots": {
+    "PRD": "company-a6-readonly-manual-check"
+  },
+  "createdAt": "2026-07-22T00:00:00.000Z",
+  "brain": "company"
+}
