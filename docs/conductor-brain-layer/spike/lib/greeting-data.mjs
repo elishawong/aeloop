@@ -1,0 +1,192 @@
+// greeting-data.mjs — 组装 render-greeting.mjs 要渲染的完整数据（GreetingData）。
+//
+// 设计权威：docs/conductor-brain-layer/DESIGN.md §2.2（外层醒来 loop）+ aeloop issue #84 +
+// 军师 2026-07-22 两条追加指令（借用 Verity buildGreetingFromState() 的输出格式；只渲染
+// confirmed 的 memory 当事实，不把 unconfirmed 当真报）。
+//
+// 为什么不是直接把 wake() 的 WakeResult 传给渲染器：wake()（./wake.mjs）的 continuedThreads
+// 只覆盖 CORE_MEMORY_TYPES 等价集合（identity/constraint/decision）全量 + FTS5 命中的并集——
+// active_task/idea 不在这个集合里（wake.mjs 头注释原话），所以一次没有 queryHint 的"刚醒来"
+// 调用，wake() 天然看不到"现在在途"/"Idea Queue"要展示的东西。本文件在 wake() 之外，
+// 对 identity store 再做两次直接的、类型范围查询（status-table.mjs 的 collectStatusRows +
+// 本文件自己的 idea 查询），把这两块补齐——这是本增量对 DESIGN §2.2 WakeResult 接口草案的
+// 一个具体扩展，不是绕开它。
+//
+// 红线（军师 2026-07-22 追加指令，和 status-table.mjs 同一条）：
+//   只有 confidenceState === "confirmed" 的 memory 才会被当成"已发生的事实"渲染进
+//   "现在在途"表格 / "Idea Queue 积压" / 身份名 / "上次停在"。unconfirmed 的 active_task/idea
+//   绝不假装是既定事实——它们只会作为"候选，未确认"出现在"待你决策"段，摆明是待确认状态，
+//   不是被悄悄当真报了。这正是要和 Verity 那套 markdown persistence（无 confidence gate，
+//   什么都当真报）拉开的地方。
+//
+// 2026-07-22 Zorro/Codex 跨模型复审补丁（blocker 2 + blocker 3，同一批修复）：
+//   - blocker 2：ConfidenceState 是三态（unconfirmed|confirmed|rejected，src/context/types.ts:33）。
+//     "候选，未确认"这个桶只应该装 unconfirmed 的——rejected 是操作者已经明确否掉的，不是"还没
+//     确认"，绝不能被当成候选复活进"待你决策"。下面 unconfirmedActiveTasks/unconfirmedIdeas
+//     显式只筛 confidenceState === "unconfirmed"（不是 "!== confirmed"）。
+//   - blocker 3："上次停在"/结尾"继续「X」" 不能只挑 statusRows 里最近更新的一条——那条可能是
+//     ✅ done 或 ⬜ 待做，把这种任务当"当前焦点"报出来会误导操作者去"继续"一个其实没在推进的
+//     任务（demo 实测中招过）。pickFocusTask() 显式按优先级选：in-progress > blocked/
+//     pending-decision > todo/done/未知状态，同一优先级内部再按最近更新排序——不再退回单纯的
+//     "最近更新"这个 tie-break。
+
+import { wake } from "./wake.mjs";
+import { collectStatusRows } from "./status-table.mjs";
+
+const IDENTITY_NAME_TITLE = "identity:name";
+export const DEFAULT_IDENTITY_NAME = '(身份名未在身份库配置 —— 见 BRAIN.md "identity:name" 约定)';
+
+function byRecencyDesc(a, b) {
+  if (a.updatedAt !== b.updatedAt) return a.updatedAt < b.updatedAt ? 1 : -1;
+  return b.id - a.id;
+}
+
+function mostRecentConfirmed(memories, type) {
+  const hits = memories
+    .filter((memory) => memory.type === type && memory.confidenceState === "confirmed")
+    .sort(byRecencyDesc);
+  return hits[0] ?? null;
+}
+
+/**
+ * "当前焦点"优先级（blocker 3）：数字越小越优先。in-progress 最该被当成"我正在做的事"；
+ * blocked/pending-decision 次之（还悬在那，比 todo/done 更需要被提到）；todo/done/任何
+ * resolveStatus() 认不出的"未知状态"（status-table.mjs 的 ❓ 未知状态）排最后——宁可选一个
+ * 不太确定的兜底，也不假装某个未知状态就是"正在进行"。
+ */
+const FOCUS_PRIORITY = Object.freeze({
+  "in-progress": 0,
+  blocked: 1,
+  "pending-decision": 1,
+  todo: 2,
+  done: 2,
+});
+const UNKNOWN_FOCUS_PRIORITY = 3;
+
+// must-fix 2（2026-07-23 复审）：一个"当前焦点"只有落在这个优先级以内（in-progress=0 或
+// blocked/pending-decision=1）才算"可续做的事"，配得上"上次停在"/"继续「X」"这种措辞。
+// todo/done/未知状态（优先级 2、3）即便被 pickFocusTask() 选出来当"矮子里拔将军"，也不能被
+// 报成"当前在做的事"——那时应该整体退回和"没有任何在途任务"同一句中性文案。
+const ACTIONABLE_FOCUS_PRIORITY_MAX = 1;
+
+// 2026-07-23 Zorro/Codex 跨模型复审 must-fix 1（同一条原型链隐患，status-table.mjs 之外的
+// 第二处）：`FOCUS_PRIORITY[statusKey] ?? UNKNOWN_FOCUS_PRIORITY` 沿原型链查找——`statusKey`
+// 来自 collectStatusRows() 透传的 tag 值，同样是不可信输入，`status:toString` 这类值会让
+// `FOCUS_PRIORITY["toString"]` 拿到 `Object.prototype.toString`（不是 undefined，`??` 不会
+// 触发兜底），把一个函数当"优先级数字"参与比较。改用 `Object.hasOwn()` 只查自身属性。
+function focusPriority(statusKey) {
+  return Object.hasOwn(FOCUS_PRIORITY, statusKey) ? FOCUS_PRIORITY[statusKey] : UNKNOWN_FOCUS_PRIORITY;
+}
+
+/**
+ * 从 collectStatusRows() 的结果里选一个"当前焦点"——不是简单的"最近更新那条"（blocker 3：
+ * 那条可能是 done/todo），而是按 focusPriority 分层，同层内部保留 statusRows 已有的
+ * 按最近更新排序（status-table.mjs 的 byRecencyDesc）。
+ *
+ * @param {ReturnType<typeof collectStatusRows>} statusRows
+ * @returns {ReturnType<typeof collectStatusRows>[number] | null}
+ */
+function pickFocusTask(statusRows) {
+  if (statusRows.length === 0) return null;
+  let best = statusRows[0];
+  let bestPriority = focusPriority(best.statusKey);
+  for (const row of statusRows) {
+    const priority = focusPriority(row.statusKey);
+    if (priority < bestPriority) {
+      best = row;
+      bestPriority = priority;
+    }
+  }
+  return best;
+}
+
+/**
+ * @param {import("../../../../dist/context/store.js").MemoryStore} store
+ * @param {{ queryHint?: string }} [opts]
+ * @returns {{
+ *   identityName: string,
+ *   lastStop: string,
+ *   statusRows: ReturnType<typeof collectStatusRows>,
+ *   backlogItems: import("../../../../dist/context/types.js").Memory[],
+ *   pendingDecisions: Array<{ label: string }>,
+ *   followUp: string,
+ *   openingSummary: string,
+ * }}
+ */
+export function gatherGreetingData(store, opts = {}) {
+  const wakeResult = wake(store, opts.queryHint);
+  const all = store.listMemories();
+
+  // ---- 身份名：identity 类型 + 固定 title 约定 + 必须 confirmed ----
+  const identityMemory = all.find(
+    (memory) =>
+      memory.type === "identity" &&
+      memory.title === IDENTITY_NAME_TITLE &&
+      memory.confidenceState === "confirmed",
+  );
+  const identityName = identityMemory ? identityMemory.content : DEFAULT_IDENTITY_NAME;
+
+  // ---- 现在在途：复用 status-table.mjs，两个消费方同一份实现 ----
+  const statusRows = collectStatusRows(store);
+
+  // ---- 上次停在：优先 snapshot 类型（confirmed），否则退到"现在在途"里的当前焦点
+  //      （pickFocusTask，不是单纯"最近更新"——blocker 3）。
+  //
+  //      2026-07-23 Zorro/Codex 跨模型复审 must-fix 2：pickFocusTask() 在 statusRows 非空时
+  //      必返一条——如果全部任务都是 done/todo/未知状态（没有任何 in-progress/blocked/
+  //      pending-decision），选出来的那条本身就不是"当前真的在做的事"，把它当"上次停在"/结尾
+  //      "继续「X」"报出来是误导（全 done → "继续「已经做完的事」"；todo-only/unknown-only 同理）。
+  //      只有 focusTask 的优先级落在"可续做"区间（in-progress=0 或 blocked/pending-decision=1，
+  //      即 focusPriority <= ACTIONABLE_FOCUS_PRIORITY_MAX）才采用它；否则退回和"完全没有在途
+  //      任务"同一句中性文案，不点名任何具体任务。 ----
+  const snapshotMemory = mostRecentConfirmed(all, "snapshot");
+  const focusTask = pickFocusTask(statusRows);
+  const focusIsActionable = focusTask !== null && focusPriority(focusTask.statusKey) <= ACTIONABLE_FOCUS_PRIORITY_MAX;
+  const lastStop = snapshotMemory
+    ? snapshotMemory.content
+    : focusIsActionable
+      ? focusTask.task
+      : "当前没有可回溯的断点。";
+
+  // ---- Idea Queue 积压：idea 类型，confirmed，未打 "done" tag ----
+  const backlogItems = all
+    .filter(
+      (memory) => memory.type === "idea" && memory.confidenceState === "confirmed" && !memory.tags.includes("done"),
+    )
+    .sort(byRecencyDesc);
+
+  // ---- 待你决策：wake() 的 pendingDecisions（identity/constraint/decision 里未确认的）
+  //      ∪ unconfirmed 的 active_task/idea 候选（不能进"现在在途"/"Idea Queue"当既定事实，
+  //      只能在这里露面，标明是"候选，未确认"）。显式只筛 "unconfirmed"——rejected 彻底
+  //      排除在外（blocker 2：rejected 是已经否掉的，不是待确认候选）。 ----
+  const unconfirmedActiveTasks = all.filter(
+    (memory) => memory.type === "active_task" && memory.confidenceState === "unconfirmed",
+  );
+  const unconfirmedIdeas = all.filter((memory) => memory.type === "idea" && memory.confidenceState === "unconfirmed");
+
+  const pendingDecisions = [
+    ...wakeResult.pendingDecisions.map((memory) => ({
+      label: `[${memory.type}] ${memory.title} — ${memory.content}`,
+    })),
+    ...unconfirmedActiveTasks.map((memory) => ({
+      label: `[active_task 候选，未确认] ${memory.title} — ${memory.content}`,
+    })),
+    ...unconfirmedIdeas.map((memory) => ({
+      label: `[idea 候选，未确认] ${memory.title} — ${memory.content}`,
+    })),
+  ];
+
+  // 同一道 must-fix 2 门控：只有 focusIsActionable 才说"继续「X」"，否则复用
+  // "没有任何在途任务"那句中性问句——不点名一个 done/todo/未知状态的任务当成"继续"的对象。
+  const followUp = focusIsActionable ? `继续「${focusTask.task}」，还是有新的？` : "有什么想让我接手的？";
+
+  return {
+    identityName,
+    lastStop,
+    statusRows,
+    backlogItems,
+    pendingDecisions,
+    followUp,
+    openingSummary: wakeResult.openingSummary,
+  };
+}

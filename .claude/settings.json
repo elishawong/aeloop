@@ -1,0 +1,16 @@
+{
+  "$comment": "aeloop 自己的 Claude Code hooks（aeloop issue #84：brain 醒来开场白 Phase1）。安全默认：AELOOP_BRAIN_IDENTITY_DB 未设置时，brain-wake-greeting.mjs 安静跳过、不注入任何东西、不影响会话正常启动——所以这份 settings.json 提交进仓库对没有配身份库的普通会话是零副作用的。配置方式见 docs/conductor-brain-layer/WAKE-GREETING-RUNBOOK.md。诚实标注：这只换了数据源（aeloop 身份 MemoryStore），没有换运行时——仍然依附 Claude Code CLI 自己的 SessionStart 生命周期钩子（DESIGN.md §7.1/§7.2 Phase1/Phase2 边界）。",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/brain-wake-greeting.mjs\""
+          }
+        ]
+      }
+    ]
+  }
+}
