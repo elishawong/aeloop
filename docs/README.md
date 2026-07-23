@@ -1,33 +1,33 @@
-# aeloop — Doc System
+# aeloop — 文档体系
 
-> 📌 Index + rules for the doc system. Read this first before starting work. Same discipline throughout: **single source of truth, delete once done, full history lives in git.**
+> 📌 文档体系的索引 + 规则。开工前先读这份。全程同一套纪律:**单一事实来源、完成即删、完整历史交给 git。**
 
-## 0. Golden Rules (locked in)
-1. **Each doc answers exactly one question, and there's only one truth for it.** Don't keep two copies.
-2. **Docs follow the code they describe.** Design authority for the engine lives in this repo at `docs/DESIGN.md`; upstream strategic rationale lives in a private internal repo — link to it, don't duplicate it here.
-3. **Progress is interruptible and resumable.** Long-running task state lives in `PROGRESS.md`.
-4. **Anti-bloat.** Boards/progress docs only keep what's unfinished; done items move to `CHANGELOG.md` (recent) + `git log` (full history).
+## 0. 黄金规则(已定盘)
+1. **每份文档只答一个问题,且只有一份事实。** 不留两份拷贝。
+2. **文档跟着它描述的代码走。** 引擎的设计权威在本仓库的 `docs/DESIGN.md`;上游的战略理由放在一个私有内部仓库——链接过去,不在这里重复。
+3. **进度可中断可续跑。** 长任务的状态放在 `PROGRESS.md`。
+4. **防臃肿。** 看板/进度文档只留未完成的;完成的项转进 `CHANGELOG.md`(近期)+ `git log`(完整历史)。
 
-## 1. Doc Map
-| Doc | Location | Answers | Retirement rule |
+## 1. 文档地图
+| 文档 | 位置 | 回答什么 | 退役规则 |
 |---|---|---|---|
-| **Design authority** | `docs/DESIGN.md` | What the engine looks like (four layers / DB / file layout / milestones) | Updated when direction changes; authoritative source in this repo |
-| Strategic rationale | (lives in a private internal repo) | Why it was built this way (upstream planning decision) | Not in this repo — linked externally, not duplicated here |
-| Overall progress board | `docs/ROADMAP.md` | Where things stand now / the full picture | Completed items **keep their checkmark**; includes the idea-insertion rule |
-| In-progress board | `docs/BACKLOG.md` | What's being worked on / up next | Only keeps unfinished items, deleted once done |
-| Resume point | `docs/PROGRESS.md` | Where a run stopped mid-way and how to resume it | Cleared once the batch is done |
-| Changelog | `CHANGELOG.md` | What was recently completed | Last ~15 entries / 90 days |
-| Full history | `git log` / `git blame` | Who changed what, when, and why | Comes with git, not hand-copied |
+| **设计权威** | `docs/DESIGN.md` | 引擎长什么样(四层/数据库/文件结构/里程碑) | 方向变了就更新;本仓库内的权威来源 |
+| 战略理由 | (放在私有内部仓库) | 为什么这么设计(上游规划决定) | 不在本仓库——外链,不在此重复 |
+| 总体进度看板 | `docs/ROADMAP.md` | 现在到哪了/全局图景 | 已完成项**保留勾选标记**;含 idea 插入规则 |
+| 在途看板 | `docs/BACKLOG.md` | 正在做什么/接下来做什么 | 只留未完成项,一完成就删 |
+| 断点 | `docs/PROGRESS.md` | 一次跑到哪断的、怎么续 | 批次完成即清空 |
+| Changelog | `CHANGELOG.md` | 最近完成了什么 | 最近约 15 条 / 90 天 |
+| 完整历史 | `git log` / `git blame` | 谁在何时因为什么改了什么 | git 自带,不手抄 |
 
-## 2. In-progress Backlog Rules
-The queue = this repo's GitHub Issues + the `docs/BACKLOG.md` mirror. Labels: `idea`/`quick-fix`/`P0-2`/`status:*`. `gh ... --repo elishawong/aeloop`. Ideas not yet approved by the commander don't go on the board; once done, delete from the mirror + close the Issue.
+## 2. 在途 Backlog 规则
+队列 = 本仓库的 GitHub Issues + `docs/BACKLOG.md` 镜像。标签:`idea`/`quick-fix`/`P0-2`/`status:*`。`gh ... --repo elishawong/aeloop`。指挥官没批准的 idea 不上看板;一完成就从镜像里删掉 + 关闭 Issue。
 
-## 3. Maintenance Triggers (every time)
-1. Every time something substantive is completed → delete that item from BACKLOG + add a CHANGELOG line + close the Issue.
-2. Before committing, confirm this has already been written back.
-3. At the end of a session/task, proactively report "docs updated / no update needed."
-4. If a batch stops partway through → write PROGRESS (see §4).
+## 3. 维护触发点(每次都要)
+1. 每次完成实质性事项 → 从 BACKLOG 删掉那条 + 加一行 CHANGELOG + 关闭 Issue。
+2. commit 前,确认已经回写。
+3. 会话/任务收尾时,主动报"文档已更新/无需更新"。
+4. 批次跑到一半停了 → 写 PROGRESS(见 §4)。
 
-## 4. "Stop halfway, resume later" (resume)
-Progress always lives on disk, never relies on session memory. Update `docs/PROGRESS.md` before every batch wrap-up/interruption.
-**New session / restart opening move: read PROGRESS → `git status` → resume from "in progress."** Once a batch is done → clear PROGRESS, write CHANGELOG.
+## 4. "跑到一半,以后续上"(续跑)
+进度永远落在磁盘上,不靠会话记忆。每次批次收尾/中断前更新 `docs/PROGRESS.md`。
+**新会话/重启后的开场动作:读 PROGRESS → `git status` → 从"进行中"续上。** 批次一完成 → 清空 PROGRESS,写 CHANGELOG。

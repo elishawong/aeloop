@@ -1,0 +1,24 @@
+flowchart LR
+    CONTRACT["Public Contracts<br/>TaskContract / ContextPack / RunPolicy"]
+
+    subgraph CORE["Aeloop Core"]
+        PROMPT["Prompt<br/>Role + Schema + Prompt Template"]
+        CONTEXT["Context<br/>Provider + Snapshot + Budget"]
+        HARNESS["Harness<br/>Model + Tool + Workspace + Telemetry"]
+        RUNTIME["Workflow Runtime<br/>Graph + Gate + Resume + Events"]
+        POLICY["Policy Engine<br/>File / Tool / Dependency / SCM"]
+        EVIDENCE["Evidence Engine<br/>Claim -> Evidence -> Artifact"]
+    end
+
+    PLUGINS["Workflow Plugins<br/>coder-tester / research / prd / custom"]
+    CLIENTS["Conductor Clients"]
+
+    CLIENTS --> CONTRACT
+    CONTRACT --> RUNTIME
+    RUNTIME --> HARNESS
+    HARNESS --> CONTEXT
+    CONTEXT --> PROMPT
+    RUNTIME --> POLICY
+    HARNESS --> EVIDENCE
+    PLUGINS --> RUNTIME
+    RUNTIME -->|"LoopEvent / GateRequest / EvidenceBundle"| CLIENTS

@@ -47,101 +47,19 @@
 
 ### 三层架构总览
 
-```mermaid
-flowchart TB
-    subgraph L3["Layer3 — Brain 行为层（新建，从现有参考实现移植）"]
-        WAKE["醒来 loop<br/>(读 identity db → 组开场白)"]
-        CONST["宪法约束<br/>(CORE 铁律 + hooks 等价物)"]
-        POST["Postmortem 复盘仪式"]
-        SCHED["调度<br/>(意图分诊 → 派工 or 直接回话)"]
-    end
-
-    subgraph GLUE["胶水（三块要建）"]
-        TRANS["① 意图→TaskContract 翻译器"]
-        OUTER["② 外层醒来/对话/调度 loop"]
-        VEC["③ 向量层（net-new，加在 FTS5 之上）"]
-    end
-
-    subgraph L1["Layer1 — 共享记忆底座（已有，MemoryStore 库）"]
-        MS["MemoryStore(dbPath)<br/>SQLite + FTS5<br/>12 类 memory type<br/>三态确认 confirm/correct/reject"]
-    end
-
-    subgraph L2["Layer2 — aeloop 执行引擎（已有，brain 不进这层，只在边界喊话）"]
-        ORCH["Orchestrator.planRun()<br/>→ RunPlan"]
-        RUNNER["startRun/resumeRun<br/>coder→G1→tester→G2/G3→apply"]
-        HARNESS["Harness<br/>ProviderRouter + AdapterRegistry<br/>LiteLLMAdapter(direct-api)<br/>ClaudeCliAdapter/CodexCliAdapter(cli-bridge)"]
-        EVB["EvidenceBundleBuilder<br/>→ EvidenceBundle"]
-    end
-
-    WAKE --> MS
-    SCHED --> TRANS
-    TRANS -->|"TaskContract"| ORCH
-    ORCH --> RUNNER
-    RUNNER --> HARNESS
-    RUNNER --> EVB
-    EVB -->|"EvidenceBundle"| OUTER
-    OUTER -->|"三态确认门折回"| MS
-    OUTER --> POST
-    CONST -.->|"约束整个 L3"| WAKE
-    CONST -.-> SCHED
-    VEC -.->|"语义检索，叠加在"| MS
-```
+![三层架构总览](diagrams/DESIGN-01-三层架构总览.svg)
 
 **图例说明**：Layer1/Layer2 内部方框标注的类/文件是已验证存在的真实代码（见 §12）；Layer3 + GLUE 三块是本设计要新建的部分，图中未画出具体类名（还没设计到那个细度，见 §2 接口草案）。
 
 ### 关键流程时序图 1：醒来
 
-```mermaid
-sequenceDiagram
-    participant U as 操作者/用户
-    participant OUTER as 外层醒来 loop（②，新建）
-    participant MS as identity MemoryStore（brain 自己的 dbPath）
-    participant VEC as 向量层（③，新建，[?] 未定型）
-    participant CONST as 宪法约束（L3，从现有参考实现 hooks 移植）
-
-    Note over OUTER: 进程/会话启动
-    OUTER->>MS: listMemories() 核心类型全量<br/>(identity/constraint/decision，同 CORE_MEMORY_TYPES 的移植版)
-    OUTER->>MS: searchMemories(上次话题关键词) FTS5
-    MS-->>OUTER: Memory[]（含 confidenceState/staleOverrideDays）
-    OUTER->>VEC: [?] 语义召回（若 FTS5 关键词未命中）
-    VEC-->>OUTER: [?] 补充候选 memory
-    OUTER->>CONST: 校验：人格/铁律未漂移
-    CONST-->>OUTER: 约束确认 / 报警
-    OUTER-->>U: 开场白（延续上次话题 + 待你决策项）
-```
+![关键流程时序图 1：醒来](diagrams/DESIGN-02-关键流程时序图-1-醒来.svg)
 
 **故意画出的缺口**：`VEC`（向量层）和 `CONST`（宪法约束校验）两条线目前都没有具体实现可以指——向量层是 net-new 组件（§2.3），宪法约束"校验未漂移"这一步在现有参考实现自己的体系里也是**靠自觉的开场白格式规范 + 自检**（`CORE/CORE.md` §🚀），不是机制化硬检查；移植到 brain 层时这一步先天就不是"调一个函数拿到 true/false"，而是"这轮生成的开场白本身有没有遵守宪法格式"——需要在 §2.2 外层 loop 的设计里进一步展开，本图先如实标注这是当前设计里最软的一环。
 
 ### 关键流程时序图 2：派工 → 折回
 
-```mermaid
-sequenceDiagram
-    participant U as 操作者
-    participant OUTER as 外层调度 loop（②）
-    participant TRANS as 意图→TaskContract 翻译器（①）
-    participant CW as ConductorWorkApp（已有，src/conductor-work/app.ts）
-    participant ORCH as Orchestrator（已有）
-    participant RUNNER as startRun/resumeRun（已有，loop/runner.ts）
-    participant EVB as EvidenceBundleBuilder（已有）
-    participant MS as identity MemoryStore（brain 自己的实例）
-
-    U->>OUTER: 自然语言意图（"做 X"）
-    OUTER->>TRANS: 意图 + 当前 memory 上下文
-    TRANS->>TRANS: 组装 Requirement[]/ExecutionPolicy/riskLevel
-    TRANS-->>OUTER: TaskContract（frozen，assertValidTaskContract 过）
-    Note over OUTER,CW: 两种调用模式：见 §1 方案对比<br/>①子进程 CLI: conductor-work.mjs run <contract.json> --json<br/>②库调: new ConductorWorkApp(...).runCandidate(contractPath,...)
-    OUTER->>CW: runCandidate(contractPath, profile, deps)
-    CW->>ORCH: planRun(...) → RunPlan(budget/policy/workflow)
-    CW->>RUNNER: startRun(deps, input) — coder→G1(人工)→tester→G2/G3(人工)→apply
-    RUNNER-->>CW: RunHandle + LoopEvent[]
-    CW->>EVB: projectEvents(events) — 只读投影，engine 内部 claim 不直接可信
-    EVB-->>CW: EvidenceBundle（requirements 覆盖/claims/evidence/usage）
-    CW-->>OUTER: { plan, handle, events, evidence }
-    OUTER->>OUTER: 三态确认门：<br/>evidence.source==="verified" → 可 confirm<br/>"model-reported" → 仍 unconfirmed，需人工/独立复核
-    OUTER->>MS: insertMemory(type: postmortem/decision/...) + updateMemoryConfidence(...)
-    MS-->>OUTER: 落库确认
-    OUTER-->>U: 下次醒来可见的延续记忆
-```
+![关键流程时序图 2：派工 → 折回](diagrams/DESIGN-03-关键流程时序图-2-派工-折回.svg)
 
 **故意画出的缺口**：`ConductorWorkApp.runCandidate()`（`src/conductor-work/app.ts:63-83`）里的 G1/G2/G3 都是"human gates are returned, never auto-approved"（该文件第 63 行注释原话）——图里没有画出"谁来点 approve"，因为**这就是 §12 提到的 gate-controller 缺口**：`docs/architecture/conductor-work/CAPABILITY-MAP.zh-CN.md` 记录 gate-controller"代码在（resume-only，start/stop fail-closed），未提交、未接 CLI/UI"。brain 层的外层 loop 要怎么把"人工点头"接进这条链，是一块本设计**明确列入不做清单**的缺口（§9），先如实画出断链而非假装已经打通。
 

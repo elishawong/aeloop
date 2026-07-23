@@ -1,0 +1,16 @@
+sequenceDiagram
+    participant U as 操作者/用户
+    participant OUTER as 外层醒来 loop（②，新建）
+    participant MS as identity MemoryStore（brain 自己的 dbPath）
+    participant VEC as 向量层（③，新建，[?] 未定型）
+    participant CONST as 宪法约束（L3，从现有参考实现 hooks 移植）
+
+    Note over OUTER: 进程/会话启动
+    OUTER->>MS: listMemories() 核心类型全量<br/>(identity/constraint/decision，同 CORE_MEMORY_TYPES 的移植版)
+    OUTER->>MS: searchMemories(上次话题关键词) FTS5
+    MS-->>OUTER: Memory[]（含 confidenceState/staleOverrideDays）
+    OUTER->>VEC: [?] 语义召回（若 FTS5 关键词未命中）
+    VEC-->>OUTER: [?] 补充候选 memory
+    OUTER->>CONST: 校验：人格/铁律未漂移
+    CONST-->>OUTER: 约束确认 / 报警
+    OUTER-->>U: 开场白（延续上次话题 + 待你决策项）

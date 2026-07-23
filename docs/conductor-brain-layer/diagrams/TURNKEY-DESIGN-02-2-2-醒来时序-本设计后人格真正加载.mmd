@@ -1,0 +1,15 @@
+sequenceDiagram
+    participant CC as Claude Code CLI
+    participant CM as CLAUDE.md（新建，见§3方案i）
+    participant Hook as brain-wake-greeting.mjs（延伸）
+    participant Store as identity MemoryStore
+    participant Model as 模型
+
+    CC->>CM: 会话启动，Claude Code 原生读取项目 CLAUDE.md（无需 hook）
+    CM-->>Model: 系统级注入：身份/人格/铁律/醒来协议（静态，全程有效）
+    CC->>Hook: SessionStart(startup/resume/clear)
+    Hook->>Store: gatherGreetingData() + 新增：confirmed constraint memory 摘要
+    Store-->>Hook: 同 #84 六字段 + constraintSummary（若有 unconfirmed constraint，进 pendingDecisions，同已有约定）
+    Hook-->>CC: additionalContext = 开场白文字（动态，逐会话不同）
+    CC->>Model: CLAUDE.md（人格，静态） + additionalContext（在途状态，动态）
+    Model-->>Model: 两条线合流：既知道"我是谁/守什么铁律"，也知道"上次做到哪"

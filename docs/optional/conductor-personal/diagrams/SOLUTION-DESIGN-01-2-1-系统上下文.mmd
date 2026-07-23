@@ -1,0 +1,33 @@
+flowchart TB
+    OWNER["个人用户 / 产品负责人"]
+    WORKUSER["工作用户 / 审批人"]
+
+    PERSONAL["Conductor<br/>私人版大脑"]
+    WORK["Conductor Work<br/>工作版大脑"]
+    ENGINE["Aeloop<br/>工作流执行与验证内核"]
+
+    PERSONAL_DB[("私人记忆与项目数据")]
+    WORK_DB[("工作记忆、需求与政策数据")]
+    RUN_DB[("Aeloop Run / Event / Evidence DB")]
+
+    GITHUB["GitHub<br/>人工批准后的产品层操作"]
+    GITLAB["GitLab<br/>默认只读；禁止远端写操作"]
+    LITELLM["Company LiteLLM"]
+    SUBS["Claude / Codex Subscription CLI"]
+
+    OWNER <--> PERSONAL
+    WORKUSER <--> WORK
+
+    PERSONAL <--> PERSONAL_DB
+    WORK <--> WORK_DB
+
+    PERSONAL -->|"TaskContract + ContextPack + RunPolicy"| ENGINE
+    WORK -->|"TaskContract + ContextPack + RunPolicy"| ENGINE
+    ENGINE -->|"LoopEvent + GateRequest + EvidenceBundle"| PERSONAL
+    ENGINE -->|"LoopEvent + GateRequest + EvidenceBundle"| WORK
+    ENGINE <--> RUN_DB
+
+    PERSONAL -->|"独立授权"| GITHUB
+    WORK -->|"读取需求与仓库元数据"| GITLAB
+    ENGINE --> SUBS
+    ENGINE --> LITELLM

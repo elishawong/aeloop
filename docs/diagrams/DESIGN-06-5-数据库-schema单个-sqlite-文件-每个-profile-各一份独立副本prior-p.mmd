@@ -1,0 +1,72 @@
+erDiagram
+    MEMORIES {
+        integer id PK
+        text type "12 种类型:identity/snapshot/active_task/idea/decision/postmortem/map/constraint/relation/agent_spec/requirement/project_registry"
+        text title
+        text content
+        text source_file
+        text tags
+        text confidence_state "unconfirmed/confirmed/rejected"
+        integer stale_override_days "NULL 时回退到 system_config"
+        text created_at
+        text updated_at
+        text confirmed_at
+        text confirmed_by
+    }
+    MEMORY_CONFIRMATIONS {
+        integer id PK
+        integer memory_id FK
+        text action "confirm/correct/reject"
+        text old_content
+        text new_content
+        text actor
+        text created_at
+    }
+    SYSTEM_CONFIG {
+        text key PK "default_stale_days/default_reject_threshold/..."
+        text value
+        text updated_at
+    }
+    WORKFLOW_RUNS {
+        integer id PK
+        text task_id
+        text workflow_def_id
+        text profile "subscription|apikey(aeloop-new)"
+        text status "running/escalated/completed/cancelled"
+        integer reject_count
+        integer reject_threshold "本次 run 的快照值"
+        text current_state
+        text langgraph_thread_id
+        text created_at
+        text updated_at
+    }
+    STRUCTURED_CLAIMS {
+        integer id PK
+        integer run_id FK
+        text step_ref
+        text actor "coder/tester"
+        text claim_text
+        text confidence "verified/inferred/unconfirmed/stale"
+        text source_ref
+        text verified_by "tool_execution/human/unverified"
+        text tool_exec_checked "aeloop-new:pass/fail/na(仅 cli-bridge)"
+        text model_used
+        text provider_used
+        text created_at
+    }
+    APPROVALS {
+        integer id PK
+        integer run_id FK
+        text gate_type "G1_SEND_TO_TESTER/G2_SEND_TO_FIX/G3_FINAL_MERGE/ESCALATION_ACK"
+        text step_ref
+        text diff_ref "hash/path,不内联大段文本"
+        text reasoning_text
+        text decision "approved/rejected/override"
+        text decision_reason
+        text decided_by
+        text decided_at
+        integer latency_seconds
+    }
+    MEMORIES ||--o{ MEMORY_CONFIRMATIONS : "confirm/correct 历史"
+    WORKFLOW_RUNS ||--o{ STRUCTURED_CLAIMS : "结构化 claim"
+    WORKFLOW_RUNS ||--o{ APPROVALS : "每个 gate 的批准记录"

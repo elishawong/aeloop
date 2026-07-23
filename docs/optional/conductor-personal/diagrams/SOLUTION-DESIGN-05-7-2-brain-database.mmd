@@ -1,0 +1,98 @@
+erDiagram
+    PROJECTS ||--o{ GOALS : has
+    PROJECTS ||--o{ SOURCE_DOCUMENTS : references
+    PROJECTS ||--o{ DECISIONS : records
+    PROJECTS ||--o{ MEMORY_ITEMS : remembers
+    GOALS ||--o{ TASK_CONTRACTS : creates
+    TASK_CONTRACTS ||--o{ RUN_LINKS : dispatches
+    SOURCE_DOCUMENTS ||--o{ SOURCE_SNAPSHOTS : versions
+    BRAIN_SESSIONS ||--o{ BRAIN_MESSAGES : contains
+
+    PROJECTS {
+        text id PK
+        text name
+        text repository_ref
+        text status
+        datetime updated_at
+    }
+
+    GOALS {
+        text id PK
+        text project_id FK
+        text objective
+        text priority
+        text status
+        datetime created_at
+    }
+
+    DECISIONS {
+        text id PK
+        text project_id FK
+        text decision
+        text rationale
+        text source_ref
+        datetime decided_at
+    }
+
+    MEMORY_ITEMS {
+        text id PK
+        text project_id FK
+        text memory_type
+        text title
+        text content
+        text confidence_state
+        text source_ref
+        datetime verified_at
+        datetime stale_after
+    }
+
+    SOURCE_DOCUMENTS {
+        text id PK
+        text project_id FK
+        text source_type
+        text source_ref
+        text access_class
+    }
+
+    SOURCE_SNAPSHOTS {
+        text id PK
+        text document_id FK
+        text version
+        text content_hash
+        text local_ref
+        datetime captured_at
+    }
+
+    TASK_CONTRACTS {
+        text id PK
+        text goal_id FK
+        text contract_json
+        text contract_hash
+        text status
+        datetime frozen_at
+    }
+
+    RUN_LINKS {
+        text id PK
+        text task_contract_id FK
+        text aeloop_run_id
+        text final_status
+        text evidence_bundle_ref
+    }
+
+    BRAIN_SESSIONS {
+        text id PK
+        text project_id FK
+        text session_type
+        datetime started_at
+        datetime completed_at
+    }
+
+    BRAIN_MESSAGES {
+        text id PK
+        text session_id FK
+        text actor
+        text content_ref
+        integer token_count
+        datetime created_at
+    }

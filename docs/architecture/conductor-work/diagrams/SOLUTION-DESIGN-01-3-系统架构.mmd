@@ -1,0 +1,20 @@
+flowchart TB
+    USER["用户 / 审批人"]
+    SOURCES["PRD / Figma / Repository Rules"]
+    BRAIN["Conductor Work<br/>需求编译、风险判断、产品交互"]
+    CONTRACT["TaskContract<br/>需求、范围、验收、禁止项"]
+    ENGINE["Aeloop<br/>可信工作流执行内核"]
+    PROFILE["Work Profile<br/>LiteLLM、模型、工具与安全策略"]
+    REPORT["EvidenceBundle<br/>覆盖矩阵、变更、测试、审批、Token"]
+    REPO["隔离 Workspace<br/>禁止远端 Git 写操作"]
+
+    USER --> BRAIN
+    SOURCES --> BRAIN
+    BRAIN --> CONTRACT
+    CONTRACT --> ENGINE
+    PROFILE --> ENGINE
+    ENGINE <--> REPO
+    ENGINE -->|"GateRequest"| BRAIN
+    BRAIN -->|"人工决定"| ENGINE
+    ENGINE --> REPORT
+    REPORT --> USER

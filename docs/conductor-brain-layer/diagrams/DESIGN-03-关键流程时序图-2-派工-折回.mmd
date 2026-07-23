@@ -1,0 +1,26 @@
+sequenceDiagram
+    participant U as 操作者
+    participant OUTER as 外层调度 loop（②）
+    participant TRANS as 意图→TaskContract 翻译器（①）
+    participant CW as ConductorWorkApp（已有，src/conductor-work/app.ts）
+    participant ORCH as Orchestrator（已有）
+    participant RUNNER as startRun/resumeRun（已有，loop/runner.ts）
+    participant EVB as EvidenceBundleBuilder（已有）
+    participant MS as identity MemoryStore（brain 自己的实例）
+
+    U->>OUTER: 自然语言意图（"做 X"）
+    OUTER->>TRANS: 意图 + 当前 memory 上下文
+    TRANS->>TRANS: 组装 Requirement[]/ExecutionPolicy/riskLevel
+    TRANS-->>OUTER: TaskContract（frozen，assertValidTaskContract 过）
+    Note over OUTER,CW: 两种调用模式：见 §1 方案对比<br/>①子进程 CLI: conductor-work.mjs run <contract.json> --json<br/>②库调: new ConductorWorkApp(...).runCandidate(contractPath,...)
+    OUTER->>CW: runCandidate(contractPath, profile, deps)
+    CW->>ORCH: planRun(...) → RunPlan(budget/policy/workflow)
+    CW->>RUNNER: startRun(deps, input) — coder→G1(人工)→tester→G2/G3(人工)→apply
+    RUNNER-->>CW: RunHandle + LoopEvent[]
+    CW->>EVB: projectEvents(events) — 只读投影，engine 内部 claim 不直接可信
+    EVB-->>CW: EvidenceBundle（requirements 覆盖/claims/evidence/usage）
+    CW-->>OUTER: { plan, handle, events, evidence }
+    OUTER->>OUTER: 三态确认门：<br/>evidence.source==="verified" → 可 confirm<br/>"model-reported" → 仍 unconfirmed，需人工/独立复核
+    OUTER->>MS: insertMemory(type: postmortem/decision/...) + updateMemoryConfidence(...)
+    MS-->>OUTER: 落库确认
+    OUTER-->>U: 下次醒来可见的延续记忆

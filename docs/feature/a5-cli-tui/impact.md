@@ -50,7 +50,7 @@
 ## 5. 项目约束自查
 - whoseorder:不适用(aeloop 是独立项目,非 whoseorder vendor 代码)。
 - 占位符 / 假数据残留?无——`renderDiff`/`gate-view.ts` 渲染的都是真实 `GatePayload` 字段,`main.ts` 的三条命令都走真实 `assembleSubscriptionDeps()`/`runner.ts` 导出,没有留 TODO/stub。
-- `git diff --stat` 核对:除 `src/cli/**`(新)+ `src/cli.e2e.test.ts`(新)外,只改了 `src/loop/runner.ts`(+36 行,纯新增导出)+ `src/loop/__tests__/runner.test.ts`(+123 行,纯新增测试)+ `package.json`/`pnpm-lock.yaml`(依赖)+ 四份文档(B9 范围内)——符合 PRD §10 "No changes outside `src/cli/**` except the single, additive `runner.ts` export" 验收标准。
+- `git diff --stat` 核对:除 `src/cli/**`(新)+ `src/cli.e2e.test.ts`(新)外,只改了 `src/loop/runner.ts`(+36 行,纯新增导出)+ `src/loop/__tests__/runner.test.ts`(+123 行,纯新增测试)+ `package.json`/`pnpm-lock.yaml`(依赖)+ 四份文档(B9 范围内)——符合 PRD §10"除了那一处新增的、纯新增的 `runner.ts` 导出之外,`src/cli/**` 之外没有其它改动"的验收标准。
 
 ---
 

@@ -1,0 +1,44 @@
+sequenceDiagram
+    autonumber
+    actor Dev as 开发者
+    participant UI as CLI/TUI
+    participant Orc as 编排(LangGraph)
+    participant Mem as Context
+    participant Coder as Coder(模型 A)
+    participant Tester as Tester(模型 B≠A)
+    participant Audit as approvals
+
+    Dev->>UI: 提交任务(--profile subscription|apikey)
+    UI->>Orc: start_workflow
+    Orc->>Mem: ContextInjector 注入(core 全量加载 + FTS5 召回,过滤已拒绝项,stale/未确认项打警告标)
+    Orc->>Coder: invoke(coder, prompt+ctx, schema)
+    Coder-->>Orc: {diff, claims[], confidence}
+    Orc->>Orc: SchemaValidator(失败→重试一次→仍失败,标 lowConfidence,绝不静默失败)
+    opt cli-bridge 路径
+        Orc->>Orc: ToolExecVerifier(如果某条 claim 声称做了 tool_execution,必须有真实的工具调用记录,否则标"声称 ≠ 实际")
+    end
+    rect rgb(255,247,214)
+    Note over Dev,UI: G1 —— 批准送去复审?
+    Orc->>UI: diff + 理由(claims/confidence)
+    alt 批准
+        Dev->>UI: 👍 / Audit(G1,approved)
+    else 拒绝(退回 Coder,不计入拒绝总数)
+        Dev->>UI: 👎+反馈 / Audit(G1,rejected)
+    end
+    end
+    Orc->>Tester: invoke(tester, diff+ctx, schema)  %% 模型 B,独立视角
+    Tester-->>Orc: {verdict, issues[], confidence}
+    alt 拒绝且计数<阈值
+        Orc->>Orc: reject_count += 1
+        rect rgb(255,230,230)
+        Note over Dev,UI: G2 —— 批准自动修复?
+        end
+    else 拒绝且计数>=阈值
+        Orc->>UI: ⚠️ 强制升级(硬分支,绕过 G2)
+        Orc->>Audit: Audit(ESCALATION,forced)
+    end
+    rect rgb(214,255,222)
+    Note over Dev,UI: G3 —— 最终签字写入
+    end
+    Orc->>Orc: 写入工作区文件(不自动 git commit/push)
+    Orc-->>Dev: 完成 + 审计轨迹

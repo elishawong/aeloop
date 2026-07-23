@@ -1,0 +1,122 @@
+erDiagram
+    TASK_CONTRACTS ||--o{ WORKFLOW_RUNS : starts
+    WORKFLOW_RUNS ||--o{ RUN_STEPS : contains
+    WORKFLOW_RUNS ||--o{ RUN_EVENTS : emits
+    WORKFLOW_RUNS ||--o{ APPROVALS : requires
+    WORKFLOW_RUNS ||--o{ CONTEXT_SNAPSHOTS : uses
+    WORKFLOW_RUNS ||--o{ ARTIFACTS : produces
+    RUN_STEPS ||--o{ CLAIMS : makes
+    RUN_STEPS ||--o{ TOOL_EXECUTIONS : executes
+    RUN_STEPS ||--o{ USAGE_RECORDS : consumes
+    CLAIMS ||--o{ CLAIM_EVIDENCE : supported_by
+
+    TASK_CONTRACTS {
+        text id PK
+        text contract_json
+        text contract_hash
+        text source_snapshot_hash
+        text policy_hash
+        datetime frozen_at
+    }
+
+    WORKFLOW_RUNS {
+        text id PK
+        text task_contract_id FK
+        text workflow_id
+        text workflow_version
+        text profile_id
+        text status
+        text current_step
+        text workspace_id
+        datetime created_at
+        datetime updated_at
+    }
+
+    RUN_STEPS {
+        text id PK
+        text run_id FK
+        text step_id
+        integer attempt
+        text role_id
+        text provider
+        text model
+        text status
+        datetime started_at
+        datetime completed_at
+    }
+
+    RUN_EVENTS {
+        integer sequence PK
+        text run_id FK
+        text event_type
+        text payload_json
+        text previous_hash
+        text event_hash
+        datetime created_at
+    }
+
+    CLAIMS {
+        text id PK
+        text step_id FK
+        text requirement_id
+        text claim_text
+        text confidence
+        text verification_status
+    }
+
+    TOOL_EXECUTIONS {
+        text id PK
+        text step_id FK
+        text tool_name
+        text arguments_hash
+        text cwd
+        integer exit_code
+        text stdout_hash
+        text stderr_hash
+    }
+
+    CLAIM_EVIDENCE {
+        text claim_id FK
+        text evidence_type
+        text evidence_id
+    }
+
+    APPROVALS {
+        text id PK
+        text run_id FK
+        text gate_id
+        text decision
+        text decided_by
+        text contract_hash
+        text artifact_hash
+        datetime decided_at
+    }
+
+    CONTEXT_SNAPSHOTS {
+        text id PK
+        text run_id FK
+        text provider_id
+        text source_version
+        text content_hash
+        integer token_count
+    }
+
+    ARTIFACTS {
+        text id PK
+        text run_id FK
+        text kind
+        text path
+        text content_hash
+        text baseline_hash
+    }
+
+    USAGE_RECORDS {
+        text id PK
+        text step_id FK
+        integer input_tokens
+        integer output_tokens
+        integer cached_tokens
+        integer reasoning_tokens
+        real estimated_cost
+        integer latency_ms
+    }

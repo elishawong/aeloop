@@ -1,0 +1,14 @@
+flowchart LR
+    A["读取 PRD/Figma"] --> B["冻结 TaskContract"]
+    B --> C["创建隔离 Workspace"]
+    C --> D["Coder 生成候选变更"]
+    D --> E{"G1 人工确认"}
+    E -->|"拒绝"| D
+    E -->|"批准"| F["确定性检查"]
+    F --> G["独立 Tester 审核"]
+    G --> H{"通过?"}
+    H -->|"否"| I["反馈与受限返工"]
+    I --> D
+    H -->|"是"| J{"G3 最终确认"}
+    J -->|"拒绝"| D
+    J -->|"批准"| K["EvidenceBundle"]
