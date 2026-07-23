@@ -290,7 +290,24 @@ export async function main(opts = {}) {
       // `scripts/dispatch-brain-task.mjs` 复用同一份，不各写一份，PRD §4.6 已定的共享方式）。
       assertProjectRegistered(store, origin.owner, origin.repo);
 
-      const issues = await fetchOpenIssues({ owner: origin.owner, repo: origin.repo });
+      // issue #96（Zorro/Codex 跨模型二签 2026-07-23 FAIL 后补齐，🟡 项1）：`fetchOpenIssues()`
+      // 调用点此前没有任何错误处理——`gh` CLI 缺失（ENOENT）/未登录/网络失败等，会让整个
+      // `main()` 抛错冒泡到顶层 `.catch()`，进程以非零 exit code 中止。真实后果比看起来更糟：
+      // 途①②（身份+宪法约束）此时已经写进 store 了，只是途③（issue 同步）失败——一个"部分
+      // 成功但报错退出"的状态，容易被误读成"整个 seed 都没生效"。改成优雅降级：只包这一个调用
+      // 点（不改 `assertProjectRegistered()` 等其它任何错误路径的语义——项目未注册仍然是真实
+      // 应该中止的错误，继续抛错，这是本次改动明确限定的范围），失败时记 `skippedIssueSync`、
+      // `issues` 退化成空数组，`main()` 正常返回、进程 exit 0——身份/宪法已经种下这个事实不该
+      // 被一个和它无关的 issue 同步失败连累成"看起来整体失败了"。
+      let issues;
+      try {
+        issues = await fetchOpenIssues({ owner: origin.owner, repo: origin.repo });
+      } catch (err) {
+        result.skippedIssueSync =
+          `gh CLI 不可用（未安装/未登录/调用失败），已跳过 issue 在途同步——身份 + 宪法约束已正常` +
+          `写入，不受影响。原始错误：${err?.message ?? String(err)}`;
+        issues = [];
+      }
       for (const issue of issues) {
         const tags = resolveActiveTaskTags(issue, projectTag);
         const outcome = upsertMemory(

@@ -263,7 +263,44 @@ try {
     rmSync(bareDir, { recursive: true, force: true });
   }
 
-  console.log("PASS: test-seed-brain-identity.mjs (issue #88 B8 — 幂等 upsert + 5种status映射 + closed→archived + 无DB路径报错 + 改标题不产生孤儿 + 多label优先级 + 无origin跳过)");
+  // ── ⑧（issue #96，Zorro/Codex 跨模型二签 2026-07-23 FAIL 后补齐，🟡 项1）：`gh` CLI 不可用
+  //     （缺失/未登录/调用失败）时，`fetchOpenIssues()` 抛错——此前会让整个 main() 拒绝、进程以
+  //     非零 exit code 中止（哪怕身份+宪法约束途①②已经写完）。现在应该优雅降级：main() 正常
+  //     resolve，`skippedIssueSync` 记下原因，`issues` 退化成空数组，不影响已经写完的身份/
+  //     宪法约束 ────────────────────────────────────────────────────────────────
+  {
+    const simulatedGhError = new Error("spawnSync gh ENOENT"); // 真实 gh 缺失时 execFileSync 抛的错误形状
+    simulatedGhError.code = "ENOENT";
+
+    const result = await main({
+      cwd: TEST_REPO,
+      fetchOpenIssues: async () => {
+        throw simulatedGhError;
+      },
+    });
+
+    assert.ok(result.skippedIssueSync, "gh 调用失败时应设置 skippedIssueSync，不该让 main() 整体拒绝");
+    assert.match(result.skippedIssueSync, /gh CLI 不可用/, "skippedIssueSync 措辞应说明是 gh 不可用，不是别的原因");
+    assert.match(result.skippedIssueSync, /ENOENT/, "skippedIssueSync 应带上原始错误信息，方便排查");
+    assert.deepEqual(result.issues, [], "gh 调用失败时 issues 应退化成空数组，不是抛出未捕获异常");
+    assert.equal(result.identity.action, "unchanged", "gh 失败不该影响已经写完的身份记录");
+    assert.ok(
+      result.constraints.every((c) => c.action === "unchanged"),
+      "gh 失败不该影响已经写完的宪法约束",
+    );
+
+    // 双重确认：DB 里身份/宪法约束记录确实还在，不是"结果对象说没受影响，但库其实被清空了"这种
+    // 表里不一。
+    const all = readAll();
+    assert.ok(all.some((m) => m.type === "identity"), "gh 失败后身份记录应仍然存在于库里");
+    assert.equal(
+      all.filter((m) => m.type === "constraint").length,
+      CONSTITUTION_CONSTRAINTS.length,
+      "gh 失败后全部宪法约束记录应仍然存在于库里",
+    );
+  }
+
+  console.log("PASS: test-seed-brain-identity.mjs (issue #88 B8 — 幂等 upsert + 5种status映射 + closed→archived + 无DB路径报错 + 改标题不产生孤儿 + 多label优先级 + 无origin跳过 + issue #96 gh失败优雅降级)");
 } finally {
   if (ORIGINAL_ENV_DB === undefined) delete process.env.AELOOP_BRAIN_IDENTITY_DB;
   else process.env.AELOOP_BRAIN_IDENTITY_DB = ORIGINAL_ENV_DB;

@@ -20,6 +20,14 @@
 // 注：POSIX 文件路径除了 NUL（`\0`）和路径分隔符 `/` 之外，单个路径段可以包含任意字节——
 // 包括真实换行符——这是本测试能在磁盘上真实构造出"一个 dbPath 字符串本身含真实换行"这个场景
 // 的原因，不是伪造的字符串拼接模拟。
+//
+// issue #96 起，"空库"这个状态本身有了新行为（首次醒来引导，见
+// docs/first-wake-onboarding/DESIGN.md）——此前 ①⑥⑦ 三段测试都用的是一个从未写入任何 memory
+// 的全新 dbPath（在 #96 之前，"空库"和"有数据的库"渲染出的开场白结构没有差异，都是 #84/#88
+// 已经覆盖的"诚实占位符"路径，所以可以用空库测别的东西）。#96 之后这三段测试各自补种了至少
+// 一条真实 memory，确保继续测的是"有数据时"的行为（dbPath 注入安全/版本行/dist 缺失
+// fail-soft），不被新的空库引导分支污染。新增的 ⑧⑨⑩ 三段专门测 #96 的两种引导状态 + 一条
+// 状态 C（有数据）回归对照。
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -41,9 +49,24 @@ try {
   mkdirSync(injectedDir);
   const dbPath = path.join(injectedDir, "identity.db");
 
-  // openIdentityStore(dbPath) 由 hook 自己在子进程里调用（真实 spawn，不绕过）；这里只需要
-  // dbPath 这个路径本身存在且可写，不需要预先塞任何 memory——即便是空库，hook 也会正常产出
-  // 一份"大部分是无"的开场白，本测试只关心带外前缀这一个出口，不需要真实数据。
+  // issue #96：这个测试关心的是"dbPath 注入安全"，不是"空库引导"——空库现在会走首次引导分支
+  // （不含"意识已加载"这一行，见 ⑧⑨），如果不预先塞一条真实 memory，下面①的断言会被新分支
+  // 污染。补种一条 confirmed 的 identity memory，让这次 spawn 走的是"有数据"的正常渲染路径，
+  // 继续单纯测带外前缀这一个出口。
+  {
+    const { openIdentityStore: openStoreForSeed } = await import(
+      path.join(REPO_ROOT, "docs", "conductor-brain-layer", "spike", "lib", "wake.mjs")
+    );
+    const seedStore = openStoreForSeed(dbPath);
+    seedStore.insertMemory({
+      type: "identity",
+      title: "identity:name",
+      content: "测试身份",
+      tags: [],
+      confidenceState: "confirmed",
+    });
+    seedStore.close();
+  }
 
   const stdinPayload = JSON.stringify({ session_id: "test-hook-injection", cwd: REPO_ROOT });
   const proc = spawnSync("node", [HOOK_PATH], {
@@ -148,6 +171,21 @@ try {
     const dbDir6 = mkdtempSync(path.join(tmpdir(), "aeloop-test-hook-greeting-version-"));
     const dbPath6 = path.join(dbDir6, "identity.db");
     try {
+      // issue #96：这条测的是版本行渲染，不是空库引导——补种一条真实 memory，避免落进新的
+      // 空库引导分支（引导分支不带版本行，见 DESIGN.md §2"不做的事"）。
+      const { openIdentityStore: openStoreForSeed6 } = await import(
+        path.join(REPO_ROOT, "docs", "conductor-brain-layer", "spike", "lib", "wake.mjs")
+      );
+      const seedStore6 = openStoreForSeed6(dbPath6);
+      seedStore6.insertMemory({
+        type: "identity",
+        title: "identity:name",
+        content: "测试身份",
+        tags: [],
+        confidenceState: "confirmed",
+      });
+      seedStore6.close();
+
       const { GENERATED_VERSION_INFO } = await import(
         path.join(REPO_ROOT, "dist", "shared", "version-info.generated.js")
       );
@@ -196,6 +234,22 @@ try {
     renameSync(versionFilePath, versionFileBackupPath); // 真实挪走——不是 mock，hook 自己的
     // 动态 import 会真的踩到 MODULE_NOT_FOUND。
     try {
+      // issue #96：这条测的是 dist/ 缺失时的 fail-soft，不是空库引导——补种一条真实 memory，
+      // 避免落进新的空库引导分支（引导分支的措辞和这条要断言的"意识已加载。"/"有什么想让我
+      // 接手的？"完全不同）。
+      const { openIdentityStore: openStoreForSeed7 } = await import(
+        path.join(REPO_ROOT, "docs", "conductor-brain-layer", "spike", "lib", "wake.mjs")
+      );
+      const seedStore7 = openStoreForSeed7(dbPath7);
+      seedStore7.insertMemory({
+        type: "identity",
+        title: "identity:name",
+        content: "测试身份",
+        tags: [],
+        confidenceState: "confirmed",
+      });
+      seedStore7.close();
+
       const stdinPayload7 = JSON.stringify({ session_id: "test-hook-nodist", cwd: REPO_ROOT });
       const proc7 = spawnSync("node", [HOOK_PATH], {
         input: stdinPayload7,
@@ -217,6 +271,104 @@ try {
   }
 
   console.log("PASS: test-hook-greeting.mjs（⑦ dist/ 缺失时 hook 级 fail-soft 端到端验证：exit 0 + 无版本行 + 开场白其余部分完整，issue #98）");
+
+  // ⑧（issue #96）状态 A——两个配置源都没有：真实把 cwd 指到一个全新临时目录（不含
+  //    .claude/brain.local.json），env 里把 AELOOP_BRAIN_IDENTITY_DB/AELOOP_BRAIN_GLOBAL_MODE
+  //    都删掉，确保 resolveIdentityDbPath() 真的解不出任何 dbPath（不是靠猜这台机器/这次 shell
+  //    没配置——显式控制，同 .claude/hooks/lib/test-db-path.mjs 的既有做法）。
+  {
+    const cwd8 = mkdtempSync(path.join(tmpdir(), "aeloop-test-hook-greeting-notconfigured-"));
+    try {
+      const env8 = { ...process.env };
+      delete env8.AELOOP_BRAIN_IDENTITY_DB;
+      delete env8.AELOOP_BRAIN_GLOBAL_MODE;
+
+      const stdinPayload8 = JSON.stringify({ session_id: "test-hook-not-configured", cwd: cwd8 });
+      const proc8 = spawnSync("node", [HOOK_PATH], {
+        input: stdinPayload8,
+        encoding: "utf8",
+        cwd: cwd8,
+        env: env8,
+      });
+      assert.equal(proc8.status, 0, `未配置时 hook 仍必须 exit 0，实际 status=${proc8.status}，stderr=${proc8.stderr}`);
+      const additionalContext8 = JSON.parse(proc8.stdout).hookSpecificOutput.additionalContext;
+      assert.equal(typeof additionalContext8, "string", "未配置时也必须注入引导脚本，不能像 #96 之前那样彻底沉默");
+      assert.ok(!additionalContext8.includes("意识已加载"), "未配置时绝不能出现'意识已加载'——没有真实数据支撑");
+      assert.ok(additionalContext8.includes("launchctl setenv"), "未配置引导应提到 IDE 不继承 env 的 launchctl 修法");
+      assert.ok(additionalContext8.includes("scripts/seed-brain-identity.mjs"), "未配置引导应提到 seed 脚本");
+      assert.ok(additionalContext8.includes("issue #102"), "未配置引导应带 #102 troubleshooting 提示");
+      assert.ok(proc8.stderr.includes("身份库未配置"), "stderr 应有可排查的诊断信息，说明走的是状态 A 引导分支");
+    } finally {
+      rmSync(cwd8, { recursive: true, force: true });
+    }
+  }
+
+  console.log("PASS: test-hook-greeting.mjs（⑧ 状态 A——两个配置源都没有时注入首次引导脚本，issue #96）");
+
+  // ⑨（issue #96）状态 B——dbPath 能解析出来，但库是空的（不插入任何 memory）：
+  //    MemoryStore 打开一个不存在的文件会静默建出空 schema（src/context/store.ts createSchema()
+  //    用 CREATE TABLE IF NOT EXISTS，已读源码确认），这正是"配了路径但没 seed"的真实场景。
+  {
+    const dbDir9 = mkdtempSync(path.join(tmpdir(), "aeloop-test-hook-greeting-emptystore-"));
+    const dbPath9 = path.join(dbDir9, "identity.db");
+    try {
+      const stdinPayload9 = JSON.stringify({ session_id: "test-hook-empty-store", cwd: REPO_ROOT });
+      const proc9 = spawnSync("node", [HOOK_PATH], {
+        input: stdinPayload9,
+        encoding: "utf8",
+        env: { ...process.env, AELOOP_BRAIN_IDENTITY_DB: dbPath9 },
+      });
+      assert.equal(proc9.status, 0, `空库时 hook 仍必须 exit 0，实际 status=${proc9.status}，stderr=${proc9.stderr}`);
+      const additionalContext9 = JSON.parse(proc9.stdout).hookSpecificOutput.additionalContext;
+      assert.ok(!additionalContext9.includes("意识已加载"), "空库时绝不能出现'意识已加载'——没有真实数据支撑");
+      assert.ok(additionalContext9.includes("已经配置了路径"), "空库引导应说明路径已经配好、缺的是数据");
+      assert.ok(additionalContext9.includes("scripts/seed-brain-identity.mjs"), "空库引导应提到 seed 脚本");
+      assert.ok(!additionalContext9.includes(dbPath9), "空库引导正文不该插值具体 dbPath（DESIGN §5：诊断信息不进模型要转达的正文）");
+      assert.ok(proc9.stderr.includes("已连上身份库"), "stderr 诊断行不能丢——只是移到 stderr，不是删掉");
+      assert.ok(proc9.stderr.includes(dbPath9), "stderr 里的诊断信息应该带真实 dbPath，方便排查");
+      assert.ok(proc9.stderr.includes("首次引导脚本"), "stderr 应说明走的是状态 B 引导分支，不是正常渲染路径");
+    } finally {
+      rmSync(dbDir9, { recursive: true, force: true });
+    }
+  }
+
+  console.log("PASS: test-hook-greeting.mjs（⑨ 状态 B——已配置但空库时注入首次引导脚本，dbPath 不进正文，issue #96）");
+
+  // ⑩（issue #96）状态 C 回归对照——有真实数据的库必须继续走正常渲染路径，不能被新的空库检测
+  //    误伤（比如把"只有 1 条 memory"也误判成"空"）。
+  {
+    const dbDir10 = mkdtempSync(path.join(tmpdir(), "aeloop-test-hook-greeting-normal-"));
+    const dbPath10 = path.join(dbDir10, "identity.db");
+    try {
+      const { openIdentityStore: openStoreForSeed10 } = await import(
+        path.join(REPO_ROOT, "docs", "conductor-brain-layer", "spike", "lib", "wake.mjs")
+      );
+      const seedStore10 = openStoreForSeed10(dbPath10);
+      seedStore10.insertMemory({
+        type: "identity",
+        title: "identity:name",
+        content: "测试身份十号",
+        tags: [],
+        confidenceState: "confirmed",
+      });
+      seedStore10.close();
+
+      const stdinPayload10 = JSON.stringify({ session_id: "test-hook-normal", cwd: REPO_ROOT });
+      const proc10 = spawnSync("node", [HOOK_PATH], {
+        input: stdinPayload10,
+        encoding: "utf8",
+        env: { ...process.env, AELOOP_BRAIN_IDENTITY_DB: dbPath10 },
+      });
+      assert.equal(proc10.status, 0, `有数据时 hook 仍必须 exit 0，实际 status=${proc10.status}，stderr=${proc10.stderr}`);
+      const additionalContext10 = JSON.parse(proc10.stdout).hookSpecificOutput.additionalContext;
+      assert.ok(additionalContext10.includes("意识已加载。我是 测试身份十号。"), "只要有 1 条 memory 就必须走正常渲染路径，不能被误判成空库引导");
+      assert.ok(!additionalContext10.includes("首次醒来引导") && !additionalContext10.includes("引导脚本"), "有数据时不该出现任何引导脚本措辞");
+    } finally {
+      rmSync(dbDir10, { recursive: true, force: true });
+    }
+  }
+
+  console.log("PASS: test-hook-greeting.mjs（⑩ 状态 C 回归对照——哪怕只有 1 条 memory 也必须继续走正常渲染路径，issue #96）");
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

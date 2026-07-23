@@ -26,8 +26,8 @@
  * 普通会话被这个 hook 卡住或搞出一堆报错噪音。用动态 import()（不是顶层 static import）
  * 就是为了让"dist/ 还没 build"这种失败也能被 try/catch 接住，而不是在模块加载阶段就直接崩溃。
  *
- * 配置（issue #88 B9 更新：dbPath 有两个来源，二选一，缺一不可当"必需"看待——两者都没有
- *   才安静跳过）：
+ * 配置（issue #88 B9 更新：dbPath 有两个来源，二选一，缺一不可当"必需"看待——issue #96 起，
+ *   两者都没有**不再**是"安静跳过"，见下方"首次醒来引导"一节）：
  *   - **首选** AELOOP_BRAIN_IDENTITY_DB：身份库 dbPath 环境变量，建议用绝对路径（相对路径会
  *     相对 `better-sqlite3` 打开时的进程 cwd 解析，hook 和手动跑 print-status-table.mjs 的 cwd
  *     不一定相同，绝对路径避免歧义，见 WAKE-GREETING-RUNBOOK.md）。
@@ -35,10 +35,20 @@
  *     （`.claude/brain.local.json.example` 是模板，复制一份改名即可；已 gitignore，不进 git）
  *     ——解决 IDE/图形界面启动的会话不继承 shell profile export 的坑，见 `resolveIdentityDbPath()`
  *     （`./lib/db-path.mjs`）+ WAKE-GREETING-RUNBOOK.md"IDE 启动读不到 env 的坑"一节。
- *   - 两者都没有 → 安静跳过，不注入任何东西，不是错误（#84 既有行为，本次未变）。
+ *   - **两者都没有 → issue #96 起注入首次引导脚本**（不是 #84/#88 时期的"安静跳过、不注入
+ *     任何东西"——那条描述已经被 #96 推翻，别再信这句话字面写的"本次未变"，本次就变了；
+ *     完整行为见下方"首次醒来引导"一节）。
  *   - AELOOP_BRAIN_IDENTITY_NAME（可选）：显式覆盖身份名，优先级高于身份库里
  *     type:"identity", title:"identity:name" 的那条 memory——纯粹为了方便在身份库还没配置
  *     identity:name 记录时也能先跑通 demo，不是长期推荐路径（长期应该配进身份库本身）。
+ *
+ * 首次醒来引导（issue #96，设计权威 docs/first-wake-onboarding/DESIGN.md，本文件不重复论证）：
+ *   dbPath 解析出 null（两个配置源都没有）或解析出来但库是空的（`listMemories().length === 0`——
+ *   `MemoryStore` 打开一个不存在的文件不会报错，只会静默建出空 schema，这是"配了路径但没
+ *   seed"和"压根没配置"共同会落到的状态）时，**不再彻底沉默/渲染诚实占位符开场白**——改为注入
+ *   `docs/conductor-brain-layer/spike/lib/onboarding-greeting.mjs` 的引导正文，指示模型带用户走
+ *   一遍问答式配置，而不是逐字复述。这两种状态下绝不能出现"意识已加载"这类需要真实数据支撑的
+ *   延续式开场白措辞——防幻觉红线在这条最基础的分支上同样适用，不是只护着"有数据"的路径。
  */
 
 import { readFileSync } from "node:fs";
@@ -59,6 +69,22 @@ function emitAdditionalContext(text) {
     JSON.stringify({
       hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text },
     }),
+  );
+}
+
+// issue #96：区别于下面正常路径用的"请原样复述"包装（逐字复述一段已经渲染好的真实数据），首次
+// 引导正文是一段要模型**执行**（带用户问答式走配置）的脚本，不是要**背诵**的开场白——两种指令
+// 混在一起会让模型把引导步骤当成开场白抄一遍就完事。这里显式区分包装语气，同时把"不要输出延续式
+// 开场白措辞/不要假装有身份"这条红线在元指令层面再强调一次（正文本身也自带这条约束，双重保险，
+// 防止未来任何一层的措辞被后续改动弱化）。
+function wrapOnboardingScript(body) {
+  return (
+    "[brain-wake-greeting] 下面这段不是要你逐字复述的开场白，是一份引导脚本。" +
+    "请按脚本内容，用对话/问答的方式带用户完成配置——每次只推进一步、等用户确认或反馈再继续下一步，" +
+    "不要一次性甩给用户一长串命令。绝不能假装身份库已经配置好、绝不能编造任何“在途任务”/“身份名”/" +
+    "历史记忆，也绝不能输出延续式开场白（“我是……上次停在……”那种格式）——那需要真实数据支撑，" +
+    "现在没有。如果用户明确想跳过配置，如实告诉 TA 在配置完成之前每次开新会话都会再看到这段引导，" +
+    `然后正常处理用户接下来的请求。\n\n${body}`
   );
 }
 
@@ -83,7 +109,16 @@ async function main() {
   // AELOOP_BRAIN_GLOBAL_MODE=1 时会跳过 brain.local.json 那层、落到一个固定全局默认路径——两条
   // 分支都在 resolveIdentityDbPath() 内部处理，本文件这一行调用本身不需要跟着改。
   const dbPath = resolveIdentityDbPath();
-  if (!dbPath) return; // 两个配置源都没有 = 安静跳过，不是错误（#84 既有行为，本次不变）
+
+  // issue #96：两个配置源都没有 = 状态 A（未配置）——此前是安静跳过、不注入任何东西（#84 既有
+  // 行为），本次改为注入首次引导正文（不是逐字复述用的开场白），理由见本文件头注释"首次醒来
+  // 引导"一节 + docs/first-wake-onboarding/DESIGN.md。
+  if (!dbPath) {
+    const { renderOnboardingNotConfigured } = await import(path.join(SPIKE_LIB_DIR, "onboarding-greeting.mjs"));
+    console.error("[brain-wake-greeting] 身份库未配置（env / .claude/brain.local.json 均未设置），已注入首次引导脚本");
+    emitAdditionalContext(wrapOnboardingScript(renderOnboardingNotConfigured()));
+    return;
+  }
 
   const { openIdentityStore } = await import(path.join(SPIKE_LIB_DIR, "wake.mjs"));
   const { gatherGreetingData } = await import(path.join(SPIKE_LIB_DIR, "greeting-data.mjs"));
@@ -99,6 +134,34 @@ async function main() {
   }
 
   const store = openIdentityStore(dbPath);
+
+  // issue #96：状态 B（已配置但空）——dbPath 能解析出来，但 `MemoryStore` 打开一个不存在的文件
+  // 不会报错，只会静默建出空 schema（src/context/store.ts createSchema() 用 CREATE TABLE IF NOT
+  // EXISTS，已读源码确认）。这个判断必须在调用 gatherGreetingData()/renderGreeting() 之前做——
+  // 那条管线本身对空库已经有诚实占位符处理（#84/#88 既有行为，test-greeting.mjs 仍在测），但
+  // #96 要的是"空库 = 主动引导"，不是"空库 = 渲染一份大部分是'无'的开场白后沉默"。
+  //
+  // Zorro/Codex 跨模型二签（2026-07-23）must-fix：`listMemories()` 本身也可能抛错（`store.ts`
+  // 的"读方法一律包成 RecallError"约定）——下面这次调用必须包进 try/catch，抛错时也要先
+  // `store.close()` 再把错误往外抛（交给 `main().catch()` 的既有 fail-soft 兜底），不能让一个
+  // 读失败绕过 store 关闭。状态 C 分支（`gatherGreetingData()`）已经有 `try/finally` 保护，这里
+  // 补齐同等保护，不再是不对称的两套标准。
+  let memoriesCount;
+  try {
+    memoriesCount = store.listMemories().length;
+  } catch (err) {
+    store.close();
+    throw err;
+  }
+
+  if (memoriesCount === 0) {
+    store.close();
+    const { renderOnboardingEmptyStore } = await import(path.join(SPIKE_LIB_DIR, "onboarding-greeting.mjs"));
+    console.error(`[brain-wake-greeting] 已连上身份库：${dbPath}（当前为空，已注入首次引导脚本）`);
+    emitAdditionalContext(wrapOnboardingScript(renderOnboardingEmptyStore()));
+    return;
+  }
+
   let data;
   try {
     data = gatherGreetingData(store, { currentProjectKey });

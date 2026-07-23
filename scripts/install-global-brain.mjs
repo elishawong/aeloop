@@ -60,6 +60,13 @@ export const COPY_ITEMS = [
   // 装完之后会是 MODULE_NOT_FOUND（这一步本身有 try/catch 兜底不会阻断开场白，但版本行会永远
   // 缺失，等同于没做）。
   { src: path.join("docs", "conductor-brain-layer", "spike", "lib", "version-info.mjs"), type: "file" },
+  // issue #96（Zorro/Codex 跨模型二签 FAIL 后补齐）：brain-wake-greeting.mjs 状态 A/B（未配置/
+  // 空库）动态 import 这个 lib 来产出首次引导正文——和上面 version-info.mjs 是同一类坑，但这次
+  // 后果更重：version-info 缺失只丢一行诊断信息，不影响开场白其余部分；onboarding-greeting.mjs
+  // 缺失会导致 import() 直接 MODULE_NOT_FOUND，被 main().catch() 吞掉，stdout 完全空——**正好
+  // 变回 #96 本身要堵的"沉默=模型脑补假开场白"那个洞**，而且是在全局模式首次在新机器上跑（dbPath
+  // 恒非 null，首次必然命中状态 B）这个 #96 最该生效的场景下失效。
+  { src: path.join("docs", "conductor-brain-layer", "spike", "lib", "onboarding-greeting.mjs"), type: "file" },
 ];
 
 /** @param {string} [homeDir] */
