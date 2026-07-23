@@ -1,0 +1,11 @@
+sequenceDiagram
+    participant U as 操作者
+    participant CLI as onboard-project.mjs（全局安装目录内）
+    participant GIT as 目标项目 git remote（只读）
+    participant DB as identity.db（全局）
+
+    U->>CLI: node onboard-project.mjs（cwd=目标项目 或 --repo owner/repo）
+    CLI->>GIT: git remote get-url origin（只读，不写任何文件）
+    GIT-->>CLI: owner/repo
+    CLI->>DB: upsert project_registry(title="project:owner/repo")
+    CLI-->>U: 注册完成，目标项目 git status 全程未变

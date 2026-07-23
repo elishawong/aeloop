@@ -1,9 +1,12 @@
-// test-seed-brain-identity.mjs — issue #88 B8 单元测试：seed-brain-identity.mjs。
+// test-seed-brain-identity.mjs — issue #88 B8 单元测试：seed-brain-identity.mjs（issue #93 B3
+// 新增：目标项目必须先注册 + project:* tag 传播的用例）。
 //
 // 覆盖 plan.md §B8："注入假 fetchOpenIssues，覆盖 DESIGN §3.c 全部 5 种映射；二次运行零调用
 // 验证；issue 消失 → archived tag"，加上本轮 operator 明确要求的：closed issue 直接判定
 // archived（不是靠"消失"推断）、无 DB 路径明确报错、多 status label 优先级、issue 改标题的
 // 幂等匹配（按 gh-issue tag，不按 title）。
+// 覆盖 docs/conductor-brain-multiproject/PRD.md §6.4："目标项目未注册 → 明确报错，零写入；
+// 目标项目已注册 → 全部 active_task 的 tags 含正确的 project:<owner>/<repo>；二次运行真幂等"。
 //
 // 跑法：node scripts/test-seed-brain-identity.mjs（需要先 pnpm run build 生成 dist/，需要
 // git CLI；不需要真实网络/gh 登录——fetchOpenIssues 全程用注入的 stub，不调真实 gh）。
@@ -19,6 +22,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, "..");
 
 const { main, CONSTITUTION_CONSTRAINTS, resolveActiveTaskTags } = await import("./seed-brain-identity.mjs");
+const { upsertMemory } = await import("../.claude/hooks/lib/memory-upsert.mjs");
 const { MemoryStore } = await import(join(REPO_ROOT, "dist", "context", "store.js"));
 
 // 独立临时 git 仓库（带假 origin，供 getOriginOwnerRepo 用）+ 独立临时身份库，全程不碰真实
@@ -26,6 +30,7 @@ const { MemoryStore } = await import(join(REPO_ROOT, "dist", "context", "store.j
 const TEST_REPO = mkdtempSync(join(tmpdir(), "brain-test-seed-repo-"));
 execFileSync("git", ["init", "-q", TEST_REPO]);
 execFileSync("git", ["-C", TEST_REPO, "remote", "add", "origin", "git@github.com:testowner/testrepo.git"]);
+const TEST_PROJECT_TAG = "project:testowner/testrepo";
 
 const DB_DIR = mkdtempSync(join(tmpdir(), "brain-test-seed-db-"));
 const DB_PATH = join(DB_DIR, "identity.db");
@@ -72,15 +77,60 @@ try {
 
   process.env.AELOOP_BRAIN_IDENTITY_DB = DB_PATH;
 
-  // ── ② 首次运行：身份 + 全部宪法约束 + 全部 5 种 status 映射 + closed→archived ──────
+  // ── ②a（issue #93 B3）目标项目尚未注册 → main() 明确报错，issue 同步零写入
+  //     （身份/宪法约束仍正常写入，不受影响——见 PRD §4.4"这条检查只挡 issue 同步"）。
+  {
+    await assert.rejects(
+      () => main({ cwd: TEST_REPO, fetchOpenIssues: async () => stubIssues() }),
+      (err) => {
+        assert.equal(err.code, "PROJECT_NOT_ONBOARDED");
+        assert.match(err.message, /尚未注册/);
+        assert.match(err.message, /onboard-project\.mjs/);
+        return true;
+      },
+      "目标项目未注册时应明确报错，不静默写入孤儿 project:* tag",
+    );
+    const all = readAll();
+    assert.equal(
+      all.filter((m) => m.type === "active_task").length,
+      0,
+      "未注册时不该产生任何 active_task 记录",
+    );
+    // 身份/宪法约束应该已经正常写入（这条检查只挡途③ issue 同步，不影响途①②）。
+    assert.ok(all.some((m) => m.type === "identity"), "身份应已正常写入，不受 issue 同步被挡影响");
+  }
+
+  // ── 注册目标项目（issue #93 B2 onboard-project.mjs 的同款语义，直接用共享 upsertMemory
+  //     构造，不额外起子进程调 CLI——本文件测的是 seed 脚本，onboard 本身有自己的
+  //     test-onboard-project.mjs） ──────────────────────────────────────────────
+  {
+    const store = new MemoryStore(DB_PATH);
+    try {
+      upsertMemory(
+        store,
+        {
+          type: "project_registry",
+          title: TEST_PROJECT_TAG,
+          content: "testowner/testrepo",
+          tags: [TEST_PROJECT_TAG],
+          confidenceState: "confirmed",
+        },
+        { actor: "test-fixture" },
+      );
+    } finally {
+      store.close();
+    }
+  }
+
+  // ── ② 首次运行（已注册）：身份 + 全部宪法约束 + 全部 5 种 status 映射 + closed→archived
+  //     + 每条 active_task 都带正确的 project:<owner>/<repo> tag ──────────────────
   {
     const result = await main({ cwd: TEST_REPO, fetchOpenIssues: async () => stubIssues() });
 
-    assert.equal(result.identity.action, "inserted", "首次运行身份应 inserted");
-    assert.equal(result.constraints.length, CONSTITUTION_CONSTRAINTS.length, "宪法约束条数应和常量数组一致");
+    assert.equal(result.identity.action, "unchanged", "身份在②a 已经写过，这里应 unchanged");
     assert.ok(
-      result.constraints.every((c) => c.action === "inserted"),
-      "首次运行全部宪法约束应 inserted",
+      result.constraints.every((c) => c.action === "unchanged"),
+      "宪法约束在②a 已经写过，这里应 unchanged",
     );
     assert.equal(result.issues.length, 6, "应处理全部 6 条 stub issue");
     assert.ok(!result.skippedIssueSync, "有合法 origin 时不该跳过 issue 同步");
@@ -101,16 +151,16 @@ try {
       assert.equal(memory.confidenceState, "confirmed");
     }
 
-    // 5 种 status 映射（DESIGN §3.c 映射表）。
-    assert.deepEqual(findByGhIssueTag(all, 10).tags.sort(), ["gh-issue:10", "status:in-progress"].sort(), "status:in-progress 应映射为 status:in-progress");
-    assert.deepEqual(findByGhIssueTag(all, 20).tags.sort(), ["gh-issue:20", "status:in-progress"].sort(), "status:prd-draft 应映射为 status:in-progress");
-    assert.deepEqual(findByGhIssueTag(all, 30).tags.sort(), ["gh-issue:30", "status:blocked"].sort(), "status:awaiting-zorro 应映射为 status:blocked");
-    assert.deepEqual(findByGhIssueTag(all, 40).tags.sort(), ["gh-issue:40", "status:pending-decision"].sort(), "status:awaiting-commander 应映射为 status:pending-decision");
-    assert.deepEqual(findByGhIssueTag(all, 50).tags.sort(), ["gh-issue:50", "status:todo"].sort(), "无 status:* label 应映射为 status:todo");
+    // 5 种 status 映射（DESIGN §3.c 映射表）——issue #93 B3：每条都追加了 project:* tag。
+    assert.deepEqual(findByGhIssueTag(all, 10).tags.sort(), ["gh-issue:10", "status:in-progress", TEST_PROJECT_TAG].sort(), "status:in-progress 应映射为 status:in-progress + project tag");
+    assert.deepEqual(findByGhIssueTag(all, 20).tags.sort(), ["gh-issue:20", "status:in-progress", TEST_PROJECT_TAG].sort(), "status:prd-draft 应映射为 status:in-progress + project tag");
+    assert.deepEqual(findByGhIssueTag(all, 30).tags.sort(), ["gh-issue:30", "status:blocked", TEST_PROJECT_TAG].sort(), "status:awaiting-zorro 应映射为 status:blocked + project tag");
+    assert.deepEqual(findByGhIssueTag(all, 40).tags.sort(), ["gh-issue:40", "status:pending-decision", TEST_PROJECT_TAG].sort(), "status:awaiting-commander 应映射为 status:pending-decision + project tag");
+    assert.deepEqual(findByGhIssueTag(all, 50).tags.sort(), ["gh-issue:50", "status:todo", TEST_PROJECT_TAG].sort(), "无 status:* label 应映射为 status:todo + project tag");
 
-    // closed → archived（直接判 state，不是"消失"推断）。
+    // closed → archived（直接判 state，不是"消失"推断）+ project tag。
     const closedMemory = findByGhIssueTag(all, 60);
-    assert.deepEqual(closedMemory.tags.sort(), ["archived", "gh-issue:60", "status:done"].sort(), "closed issue 应打 archived + status:done");
+    assert.deepEqual(closedMemory.tags.sort(), ["archived", "gh-issue:60", "status:done", TEST_PROJECT_TAG].sort(), "closed issue 应打 archived + status:done + project tag");
   }
 
   // ── ③ 幂等：完全相同输入二次运行 → 零写入（DB 状态逐条比对不变） ──────────────

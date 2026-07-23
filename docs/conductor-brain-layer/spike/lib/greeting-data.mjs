@@ -101,12 +101,35 @@ function pickFocusTask(statusRows) {
 }
 
 /**
+ * issue #93 B4：其它已 onboard 项目的一行摘要——"最高优先级"复用 pickFocusTask() 的同一套
+ * FOCUS_PRIORITY 分层（in-progress > blocked/pending-decision > todo/done > 未知状态），不是
+ * 重新发明一套映射；这里不做"是否可续做"（ACTIONABLE_FOCUS_PRIORITY_MAX）的门控——那道门控
+ * 是"该不该说'继续「X」'"这个措辞层面的约束，摘要只是如实报"这个项目里优先级最高的状态是什么"，
+ * 不涉及"继续"这个动词，不需要同一层约束。
+ * @param {string} projectKey
+ * @param {ReturnType<typeof collectStatusRows>} rows
+ * @returns {{ projectKey: string, count: number, topStatusLabel: string }}
+ */
+function summarizeOtherProject(projectKey, rows) {
+  const top = pickFocusTask(rows);
+  return { projectKey, count: rows.length, topStatusLabel: top ? top.statusLabel : "—" };
+}
+
+/**
  * @param {import("../../../../dist/context/store.js").MemoryStore} store
- * @param {{ queryHint?: string }} [opts]
+ * @param {{ queryHint?: string, currentProjectKey?: string|null }} [opts] `currentProjectKey`
+ *   （issue #93 B4 新增，`owner/repo` 形式，通常由 `brain-wake-greeting.mjs` 从 SessionStart
+ *   stdin 的 `cwd` 反查 `getOriginOwnerRepo()` 算出）——**省略或传 `null`/`undefined` 时行为
+ *   字节级不变**（今天所有既有调用点都是这样调的）：`statusRows` 仍是全部 confirmed
+ *   active_task（不分组），`otherProjects` 恒为 `[]`，`unassignedCount` 恒为 `0`——这是刻意的
+ *   向后兼容设计，不是"忘了处理未知项目"的疏漏；只有传入非空 `currentProjectKey` 才会真的按
+ *   `project:*` tag 分组渲染（DESIGN §1.3/PRD §4.5）。
  * @returns {{
  *   identityName: string,
  *   lastStop: string,
  *   statusRows: ReturnType<typeof collectStatusRows>,
+ *   otherProjects: Array<{ projectKey: string, count: number, topStatusLabel: string }>,
+ *   unassignedCount: number,
  *   backlogItems: import("../../../../dist/context/types.js").Memory[],
  *   pendingDecisions: Array<{ label: string }>,
  *   followUp: string,
@@ -127,10 +150,37 @@ export function gatherGreetingData(store, opts = {}) {
   const identityName = identityMemory ? identityMemory.content : DEFAULT_IDENTITY_NAME;
 
   // ---- 现在在途：复用 status-table.mjs，两个消费方同一份实现 ----
-  const statusRows = collectStatusRows(store);
+  const allStatusRows = collectStatusRows(store);
+  const currentProjectKey = opts.currentProjectKey ?? null;
 
-  // ---- 上次停在：优先 snapshot 类型（confirmed），否则退到"现在在途"里的当前焦点
-  //      （pickFocusTask，不是单纯"最近更新"——blocker 3）。
+  /** @type {ReturnType<typeof collectStatusRows>} */
+  let statusRows;
+  /** @type {Array<{ projectKey: string, count: number, topStatusLabel: string }>} */
+  let otherProjects;
+  let unassignedCount;
+
+  if (!currentProjectKey) {
+    // 向后兼容路径（见函数头注释）：不分组，statusRows = 全部行，其它两个字段恒空。
+    statusRows = allStatusRows;
+    otherProjects = [];
+    unassignedCount = 0;
+  } else {
+    statusRows = allStatusRows.filter((row) => row.project === currentProjectKey);
+    unassignedCount = allStatusRows.filter((row) => row.project === null).length;
+
+    const byOtherProject = new Map();
+    for (const row of allStatusRows) {
+      if (row.project === null || row.project === currentProjectKey) continue;
+      if (!byOtherProject.has(row.project)) byOtherProject.set(row.project, []);
+      byOtherProject.get(row.project).push(row);
+    }
+    otherProjects = [...byOtherProject.entries()]
+      .map(([projectKey, rows]) => summarizeOtherProject(projectKey, rows))
+      .sort((a, b) => a.projectKey.localeCompare(b.projectKey)); // 确定性排序，不依赖 Map 迭代顺序的偶然性
+  }
+
+  // ---- 上次停在：优先 snapshot 类型（confirmed），否则退到"现在在途"（仅当前项目，见上）
+  //      里的当前焦点（pickFocusTask，不是单纯"最近更新"——blocker 3）。
   //
   //      2026-07-23 Zorro/Codex 跨模型复审 must-fix 2：pickFocusTask() 在 statusRows 非空时
   //      必返一条——如果全部任务都是 done/todo/未知状态（没有任何 in-progress/blocked/
@@ -184,6 +234,8 @@ export function gatherGreetingData(store, opts = {}) {
     identityName,
     lastStop,
     statusRows,
+    otherProjects,
+    unassignedCount,
     backlogItems,
     pendingDecisions,
     followUp,

@@ -33,3 +33,6 @@ profiles/apikey/
 # Misc
 .DS_Store
 *.log
+
+# conductor-brain multiproject spike run 产物(dispatch/spike 输出,throwaway,不追踪)
+brain-spike-*.json

@@ -358,6 +358,97 @@ try {
     }
   }
 
+  // ---- ⑦（issue #93 B4）多项目分组：混合 ≥2 个项目的 tag 数据，验证 currentProjectKey
+  //      置顶完整表格、其它项目摘要、未分组任务显式计数——对应 epic #93 验收标准"开场白按
+  //      项目分组显示各项目在途，≥2 项目验证聚合" ----
+  {
+    const dir7 = mkdtempSync(path.join(tmpdir(), "aeloop-test-greeting-multiproject-"));
+    const dbPath7 = path.join(dir7, "identity.db");
+    try {
+      const store = openIdentityStore(dbPath7);
+
+      // 项目 A（当前项目）：2 条在途，一条 in-progress 一条 todo。
+      store.insertMemory({
+        type: "active_task",
+        title: "project-a-inprogress",
+        content: "a1",
+        tags: ["status:in-progress", "project:ownerA/repoA"],
+        confidenceState: "confirmed",
+      });
+      store.insertMemory({
+        type: "active_task",
+        title: "project-a-todo",
+        content: "a2",
+        tags: ["status:todo", "project:ownerA/repoA"],
+        confidenceState: "confirmed",
+      });
+      // 项目 B（其它项目）：1 条 blocked。
+      store.insertMemory({
+        type: "active_task",
+        title: "project-b-blocked",
+        content: "b1",
+        tags: ["status:blocked", "project:ownerB/repoB"],
+        confidenceState: "confirmed",
+      });
+      // 项目 C（其它项目）：1 条 done。
+      store.insertMemory({
+        type: "active_task",
+        title: "project-c-done",
+        content: "c1",
+        tags: ["status:done", "project:ownerC/repoC"],
+        confidenceState: "confirmed",
+      });
+      // 未分组：没有 project tag 的历史遗留数据。
+      store.insertMemory({
+        type: "active_task",
+        title: "legacy-unassigned",
+        content: "legacy",
+        tags: ["status:in-progress"],
+        confidenceState: "confirmed",
+      });
+
+      // --- 不传 currentProjectKey（向后兼容路径）：statusRows 是全部 5 条，不分组 ---
+      const dataNoCurrentProject = gatherGreetingData(store);
+      assert.equal(dataNoCurrentProject.statusRows.length, 5, "未传 currentProjectKey 时应向后兼容——statusRows 是全部行，不分组");
+      assert.deepEqual(dataNoCurrentProject.otherProjects, [], "未传 currentProjectKey 时 otherProjects 恒为空数组");
+      assert.equal(dataNoCurrentProject.unassignedCount, 0, "未传 currentProjectKey 时 unassignedCount 恒为 0（不重复计数）");
+      const renderedNoCurrentProject = renderGreeting(dataNoCurrentProject);
+      assert.ok(!renderedNoCurrentProject.includes("**其它项目：**"), "未传 currentProjectKey 时不该出现「其它项目」段");
+      assert.ok(!renderedNoCurrentProject.includes("**未分组任务："), "未传 currentProjectKey 时不该出现「未分组任务」段");
+
+      // --- 传 currentProjectKey="ownerA/repoA"：分组生效 ---
+      const data = gatherGreetingData(store, { currentProjectKey: "ownerA/repoA" });
+      assert.equal(data.statusRows.length, 2, "当前项目（A）应只看到自己的 2 条");
+      assert.ok(
+        data.statusRows.every((r) => r.task.startsWith("project-a-")),
+        "statusRows 不该混入其它项目/未分组的行",
+      );
+      assert.equal(data.otherProjects.length, 2, "应有 2 个其它项目分组（B/C）");
+      const otherByKey = Object.fromEntries(data.otherProjects.map((p) => [p.projectKey, p]));
+      assert.equal(otherByKey["ownerB/repoB"].count, 1);
+      assert.equal(otherByKey["ownerC/repoC"].count, 1);
+      assert.equal(otherByKey["ownerB/repoB"].topStatusLabel, "🔴 阻塞或等决策", "项目 B 唯一一条是 blocked，摘要应带对应图标");
+      assert.equal(otherByKey["ownerC/repoC"].topStatusLabel, "✅ done", "项目 C 唯一一条是 done，摘要应带对应图标");
+      assert.equal(data.unassignedCount, 1, "应有 1 条未分组任务（legacy-unassigned）");
+
+      // 当前焦点（lastStop/followUp）只应该看当前项目（A）——A 里有 in-progress，应该被选中，
+      // 不会被 B 的 blocked（优先级其实也够高，但不该跨项目被选中）带偏。
+      assert.equal(data.lastStop, "project-a-inprogress", "当前焦点只应该看当前项目（A）自己的行");
+
+      const rendered = renderGreeting(data);
+      assert.ok(rendered.includes("project-a-inprogress"), "当前项目的行应该出现在主表格");
+      assert.ok(rendered.includes("**其它项目：**"), "应该出现「其它项目」段");
+      assert.ok(rendered.includes("ownerB/repoB"), "其它项目摘要应包含项目 B 的 key");
+      assert.ok(rendered.includes("ownerC/repoC"), "其它项目摘要应包含项目 C 的 key");
+      assert.ok(!rendered.includes("project-b-blocked"), "其它项目段只应有摘要，不该逐条列出任务标题");
+      assert.ok(rendered.includes("**未分组任务：** 1 条"), "应该出现未分组任务计数提示");
+
+      store.close();
+    } finally {
+      rmSync(dir7, { recursive: true, force: true });
+    }
+  }
+
   console.log("PASS: test-greeting.mjs");
 } finally {
   rmSync(dir, { recursive: true, force: true });
