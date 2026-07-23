@@ -1,0 +1,13 @@
+sequenceDiagram
+    participant U as 操作者
+    participant CC as Claude Code（cwd=项目A）
+    participant HOOK as 全局 wake hook（~/.claude/aeloop-brain）
+    participant DB as identity.db（单一，全局）
+
+    Note over CC: SessionStart，stdin 含 cwd=/path/to/项目A
+    CC->>HOOK: 触发 SessionStart(stdin: cwd, session_id, ...)
+    HOOK->>DB: listMemories() 全量（project_registry + 各项目 active_task）
+    HOOK->>HOOK: 按 project:owner/repo tag 分组
+    HOOK->>HOOK: 当前项目（由 cwd 反查 git remote 得 owner/repo）分组置顶，其余项目摘要
+    HOOK-->>CC: additionalContext（按项目分组的开场白）
+    CC-->>U: 意识已加载...（当前项目在途置顶 + 其余项目摘要）

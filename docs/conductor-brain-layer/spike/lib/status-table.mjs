@@ -81,7 +81,7 @@ function byRecencyDesc(a, b) {
 
 /**
  * @param {import("../../../../dist/context/store.js").MemoryStore} store
- * @returns {Array<{id: number, task: string, statusKey: string, statusLabel: string, model: string, updatedAt: string}>}
+ * @returns {Array<{id: number, task: string, statusKey: string, statusLabel: string, model: string, project: string|null, updatedAt: string}>}
  */
 export function collectStatusRows(store) {
   return store
@@ -95,12 +95,18 @@ export function collectStatusRows(store) {
     .map((memory) => {
       const { statusKey, statusLabel } = resolveStatus(memory.tags);
       const model = tagValue(memory.tags, "model:") ?? "—";
+      // issue #93 B4：`project:<owner>/<repo>` tag（`scripts/seed-brain-identity.mjs` B3 起写入）
+      // ——没有这个 tag 的历史遗留数据（B3 上线前已存在的旧 active_task）→ `null`，渲染层
+      // （greeting-data.mjs）必须显式标"未分组"，不能静默丢弃/也不能误判进任何一个项目分组
+      // （延续 resolveStatus() "未知值必须显式标 ❓，不能静默兜底"的红线精神，见文件头注释）。
+      const project = tagValue(memory.tags, "project:");
       return {
         id: memory.id,
         task: memory.title,
         statusKey,
         statusLabel,
         model,
+        project,
         updatedAt: memory.updatedAt,
       };
     })

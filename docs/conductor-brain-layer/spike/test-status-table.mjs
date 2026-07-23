@@ -264,6 +264,37 @@ try {
     }
   }
 
+  // ⑩（issue #93 B4）project tag 解析：有 project:* tag → row.project 正确解析；没有 → null
+  //     （历史遗留数据，不能被误判进任何一个项目分组，见 status-table.mjs 头注释新增说明）。
+  {
+    const dir10 = mkdtempSync(path.join(tmpdir(), "aeloop-test-status-table-project-"));
+    const dbPath10 = path.join(dir10, "identity.db");
+    try {
+      const store10 = openIdentityStore(dbPath10);
+      store10.insertMemory({
+        type: "active_task",
+        title: "task with project tag",
+        content: "p",
+        tags: ["status:in-progress", "project:whoseworks/whoseorder"],
+        confidenceState: "confirmed",
+      });
+      store10.insertMemory({
+        type: "active_task",
+        title: "task without project tag",
+        content: "np",
+        tags: ["status:todo"],
+        confidenceState: "confirmed",
+      });
+      const rows10 = collectStatusRows(store10);
+      const byTitle10 = Object.fromEntries(rows10.map((r) => [r.task, r]));
+      assert.equal(byTitle10["task with project tag"].project, "whoseworks/whoseorder", "project tag 应被正确解析");
+      assert.equal(byTitle10["task without project tag"].project, null, "没有 project tag 应是 null，不是空字符串/undefined");
+      store10.close();
+    } finally {
+      rmSync(dir10, { recursive: true, force: true });
+    }
+  }
+
   console.log("PASS: test-status-table.mjs");
 } finally {
   rmSync(dir, { recursive: true, force: true });

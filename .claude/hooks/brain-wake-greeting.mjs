@@ -58,17 +58,25 @@ function emitAdditionalContext(text) {
 }
 
 async function main() {
-  // stdin 带 session_id/cwd（Claude Code SessionStart payload 约定），这个 hook 目前不需要
-  // 读它——dbPath 完全由环境变量决定，不依赖 cwd——但仍然把 stdin 排空，避免管道卡住。
+  // stdin 带 session_id/cwd（Claude Code SessionStart payload 约定）。issue #93 B4 起，这个 hook
+  // 现在需要读 cwd 了（此前 #84/#88 只排空不解析）——用来反查"当前是哪个项目"，好在多项目开场白
+  // 里把当前项目置顶（PRD §4.5）。解析失败（非 JSON / 没有 cwd 字段）→ currentProjectKey 保持
+  // null，走 greeting-data.mjs 已有的向后兼容路径（不分组，行为等同 #84/#88），不报错、不阻断
+  // （延续本文件"绝不阻断"的既有惯例）。
+  let cwd = null;
   try {
-    readFileSync(0, "utf8");
+    const raw = readFileSync(0, "utf8");
+    const input = JSON.parse(raw);
+    if (typeof input.cwd === "string" && input.cwd) cwd = input.cwd;
   } catch {
-    /* 没有 stdin 也无所谓 */
+    /* 没有 stdin / 不是合法 JSON / 没有 cwd 字段，都无所谓——cwd 保持 null */
   }
 
   // issue #88 B9：dbPath 解析从"直读 env"改成 resolveIdentityDbPath()（env 优先，读不到时 fallback
   // 到 .claude/brain.local.json——解决 IDE/图形界面启动的会话不继承 shell profile export 的坑，
-  // 见 docs/conductor-brain-layer/WAKE-GREETING-RUNBOOK.md）。这是本文件在 B9 里唯一的逻辑改动。
+  // 见 docs/conductor-brain-layer/WAKE-GREETING-RUNBOOK.md）。issue #93 B1 起，
+  // AELOOP_BRAIN_GLOBAL_MODE=1 时会跳过 brain.local.json 那层、落到一个固定全局默认路径——两条
+  // 分支都在 resolveIdentityDbPath() 内部处理，本文件这一行调用本身不需要跟着改。
   const dbPath = resolveIdentityDbPath();
   if (!dbPath) return; // 两个配置源都没有 = 安静跳过，不是错误（#84 既有行为，本次不变）
 
@@ -76,10 +84,19 @@ async function main() {
   const { gatherGreetingData } = await import(path.join(SPIKE_LIB_DIR, "greeting-data.mjs"));
   const { renderGreeting } = await import(path.join(SPIKE_LIB_DIR, "render-greeting.mjs"));
 
+  // issue #93 B4：cwd 反查当前项目 owner/repo——解析失败（非 git 目录/无 origin/URL 认不出）
+  // 同样兜底为 null，不报错（同上"绝不阻断"惯例）。
+  let currentProjectKey = null;
+  if (cwd) {
+    const { getOriginOwnerRepo } = await import(path.join(HERE, "lib", "git-remote.mjs"));
+    const origin = getOriginOwnerRepo(cwd);
+    if (origin.ok) currentProjectKey = `${origin.owner}/${origin.repo}`;
+  }
+
   const store = openIdentityStore(dbPath);
   let data;
   try {
-    data = gatherGreetingData(store);
+    data = gatherGreetingData(store, { currentProjectKey });
   } finally {
     store.close();
   }

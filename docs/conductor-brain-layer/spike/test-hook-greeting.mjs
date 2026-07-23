@@ -22,7 +22,7 @@
 // 的原因，不是伪造的字符串拼接模拟。
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -88,6 +88,58 @@ try {
   assert.ok(proc.stderr.includes(dbPath), "stderr 里的诊断信息应该带上真实 dbPath，方便排查——这里允许原样出现，因为 stderr 不是模型要复述的正文");
 
   console.log("PASS: test-hook-greeting.mjs（① 无额外开场白行 ② 无伪造 bullet/身份声明 ③ dbPath 已不在正文里 ④ 诊断仍在 stderr）");
+
+  // ⑤（issue #93 B4）stdin 的 cwd 应被解析出 currentProjectKey，并真的影响分组渲染——用一个
+  //    真实 fixture git repo（带 origin remote）当 cwd，身份库里预置两个项目的 active_task，
+  //    验证 cwd 对应的项目被置顶进主表格、另一个项目只出现在"其它项目"摘要里。
+  {
+    const fixtureRepoDir = mkdtempSync(path.join(tmpdir(), "aeloop-test-hook-greeting-cwd-"));
+    execFileSync("git", ["init", "-q", fixtureRepoDir]);
+    execFileSync("git", ["-C", fixtureRepoDir, "remote", "add", "origin", "git@github.com:cwdowner/cwdrepo.git"]);
+
+    const dbDir = mkdtempSync(path.join(tmpdir(), "aeloop-test-hook-greeting-cwd-db-"));
+    const dbPath = path.join(dbDir, "identity.db");
+
+    try {
+      const { openIdentityStore } = await import(path.join(REPO_ROOT, "docs", "conductor-brain-layer", "spike", "lib", "wake.mjs"));
+      const store = openIdentityStore(dbPath);
+      store.insertMemory({
+        type: "active_task",
+        title: "cwd-project-task",
+        content: "属于 cwd 对应的项目",
+        tags: ["status:in-progress", "project:cwdowner/cwdrepo"],
+        confidenceState: "confirmed",
+      });
+      store.insertMemory({
+        type: "active_task",
+        title: "other-project-task",
+        content: "属于另一个项目",
+        tags: ["status:todo", "project:otherowner/otherrepo"],
+        confidenceState: "confirmed",
+      });
+      store.close();
+
+      const stdinPayload2 = JSON.stringify({ session_id: "test-hook-cwd", cwd: fixtureRepoDir });
+      const proc2 = spawnSync("node", [HOOK_PATH], {
+        input: stdinPayload2,
+        encoding: "utf8",
+        env: { ...process.env, AELOOP_BRAIN_IDENTITY_DB: dbPath },
+      });
+      assert.equal(proc2.status, 0, `hook 必须 exit 0，实际 status=${proc2.status}，stderr=${proc2.stderr}`);
+      const hookOutput2 = JSON.parse(proc2.stdout);
+      const additionalContext2 = hookOutput2.hookSpecificOutput.additionalContext;
+
+      assert.ok(additionalContext2.includes("cwd-project-task"), "cwd 对应项目的任务应该出现在主表格里");
+      assert.ok(additionalContext2.includes("**其它项目：**"), "另一个项目应该以摘要形式出现");
+      assert.ok(additionalContext2.includes("otherowner/otherrepo"), "其它项目摘要应包含另一个项目的 key");
+      assert.ok(!additionalContext2.includes("other-project-task"), "另一个项目的任务标题不该逐条出现，只应有摘要");
+    } finally {
+      rmSync(fixtureRepoDir, { recursive: true, force: true });
+      rmSync(dbDir, { recursive: true, force: true });
+    }
+  }
+
+  console.log("PASS: test-hook-greeting.mjs（⑤ stdin cwd 正确反查当前项目并驱动分组渲染，issue #93 B4）");
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

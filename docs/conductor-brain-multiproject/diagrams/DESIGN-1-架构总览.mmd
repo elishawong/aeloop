@@ -1,0 +1,17 @@
+flowchart TB
+    subgraph HOME["用户主目录 ~/.claude/（全局，装一次）"]
+        SETTINGS["settings.json<br/>hooks.SessionStart 追加注册<br/>（合并写入，不覆盖既有 hooks）"]
+        BRAIN["aeloop-brain/（本设计新增的固定安装目录）<br/>dist/（build 产物）<br/>hooks/*.mjs（wake-greeting 等，路径改绝对）<br/>lib/*.mjs（spike lib 迁移）<br/>node_modules/better-sqlite3（原生二进制）<br/>data/identity.db（默认库路径，env 可覆盖）"]
+    end
+
+    subgraph P1["项目 A（如 whoseorder，任意真实仓库）"]
+        A1["git 工作区<br/>（无 .claude/brain* 任何文件，git status 干净）"]
+    end
+    subgraph P2["项目 B（如 aeloop 自身）"]
+        A2["git 工作区<br/>（同上，零污染）"]
+    end
+
+    SETTINGS -->|"SessionStart 触发，command 指向绝对路径"| BRAIN
+    BRAIN -->|"stdin.cwd 判定当前项目"| A1
+    BRAIN -->|"stdin.cwd 判定当前项目"| A2
+    BRAIN -->|"读写"| DB[("identity.db<br/>project_registry + N×active_task(project:owner/repo tag)")]

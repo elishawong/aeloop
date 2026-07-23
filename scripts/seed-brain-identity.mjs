@@ -71,6 +71,8 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { upsertMemory } from "../.claude/hooks/lib/memory-upsert.mjs";
+import { assertProjectRegistered, projectTagFor } from "../.claude/hooks/lib/project-registry.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(HERE, "..");
@@ -164,17 +166,24 @@ const STATUS_LABEL_TO_TAG = Object.freeze({
 
 /**
  * @param {{number:number, title:string, state:string, labels:{name:string}[]}} issue
+ * @param {string} [projectTag] issue #93 B3 新增：`project:<owner>/<repo>` 形式的 tag，追加到
+ *   返回数组末尾——供 `docs/conductor-brain-layer/spike/lib/status-table.mjs`（B4）按项目分组。
+ *   可选（不传时行为等同 issue #88 原版，供尚未迁移调用点/旧测试过渡期使用），但 `main()` 自己
+ *   的调用点（见下）总是传入这个参数，生产路径下永远带 project tag。
  * @returns {string[]} active_task 的 tags
  */
-export function resolveActiveTaskTags(issue) {
+export function resolveActiveTaskTags(issue, projectTag) {
   const ghIssueTag = `gh-issue:${issue.number}`;
-  if (issue.state === "CLOSED") {
-    return ["status:done", "archived", ghIssueTag];
-  }
-  const labelNames = new Set((issue.labels ?? []).map((l) => l.name));
-  const matched = STATUS_LABEL_PRECEDENCE.find((candidate) => labelNames.has(candidate));
-  const statusTag = matched ? STATUS_LABEL_TO_TAG[matched] : "status:todo";
-  return [statusTag, ghIssueTag];
+  const base = (() => {
+    if (issue.state === "CLOSED") {
+      return ["status:done", "archived", ghIssueTag];
+    }
+    const labelNames = new Set((issue.labels ?? []).map((l) => l.name));
+    const matched = STATUS_LABEL_PRECEDENCE.find((candidate) => labelNames.has(candidate));
+    const statusTag = matched ? STATUS_LABEL_TO_TAG[matched] : "status:todo";
+    return [statusTag, ghIssueTag];
+  })();
+  return projectTag ? [...base, projectTag] : base;
 }
 
 // ── gh 拉取（可注入，默认真跑 gh CLI；命名沿用 plan.md §B8 既定的 fetchOpenIssues，虽然实际
@@ -198,91 +207,12 @@ async function defaultFetchOpenIssues({ owner, repo }) {
   return JSON.parse(raw);
 }
 
-// ── upsert helpers（MemoryStore 没有原生 upsert，见文件头"幂等性"整段说明） ────────────────
-
-function tagsEqual(a, b) {
-  if (a.length !== b.length) return false;
-  const sa = [...a].sort();
-  const sb = [...b].sort();
-  return sa.every((v, i) => v === sb[i]);
-}
-
-/**
- * 找已有记录——两种匹配策略，调用方按数据本身的稳定性选：
- *   - `matchTag`（active_task 用）：按一个稳定的 tag（`gh-issue:<n>`）匹配。GitHub issue 的
- *     **标题会改**（重命名/措辞调整很常见），如果按 `title` 匹配，issue 改标题后旧记录找不到、
- *     会插入一条新的、旧的变成孤儿——`gh-issue:<n>` 这个 tag 在 issue 号不变的前提下永远稳定，
- *     是这里唯一正确的匹配键。
- *   - `title`（identity/constraint 用）：这两类的 `title` 来自本文件自己硬编码的固定字符串
- *     （`"identity:name"`/`"constraint:<slug>"`），不会像 issue 标题那样外部变化，按 title
- *     匹配是安全、足够的。
- * @param {import("../dist/context/store.js").MemoryStore} store
- * @param {{type:string, title:string, matchTag?:string}} desired
- * @returns {object|null}
- */
-function findExisting(store, desired) {
-  const all = store.listMemories();
-  if (desired.matchTag) {
-    return all.find((m) => m.type === desired.type && m.tags.includes(desired.matchTag)) ?? null;
-  }
-  return all.find((m) => m.type === desired.type && m.title === desired.title) ?? null;
-}
-
-/**
- * @param {import("../dist/context/store.js").MemoryStore} store
- * @param {{type:string, title:string, content:string, tags:string[], confidenceState:string, matchTag?:string}} desired
- * @returns {{action:"inserted"|"unchanged"|"content-updated"|"replaced"}}
- */
-function upsertMemory(store, desired) {
-  const existing = findExisting(store, desired);
-  const insertPayload = {
-    type: desired.type,
-    title: desired.title,
-    content: desired.content,
-    tags: desired.tags,
-    confidenceState: desired.confidenceState,
-  };
-
-  if (!existing) {
-    store.insertMemory(insertPayload);
-    return { action: "inserted" };
-  }
-
-  const titleChanged = existing.title !== desired.title;
-  const contentChanged = existing.content !== desired.content;
-  const tagsChanged = !tagsEqual(existing.tags, desired.tags);
-  const confidenceChanged = existing.confidenceState !== desired.confidenceState;
-
-  if (!titleChanged && !contentChanged && !tagsChanged && !confidenceChanged) {
-    return { action: "unchanged" };
-  }
-
-  if (titleChanged || tagsChanged) {
-    // MemoryStore 没有 updateMemoryTags()/改 title 的方法——title/tags 只能在 insert 时定，
-    // 变了只能删了重建（文件头"幂等性"已说明这条真实约束，不是本函数绕开设计）。
-    // title 会变的场景（issue 改标题）正是上面 findExisting 要用 matchTag 而不是 title 匹配的
-    // 理由——按稳定的 gh-issue tag 先找到这条记录，再在这里发现"哦，标题变了"，走重建更新它。
-    store.deleteMemory(existing.id);
-    store.insertMemory(insertPayload);
-    return { action: "replaced" };
-  }
-
-  // 只有 content（和/或 confidence）变了，title/tags 没变：可以用 updateMemoryContent，保留原
-  // id/createdAt 的连续性，比删除重建更好。
-  const now = new Date().toISOString();
-  if (contentChanged) {
-    store.updateMemoryContent(existing.id, desired.content, now);
-  }
-  if (confidenceChanged) {
-    store.updateMemoryConfidence(existing.id, {
-      confidenceState: desired.confidenceState,
-      confirmedAt: desired.confidenceState === "confirmed" ? now : null,
-      confirmedBy: desired.confidenceState === "confirmed" ? "seed-brain-identity" : null,
-      updatedAt: now,
-    });
-  }
-  return { action: "content-updated" };
-}
+// ── upsert helpers ───────────────────────────────────────────────────────────
+// issue #93 B3：`findExisting()`/`tagsEqual()`/`upsertMemory()` 原样抽到
+// `.claude/hooks/lib/memory-upsert.mjs`（这三个函数本来就不含 issue 特定逻辑，`scripts/
+// onboard-project.mjs` 需要同一套 upsert 语义写 `project_registry` 记录，不重复实现一份）。
+// 本文件改为 import 那份共享实现，行为字节级不变（`test-seed-brain-identity.mjs` 现有用例应
+// 零改动继续通过）——见文件头 import。
 
 // ── main ──────────────────────────────────────────────────────────────────
 
@@ -314,25 +244,33 @@ export async function main(opts = {}) {
     // 1. 身份。
     result.identity = {
       title: IDENTITY_NAME_TITLE,
-      ...upsertMemory(store, {
-        type: "identity",
-        title: IDENTITY_NAME_TITLE,
-        content: IDENTITY_NAME_CONTENT,
-        tags: [],
-        confidenceState: "confirmed",
-      }),
+      ...upsertMemory(
+        store,
+        {
+          type: "identity",
+          title: IDENTITY_NAME_TITLE,
+          content: IDENTITY_NAME_CONTENT,
+          tags: [],
+          confidenceState: "confirmed",
+        },
+        { actor: "seed-brain-identity" },
+      ),
     };
 
     // 2. 宪法约束。
     for (const constraint of CONSTITUTION_CONSTRAINTS) {
       const title = `constraint:${constraint.slug}`;
-      const outcome = upsertMemory(store, {
-        type: "constraint",
-        title,
-        content: constraint.content,
-        tags: [`hardness:${constraint.hardness}`],
-        confidenceState: "confirmed",
-      });
+      const outcome = upsertMemory(
+        store,
+        {
+          type: "constraint",
+          title,
+          content: constraint.content,
+          tags: [`hardness:${constraint.hardness}`],
+          confidenceState: "confirmed",
+        },
+        { actor: "seed-brain-identity" },
+      );
       result.constraints.push({ slug: constraint.slug, title, ...outcome });
     }
 
@@ -342,17 +280,31 @@ export async function main(opts = {}) {
     if (!origin.ok) {
       result.skippedIssueSync = "无法从 cwd 判定 owner/repo（非 git 目录 / 无 origin remote），跳过 issue 同步。";
     } else {
+      const projectTag = projectTagFor(origin.owner, origin.repo);
+
+      // issue #93 B3：目标项目必须先被 `scripts/onboard-project.mjs` 注册（存在对应
+      // `project_registry` 记录），否则明确报错、不进入 issue 同步循环——不静默写入孤儿
+      // `project:*` tag（PRD §4.4）。注意：这条检查只挡住途③的 issue 同步，不影响途①②已经
+      // 写完的身份/宪法约束（PRD §4.4 明确"在这一步 return/throw，不进入 issue 同步循环"）。
+      // 判据本身抽到 `.claude/hooks/lib/project-registry.mjs`（issue #93 B5 顺手抽出，供
+      // `scripts/dispatch-brain-task.mjs` 复用同一份，不各写一份，PRD §4.6 已定的共享方式）。
+      assertProjectRegistered(store, origin.owner, origin.repo);
+
       const issues = await fetchOpenIssues({ owner: origin.owner, repo: origin.repo });
       for (const issue of issues) {
-        const tags = resolveActiveTaskTags(issue);
-        const outcome = upsertMemory(store, {
-          type: "active_task",
-          title: issue.title,
-          content: `#${issue.number}`,
-          tags,
-          confidenceState: "confirmed",
-          matchTag: `gh-issue:${issue.number}`, // 按稳定的 issue 号匹配，不按会变的标题（见 findExisting 头注释）
-        });
+        const tags = resolveActiveTaskTags(issue, projectTag);
+        const outcome = upsertMemory(
+          store,
+          {
+            type: "active_task",
+            title: issue.title,
+            content: `#${issue.number}`,
+            tags,
+            confidenceState: "confirmed",
+            matchTag: `gh-issue:${issue.number}`, // 按稳定的 issue 号匹配，不按会变的标题（见 memory-upsert.mjs 头注释）
+          },
+          { actor: "seed-brain-identity" },
+        );
         result.issues.push({ number: issue.number, tags, ...outcome });
       }
     }
