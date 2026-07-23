@@ -8,7 +8,7 @@ last_updated: 2026-07-23
 
 > 边写边更。每批做完追加一条：做了什么 + 本地自检结果（`node .claude/hooks/test-*.mjs` 等）+ 可追源的证据。**改完即写回。**
 
-> **▶ 下一步（RESUME 指针）**：全部 9 个批次（B1/B2/B3/B4/B5/B6/B7/B8/B9）+ Zorro Pass1/2 FAIL 修复轮 + Zorro/Codex B5 两轮复验 FAIL 修复轮均已完成、self-check 全绿（9 个 test-*.mjs + 619 既有 vitest + build 全绿），已用真实 `gh` + 真实 aeloop 仓库端到端验证过种子脚本能让 `brain-wake-greeting.mjs` 读出真身份（"意识已加载。我是 你的 AI 调度员。"）。等 Zorro 复审 B8，通过后本 epic 落地部分收尾。**尚待 operator 单独拍板"成本透明"人格措辞（不混进 B8，operator 明确说了单独让 Cypher 补）**。**未 commit**（授权在 operator 手里，planning 文档已 commit `dd1870e`）。
+> **▶ 下一步（RESUME 指针）**：全部 9 个批次 + Zorro Pass1/2 FAIL 修复轮 + Zorro/Codex B5 两轮复验 FAIL 修复轮均已完成并已 commit（`4e0e005`）。**2026-07-23 operator 拍板追加"成本透明"人格条款**（👁，见下方独立记录）——已同步进 `BRAIN.md` §1.6 + `CLAUDE.md` + `scripts/seed-brain-identity.mjs` 的 `CONSTITUTION_CONSTRAINTS`（6→7 条），self-check 全绿。**未 commit**（本轮改动，operator 说了攒着一起走门，不是本次单独提交）。
 
 - **关联 PRD / Plan**：`./PRD.md` · `./plan.md`
 - **方案权威**：`docs/conductor-brain-layer/TURNKEY-DESIGN.md`（operator 已确认）
@@ -123,6 +123,12 @@ last_updated: 2026-07-23
 - **顺带4b：finding 4b（令牌消费写失败 → 可重放）——选择"一行（级别）fail-closed 修复"，不是只写文档**：`brain-lock.mjs` 的 `consumeCommitAuthorization()` 原来的写盘调用 `writeLockFile(file, updated)` 不在 try/catch 里——如果写失败（磁盘满/权限），异常会冒泡到 `brain-commit-gate.mjs` 的外层 `catch { allow() }`，导致这次操作被放行、但令牌本身没有真正标记为已消费，等于在这个窄条件下"一次性令牌"被悄悄复用了一次。判断：这个修复足够小、足够干净（把一行写调用包进 try/catch，失败时返回 `{consumed:false, reason:"write-failed"}` 而不是让异常冒泡），选择直接做掉而不是只在文档里承认这个张力——调用方因此走的是既有的 `deny(...)` 分支，不会落进"guard 自身异常→allow"的兜底路径。范围严格限定在这一个函数内部的这一步写入，没有改变 hook 层面"guard 自身其它异常仍然 fail-open"的整体设计，也没有碰任何 `brain-commit-gate.mjs`/`brain-issue-gate.mjs` 的判定链代码。取舍本身 + 为什么选择这条路径，写进了函数上方的 JSDoc（不只是 commit message 里一句话）。补了真实 I/O 失败的回归测试（chmod 锁文件只读，逼真实 `writeFileSync` 抛错，不是 mock）。
 - **finding 5（issue-gate 收任意 truthy `lock.issue`）：跳过**，遵照 operator 指令——P3、默认关闭门（`enforce` 模式才生效），不顺手做格式校验，不碰 `brain-issue-gate.mjs`/`brain-lock.mjs` 的 `bindIssue`/校验逻辑。
 - **本地自检**：全部 7 个 test-*.mjs 重跑 PASS（`test-git-remote`/`test-command-match`/`test-brain-lock`(含新的 write-failed 回归)/`test-db-path`/`test-brain-commit-gate`/`test-brain-issue-gate`/`test-brain-isolation-guard`(hermetic 重写后)）；`pnpm run build` + 619 个既有 vitest 测试全绿；`git diff --stat` 核对本轮只碰了 7 个文件（`brain-commit-gate.mjs`、`brain-lock.mjs`、`test-brain-lock.mjs`、`test-brain-isolation-guard.mjs`、`CLAUDE.md`、`BRAIN.md`、`TURNKEY-DESIGN.md`），`brain-issue-gate.mjs`/`brain-isolation-guard.mjs`（hook 本体）本轮零改动，确认没有碰任何 gate 判定逻辑（除已授权的 4b 一处）。
+
+### 成本透明人格条款追加（operator 拍板，2026-07-23，B8 已 commit 之后的小 follow-up）
+- 状态：完成
+- **背景**：operator 拍板给人格加一条"成本透明"（👁 soft，不是硬机制门）——原本这条特意没混进 B8（等 operator 单独定），本次单独追加。
+- **改了什么**：`docs/conductor-brain-layer/BRAIN.md` §1.6 追加第 7 条 👁（"成本透明"，措辞按 operator 给的原文，含关键护栏"不擅自为省成本牺牲复审/验证的完整性"）；`CLAUDE.md` 铁律段同步追加同一条（措辞一致）；`scripts/seed-brain-identity.mjs` 的 `CONSTITUTION_CONSTRAINTS` 追加第 7 条 `slug:"cost-transparency", hardness:"soft"`，内容誊写自新加的 §1.6 条目，保持"种进身份库的宪法和 BRAIN.md 不漂移"这条既有原则（6 条=4🔒+2👁 → 7 条=4🔒+3👁）。`scripts/test-seed-brain-identity.mjs` **不需要改**——原有的 `assert.equal(result.constraints.length, CONSTITUTION_CONSTRAINTS.length, ...)` 断言本来就是动态读常量数组长度，不是硬编码 6，自动适配成 7，重跑确认。
+- **本地自检**：全部 9 个 test-*.mjs 重跑 PASS；`pnpm run build` + 619 个既有 vitest 全绿；`git diff --stat` 确认本轮只碰了 3 个文件（`BRAIN.md`/`CLAUDE.md`/`seed-brain-identity.mjs`），`src/**`、其它 hook、共享库、`settings.json`、`brain-red-line-guard.mjs` 零改动。额外用真实 `gh`（throwaway DB）重新端到端跑了一次 seed 脚本，确认第 7 条约束（`constraint:cost-transparency`，`tags:["hardness:soft"]`）真的落进了库里。
 
 ## 决策记录（可追源）
 - 2026-07-23：operator 确认 DESIGN §4 人格加载方案 = (iii)，§7 issue-gate 范围 = opt-in/env 开关默认收窄——已焊进 `docs/conductor-brain-layer/TURNKEY-DESIGN.md`（见该文件 §4/§6/§7 变更标注），并据此写出本 PRD/plan。理由见 `TURNKEY-DESIGN.md` 对应章节，不在此重复。

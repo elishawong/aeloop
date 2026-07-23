@@ -13,7 +13,8 @@
  *      （issue #88 body 定盘的自我介绍角色化身份，不用人名）。
  *   2. **宪法约束**：`CONSTITUTION_CONSTRAINTS`（下方常量数组）——`type:"constraint"`，每条
  *      `title:"constraint:<slug>"`，`tags:["hardness:hard"|"hardness:soft"]`，逐条誊写自
- *      `BRAIN.md` §1.6 的六条铁律（4 条 🔒 + 2 条 👁）。
+ *      `BRAIN.md` §1.6 的七条铁律（4 条 🔒 + 3 条 👁，2026-07-23 operator 拍板新增"成本
+ *      透明"一条 👁，见下方数组第 7 条）。
  *   3. **在途任务**：从 `gh issue list`（真实调用或注入的 stub）读出的每个 issue，映射成
  *      `type:"active_task"`，见下方"issue → active_task 映射"整段。
  *
@@ -136,6 +137,15 @@ export const CONSTITUTION_CONSTRAINTS = [
     content:
       "犯错即复盘：postmortem 是 MemoryType 12 类之一，可以记录复盘条目，但'复盘后怎么修改宪法'这条闭环今天" +
       "没有自动化，靠人工。",
+  },
+  {
+    slug: "cost-transparency",
+    hardness: "soft",
+    content:
+      "成本透明：预计要进入高开销段（多轮返工/深调研扇出/派多个 agent）前，先向操作者说明量级并等确认；" +
+      "事后如实报实际开销。不擅自为省成本牺牲复审/验证的完整性。这条是透明习惯，不是硬机制门，没有对应的" +
+      "代码级拦截，完全靠自觉遵守；最后一句是关键护栏，把它和'省 token'这个价值观明确切开——省成本不能" +
+      "成为跳过复审、缩水验证覆盖面的理由。",
   },
 ];
 
