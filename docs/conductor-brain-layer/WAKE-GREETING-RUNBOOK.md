@@ -74,6 +74,62 @@
    '
    ```
 
+## shell profile 正确姿势（issue #88 B9 新增）
+
+上面"配置身份库"第1步的 `export AELOOP_BRAIN_IDENTITY_DB=...` 只在**当前终端 session** 里生效——
+关掉这个终端窗口/开一个新终端标签页，这个变量就没了。要让它对以后打开的所有终端持久生效，
+写进 shell 的 profile 文件：
+
+```bash
+# zsh（macOS 默认 shell，`echo $SHELL` 确认）
+echo 'export AELOOP_BRAIN_IDENTITY_DB="/absolute/path/to/your/identity.db"' >> ~/.zshrc
+
+# bash
+echo 'export AELOOP_BRAIN_IDENTITY_DB="/absolute/path/to/your/identity.db"' >> ~/.bashrc
+```
+
+**改完要开一个新终端窗口，或者在已经开着的终端里手动 `source ~/.zshrc`（或 `~/.bashrc`）**——
+已经开着的终端不会自动重新读这个文件，这是 shell 本身的行为，不是配置错了。
+
+## IDE 启动读不到 env 的坑（issue #88 B9 新增）
+
+macOS 上从 Dock / Spotlight / IDE 图形界面启动的进程**不继承** shell profile 里 export 的
+环境变量——这是 macOS 本身的进程继承模型决定的，只有从终端里敲命令启动的进程（包括从终端
+里打开的 Claude Code CLI）才会读到 `.zshrc`/`.bashrc` 里 export 的变量。如果你的 Claude Code
+是从 IDE（如某些编辑器内置的终端面板本身没问题，但 IDE 的"图形界面启动"某个外部工具时会有
+这个坑）或者 Dock 图标启动的，即便 `.zshrc` 里配好了 `AELOOP_BRAIN_IDENTITY_DB`，那个会话
+也可能读不到。两条修法：
+
+1. **推荐（更稳）**：`launchctl setenv AELOOP_BRAIN_IDENTITY_DB "/absolute/path/to/your/identity.db"`
+   ——对 macOS 上所有图形界面启动的进程一次性生效。**诚实标注局限**：这不是"跑一次永久生效"——
+   重启电脑后 launchctl 的这份 setenv 会失效，需要重新跑一次（可以写进一个开机自启脚本，
+   本 RUNBOOK 不展开如何配置那一层）。
+2. **备选（issue #88 B9 新增的机制化 fallback，比纯文档提醒更可靠）**：把
+   `.claude/brain.local.json.example` 复制成 `.claude/brain.local.json`（已在 `.gitignore` 里，
+   不会被提交），填入 `identityDbPath` 字段：
+
+   ```bash
+   cp .claude/brain.local.json.example .claude/brain.local.json
+   # 编辑 .claude/brain.local.json，把 identityDbPath 换成你自己的绝对路径
+   ```
+
+   `brain-wake-greeting.mjs` 会在 `AELOOP_BRAIN_IDENTITY_DB` 环境变量读不到时，自动 fallback 读
+   这份本地配置文件（`.claude/hooks/lib/db-path.mjs` 的 `resolveIdentityDbPath()`）——即便 IDE
+   启动的进程读不到 shell profile，只要这份文件存在，hook 依然能找到 dbPath，不需要每次都排查
+   "这个会话是不是从图形界面启动的"。
+
+## 排查清单（issue #88 B9 新增）
+
+- `echo $AELOOP_BRAIN_IDENTITY_DB` 在当前终端里是空的 → 没 export，或者开了新终端没 `source`
+  对应的 profile 文件（见上方"shell profile 正确姿势"）。
+- 终端里能读到这个变量，但 Claude Code 会话里开场白没出现 → 检查这个会话是不是从 IDE/图形
+  界面启动的（见上方"IDE 启动读不到 env 的坑"），排查时可以先用 `.claude/brain.local.json`
+  fallback 绕开这个问题，确认是不是这条路径的坑。
+- 两个配置源（env / `.claude/brain.local.json`）都配了，仍然没有开场白 → 跑
+  `node docs/conductor-brain-layer/spike/demo-wake-greeting.mjs`（"本机验证"一节，见下）本机
+  排除，区分"hook 本身没触发"和"触发了但数据是空的"两种可能——前者通常是 `.claude/settings.json`
+  没生效或 Claude Code 版本问题，后者是身份库里确实没有种子数据（回到"配置身份库"第3步）。
+
 ## 让"你好" → 开场白 真的跑起来
 
 `.claude/settings.json` 已经把 `SessionStart` 接到 `.claude/hooks/brain-wake-greeting.mjs`

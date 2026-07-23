@@ -2,7 +2,7 @@
 /**
  * brain-wake-greeting.mjs — SessionStart hook（aeloop issue #84）。
  *
- * 会话启动时：开 aeloop 身份 MemoryStore（AELOOP_BRAIN_IDENTITY_DB 指的那个 dbPath）→
+ * 会话启动时：开 aeloop 身份 MemoryStore（dbPath 由 `resolveIdentityDbPath()` 解析，见下方"配置"）→
  * gatherGreetingData()（docs/conductor-brain-layer/spike/lib/greeting-data.mjs）→
  * renderGreeting() → 把渲染好的开场白文字连同一条"请原样复述"的指令，作为
  * SessionStart additionalContext 注入。模型看到这段注入后，对用户的第一句话（不管是不是
@@ -26,10 +26,16 @@
  * 普通会话被这个 hook 卡住或搞出一堆报错噪音。用动态 import()（不是顶层 static import）
  * 就是为了让"dist/ 还没 build"这种失败也能被 try/catch 接住，而不是在模块加载阶段就直接崩溃。
  *
- * 配置：
- *   - AELOOP_BRAIN_IDENTITY_DB（必需，否则安静跳过，不注入任何东西）：身份库 dbPath，
- *     建议用绝对路径（相对路径会相对 `better-sqlite3` 打开时的进程 cwd 解析，hook 和手动跑
- *     print-status-table.mjs 的 cwd 不一定相同，绝对路径避免歧义，见 WAKE-GREETING-RUNBOOK.md）。
+ * 配置（issue #88 B9 更新：dbPath 有两个来源，二选一，缺一不可当"必需"看待——两者都没有
+ *   才安静跳过）：
+ *   - **首选** AELOOP_BRAIN_IDENTITY_DB：身份库 dbPath 环境变量，建议用绝对路径（相对路径会
+ *     相对 `better-sqlite3` 打开时的进程 cwd 解析，hook 和手动跑 print-status-table.mjs 的 cwd
+ *     不一定相同，绝对路径避免歧义，见 WAKE-GREETING-RUNBOOK.md）。
+ *   - **fallback**（env 读不到时）：项目根 `.claude/brain.local.json` 的 `identityDbPath` 字段
+ *     （`.claude/brain.local.json.example` 是模板，复制一份改名即可；已 gitignore，不进 git）
+ *     ——解决 IDE/图形界面启动的会话不继承 shell profile export 的坑，见 `resolveIdentityDbPath()`
+ *     （`./lib/db-path.mjs`）+ WAKE-GREETING-RUNBOOK.md"IDE 启动读不到 env 的坑"一节。
+ *   - 两者都没有 → 安静跳过，不注入任何东西，不是错误（#84 既有行为，本次未变）。
  *   - AELOOP_BRAIN_IDENTITY_NAME（可选）：显式覆盖身份名，优先级高于身份库里
  *     type:"identity", title:"identity:name" 的那条 memory——纯粹为了方便在身份库还没配置
  *     identity:name 记录时也能先跑通 demo，不是长期推荐路径（长期应该配进身份库本身）。
@@ -38,6 +44,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveIdentityDbPath } from "./lib/db-path.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SPIKE_LIB_DIR = path.join(HERE, "..", "..", "docs", "conductor-brain-layer", "spike", "lib");
@@ -59,8 +66,11 @@ async function main() {
     /* 没有 stdin 也无所谓 */
   }
 
-  const dbPath = process.env.AELOOP_BRAIN_IDENTITY_DB;
-  if (!dbPath) return; // 未配置身份库 = 安静跳过，不是错误
+  // issue #88 B9：dbPath 解析从"直读 env"改成 resolveIdentityDbPath()（env 优先，读不到时 fallback
+  // 到 .claude/brain.local.json——解决 IDE/图形界面启动的会话不继承 shell profile export 的坑，
+  // 见 docs/conductor-brain-layer/WAKE-GREETING-RUNBOOK.md）。这是本文件在 B9 里唯一的逻辑改动。
+  const dbPath = resolveIdentityDbPath();
+  if (!dbPath) return; // 两个配置源都没有 = 安静跳过，不是错误（#84 既有行为，本次不变）
 
   const { openIdentityStore } = await import(path.join(SPIKE_LIB_DIR, "wake.mjs"));
   const { gatherGreetingData } = await import(path.join(SPIKE_LIB_DIR, "greeting-data.mjs"));

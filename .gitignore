@@ -25,6 +25,11 @@ profiles/apikey/
 .env
 .env.local
 
+# conductor-brain turnkey (issue #88): per-operator local config + one-time authorization locks,
+# neither should ever be committed (brain.local.json.example is the tracked template to copy from)
+.claude/brain.local.json
+.claude/brain-locks/
+
 # Misc
 .DS_Store
 *.log
