@@ -1,45 +1,40 @@
-# Conductor Work visual demo
+# Conductor Work 可视化演示
 
-Zero-dependency local UI for the company workflow. It displays the concepts
-that must remain visible to a company user: LoopEvent timeline, human gates,
-requirement coverage, EvidenceBundle, policy status, and token savings.
+面向公司工作流的零依赖本地 UI。展示的是必须让公司用户看得见的概念:
+LoopEvent 时间线、human gate、需求覆盖度、EvidenceBundle、policy 状态、
+token 节省量。
 
 ```bash
 node conductor-work/ui/server.mjs
 ```
 
-Open `http://127.0.0.1:4173`.
+打开 `http://127.0.0.1:4173`。
 
-## Where the data comes from (demo fixture stage, not production)
+## 数据从哪来(演示 fixture 阶段,不是生产环境)
 
-This is a **demo fixture stage**, not a connection to any real, running
-conductor. `server.mjs` hardcodes a small, type-legal `LoopEvent[]` array
-(`src/loop/events.ts` shapes) at module scope and feeds it, once at process
-start, through the real `EvidenceEventProjector` /
-`EvidenceBundleBuilder`/`TokenBudgetLedger` classes (`src/evidence/bundle.ts`,
-compiled to `dist/evidence/bundle.js`). The JSON served at `GET /api/state`
-is therefore a genuine projector *output* computed from that fixture — not a
-hand-authored object shaped to look like one.
+这是一个**演示 fixture 阶段**,不接任何真实运行中的 conductor。`server.mjs`
+在模块作用域里硬编码了一个小型、类型合法的 `LoopEvent[]` 数组
+(形状来自 `src/loop/events.ts`),进程启动时喂它跑一遍真实的
+`EvidenceEventProjector` / `EvidenceBundleBuilder` / `TokenBudgetLedger`
+这几个类(`src/evidence/bundle.ts`,编译产物在 `dist/evidence/bundle.js`)。
+`GET /api/state` 返回的 JSON 因此是从那份 fixture 算出来的真实 projector
+*输出*——不是手写出来、装成那个样子的对象。
 
-Run `pnpm run build` at the repo root first so `dist/evidence/bundle.js`
-exists. If it doesn't (fresh checkout, no build yet), `server.mjs` catches
-the missing-module error and serves a clearly-labelled static fallback
-snapshot instead (`source: "static-fallback"` in the JSON) so the page still
-renders — but that fallback is hand-authored copy, not projector output.
-`source: "projector"` in the `/api/state` response tells you which one you
-are looking at.
+先在仓库根跑 `pnpm run build`,确保 `dist/evidence/bundle.js` 存在。如果不
+存在(全新 checkout、还没 build 过),`server.mjs` 会捕获缺模块的错误,
+改为提供一份标注清楚的静态兜底快照(JSON 里 `source: "static-fallback"`),
+让页面照样能渲染——但那份兜底数据是手写的,不是 projector 输出。
+`/api/state` 响应里的 `source: "projector"` 会告诉你现在看到的是哪一种。
 
-**What is still demo/not-yet-wired**: the *event stream itself*. A future
-iteration should replace `FIXTURE_EVENTS` in `server.mjs` with the real
-`LoopEvent` stream emitted by a live conductor run (`runner.ts`'s
-`LoopEventEmitter`, or `ConductorWorkApp.projectEvents()` once a real
-`brains/company` + `TaskContract` + workflow registry are wired up end to
-end) — that adapter swap should not require changing `index.html`'s
-structure, since `app.js` already renders whatever shape `/api/state`
-returns.
+**还处于演示阶段/尚未接线的部分**:*事件流本身*。未来的迭代应该把
+`server.mjs` 里的 `FIXTURE_EVENTS` 换成真实 conductor run 发出的真实
+`LoopEvent` 流(`runner.ts` 的 `LoopEventEmitter`,或者等真实的
+`brains/company` + `TaskContract` + workflow registry 端到端接通之后用
+`ConductorWorkApp.projectEvents()`)——换这个 adapter 不应该需要改动
+`index.html` 的结构,因为 `app.js` 已经能渲染 `/api/state` 返回的任意形状。
 
-The human-gate buttons (`Approve`/`Reject`) only mutate what this page
-displays locally — they do not send a decision to any persisted run.
+human-gate 按钮(`Approve`/`Reject`)只会本地改变这个页面显示的内容——
+不会把决定发给任何持久化的 run。
 
-Everything else in this file is documentation, not UI copy — the existing
-Chinese UI labels in `index.html`/`app.js` are left as-is.
+本文件里除此之外的内容都是文档,不是 UI 文案——`index.html`/`app.js`
+里已有的中文 UI 标签保持原样不动。

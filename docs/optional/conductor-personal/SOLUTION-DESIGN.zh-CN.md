@@ -39,41 +39,7 @@
 
 ### 2.1 系统上下文
 
-```mermaid
-flowchart TB
-    OWNER["个人用户 / 产品负责人"]
-    WORKUSER["工作用户 / 审批人"]
-
-    PERSONAL["Conductor<br/>私人版大脑"]
-    WORK["Conductor Work<br/>工作版大脑"]
-    ENGINE["Aeloop<br/>工作流执行与验证内核"]
-
-    PERSONAL_DB[("私人记忆与项目数据")]
-    WORK_DB[("工作记忆、需求与政策数据")]
-    RUN_DB[("Aeloop Run / Event / Evidence DB")]
-
-    GITHUB["GitHub<br/>人工批准后的产品层操作"]
-    GITLAB["GitLab<br/>默认只读；禁止远端写操作"]
-    LITELLM["Company LiteLLM"]
-    SUBS["Claude / Codex Subscription CLI"]
-
-    OWNER <--> PERSONAL
-    WORKUSER <--> WORK
-
-    PERSONAL <--> PERSONAL_DB
-    WORK <--> WORK_DB
-
-    PERSONAL -->|"TaskContract + ContextPack + RunPolicy"| ENGINE
-    WORK -->|"TaskContract + ContextPack + RunPolicy"| ENGINE
-    ENGINE -->|"LoopEvent + GateRequest + EvidenceBundle"| PERSONAL
-    ENGINE -->|"LoopEvent + GateRequest + EvidenceBundle"| WORK
-    ENGINE <--> RUN_DB
-
-    PERSONAL -->|"独立授权"| GITHUB
-    WORK -->|"读取需求与仓库元数据"| GITLAB
-    ENGINE --> SUBS
-    ENGINE --> LITELLM
-```
+![2.1 系统上下文](diagrams/SOLUTION-DESIGN-01-2-1-系统上下文.svg)
 
 ### 2.2 三个产品的职责
 
@@ -188,32 +154,7 @@ Total tokens / Accepted outcome
 
 ### 4.1 Aeloop 内核
 
-```mermaid
-flowchart LR
-    CONTRACT["Public Contracts<br/>TaskContract / ContextPack / RunPolicy"]
-
-    subgraph CORE["Aeloop Core"]
-        PROMPT["Prompt<br/>Role + Schema + Prompt Template"]
-        CONTEXT["Context<br/>Provider + Snapshot + Budget"]
-        HARNESS["Harness<br/>Model + Tool + Workspace + Telemetry"]
-        RUNTIME["Workflow Runtime<br/>Graph + Gate + Resume + Events"]
-        POLICY["Policy Engine<br/>File / Tool / Dependency / SCM"]
-        EVIDENCE["Evidence Engine<br/>Claim -> Evidence -> Artifact"]
-    end
-
-    PLUGINS["Workflow Plugins<br/>coder-tester / research / prd / custom"]
-    CLIENTS["Conductor Clients"]
-
-    CLIENTS --> CONTRACT
-    CONTRACT --> RUNTIME
-    RUNTIME --> HARNESS
-    HARNESS --> CONTEXT
-    CONTEXT --> PROMPT
-    RUNTIME --> POLICY
-    HARNESS --> EVIDENCE
-    PLUGINS --> RUNTIME
-    RUNTIME -->|"LoopEvent / GateRequest / EvidenceBundle"| CLIENTS
-```
+![4.1 Aeloop 内核](diagrams/SOLUTION-DESIGN-02-4-1-aeloop-内核.svg)
 
 ### 4.2 公共协议
 
@@ -298,21 +239,7 @@ export interface WorkflowManifest {
 
 第一阶段使用 TypeScript 插件，每个插件内部仍然手写并测试 LangGraph，保持强类型和可审计。第二阶段再为简单流程增加声明式 YAML/JSON DSL；不在第一阶段直接建设 Ruflo 规模的通用动态图平台。
 
-```mermaid
-flowchart TB
-    REG["Workflow Registry"]
-    CODE["coder-tester<br/>代码生成与独立审查"]
-    RESEARCH["research-synthesis<br/>多源调研与引用核对"]
-    PRD["prd-authoring<br/>需求收集、冲突检查、PRD"]
-    DESIGN["design-compliance<br/>PRD/Figma/实现对齐"]
-    CUSTOM["Custom Plugin"]
-
-    REG --> CODE
-    REG --> RESEARCH
-    REG --> PRD
-    REG --> DESIGN
-    REG --> CUSTOM
-```
+![4.3 Workflow 插件模型](diagrams/SOLUTION-DESIGN-03-4-3-workflow-插件模型.svg)
 
 ### 4.4 两级调度
 
@@ -509,131 +436,7 @@ conductor-work/
 
 Aeloop 数据库只保存执行事实，不保存私人或公司长期业务记忆。
 
-```mermaid
-erDiagram
-    WORKFLOW_RUNS ||--o{ RUN_STEPS : contains
-    WORKFLOW_RUNS ||--o{ RUN_EVENTS : emits
-    WORKFLOW_RUNS ||--o{ APPROVALS : requires
-    WORKFLOW_RUNS ||--o{ CONTEXT_SNAPSHOTS : uses
-    WORKFLOW_RUNS ||--o{ ARTIFACTS : produces
-    RUN_STEPS ||--o{ CLAIMS : makes
-    RUN_STEPS ||--o{ TOOL_EXECUTIONS : executes
-    RUN_STEPS ||--o{ USAGE_RECORDS : consumes
-    CLAIMS ||--o{ CLAIM_EVIDENCE : supported_by
-    TOOL_EXECUTIONS ||--o{ CLAIM_EVIDENCE : provides
-    ARTIFACTS ||--o{ CLAIM_EVIDENCE : provides
-
-    WORKFLOW_RUNS {
-        text id PK
-        text caller_id
-        text workflow_id
-        text workflow_version
-        text profile_id
-        text task_contract_hash
-        text policy_hash
-        text status
-        text current_step
-        text workspace_id
-        datetime created_at
-        datetime updated_at
-    }
-
-    RUN_STEPS {
-        text id PK
-        text run_id FK
-        text step_id
-        integer attempt
-        text role_id
-        text provider
-        text model
-        text status
-        datetime started_at
-        datetime completed_at
-    }
-
-    RUN_EVENTS {
-        integer sequence PK
-        text run_id FK
-        text event_type
-        text payload_json
-        text previous_hash
-        text event_hash
-        datetime created_at
-    }
-
-    APPROVALS {
-        text id PK
-        text run_id FK
-        text gate_id
-        text decision
-        text decided_by
-        text reason
-        text contract_hash
-        text artifact_hash
-        datetime decided_at
-    }
-
-    CONTEXT_SNAPSHOTS {
-        text id PK
-        text run_id FK
-        text provider_id
-        text source_version
-        text content_hash
-        integer token_count
-        text items_json
-        datetime created_at
-    }
-
-    CLAIMS {
-        text id PK
-        text step_id FK
-        text requirement_id
-        text claim_text
-        text confidence
-        text verification_status
-        datetime created_at
-    }
-
-    TOOL_EXECUTIONS {
-        text id PK
-        text step_id FK
-        text tool_name
-        text arguments_hash
-        text cwd
-        integer exit_code
-        text stdout_hash
-        text stderr_hash
-        datetime started_at
-        datetime completed_at
-    }
-
-    ARTIFACTS {
-        text id PK
-        text run_id FK
-        text kind
-        text path
-        text content_hash
-        text baseline_hash
-        datetime created_at
-    }
-
-    CLAIM_EVIDENCE {
-        text claim_id FK
-        text evidence_type
-        text evidence_id
-    }
-
-    USAGE_RECORDS {
-        text id PK
-        text step_id FK
-        integer input_tokens
-        integer output_tokens
-        integer cached_tokens
-        integer reasoning_tokens
-        real estimated_cost
-        integer latency_ms
-    }
-```
+![7.1 Aeloop Run Database](diagrams/SOLUTION-DESIGN-04-7-1-aeloop-run-database.svg)
 
 LangGraph checkpoint 表继续由其官方 SQLite saver 管理，不手工耦合其内部 schema。业务审计表与 checkpoint 表保持职责分离。
 
@@ -641,106 +444,7 @@ LangGraph checkpoint 表继续由其官方 SQLite saver 管理，不手工耦合
 
 Conductor 和 Conductor Work 可以采用相似的逻辑 schema，但必须使用不同数据库、不同路径、不同加密与备份策略。
 
-```mermaid
-erDiagram
-    PROJECTS ||--o{ GOALS : has
-    PROJECTS ||--o{ SOURCE_DOCUMENTS : references
-    PROJECTS ||--o{ DECISIONS : records
-    PROJECTS ||--o{ MEMORY_ITEMS : remembers
-    GOALS ||--o{ TASK_CONTRACTS : creates
-    TASK_CONTRACTS ||--o{ RUN_LINKS : dispatches
-    SOURCE_DOCUMENTS ||--o{ SOURCE_SNAPSHOTS : versions
-    BRAIN_SESSIONS ||--o{ BRAIN_MESSAGES : contains
-
-    PROJECTS {
-        text id PK
-        text name
-        text repository_ref
-        text status
-        datetime updated_at
-    }
-
-    GOALS {
-        text id PK
-        text project_id FK
-        text objective
-        text priority
-        text status
-        datetime created_at
-    }
-
-    DECISIONS {
-        text id PK
-        text project_id FK
-        text decision
-        text rationale
-        text source_ref
-        datetime decided_at
-    }
-
-    MEMORY_ITEMS {
-        text id PK
-        text project_id FK
-        text memory_type
-        text title
-        text content
-        text confidence_state
-        text source_ref
-        datetime verified_at
-        datetime stale_after
-    }
-
-    SOURCE_DOCUMENTS {
-        text id PK
-        text project_id FK
-        text source_type
-        text source_ref
-        text access_class
-    }
-
-    SOURCE_SNAPSHOTS {
-        text id PK
-        text document_id FK
-        text version
-        text content_hash
-        text local_ref
-        datetime captured_at
-    }
-
-    TASK_CONTRACTS {
-        text id PK
-        text goal_id FK
-        text contract_json
-        text contract_hash
-        text status
-        datetime frozen_at
-    }
-
-    RUN_LINKS {
-        text id PK
-        text task_contract_id FK
-        text aeloop_run_id
-        text final_status
-        text evidence_bundle_ref
-    }
-
-    BRAIN_SESSIONS {
-        text id PK
-        text project_id FK
-        text session_type
-        datetime started_at
-        datetime completed_at
-    }
-
-    BRAIN_MESSAGES {
-        text id PK
-        text session_id FK
-        text actor
-        text content_ref
-        integer token_count
-        datetime created_at
-    }
-```
+![7.2 Brain Database](diagrams/SOLUTION-DESIGN-05-7-2-brain-database.svg)
 
 工作版可以在此基础上增加 Requirement、PolicyVersion、ApprovalAuthority 等表，但这些属于 Conductor Work，不进入 Aeloop。
 

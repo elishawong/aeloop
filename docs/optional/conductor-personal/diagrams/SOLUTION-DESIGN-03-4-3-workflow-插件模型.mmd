@@ -1,0 +1,13 @@
+flowchart TB
+    REG["Workflow Registry"]
+    CODE["coder-tester<br/>代码生成与独立审查"]
+    RESEARCH["research-synthesis<br/>多源调研与引用核对"]
+    PRD["prd-authoring<br/>需求收集、冲突检查、PRD"]
+    DESIGN["design-compliance<br/>PRD/Figma/实现对齐"]
+    CUSTOM["Custom Plugin"]
+
+    REG --> CODE
+    REG --> RESEARCH
+    REG --> PRD
+    REG --> DESIGN
+    REG --> CUSTOM

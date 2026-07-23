@@ -52,74 +52,17 @@
 
 ### 2.1 醒来时序：今天（#84 现状，人格缺口画出来）
 
-```mermaid
-sequenceDiagram
-    participant CC as Claude Code CLI
-    participant Hook as brain-wake-greeting.mjs
-    participant Store as identity MemoryStore
-    participant Model as 模型（本次会话实际用的哪个）
-
-    CC->>Hook: SessionStart(startup/resume/clear)
-    Hook->>Store: gatherGreetingData()
-    Store-->>Hook: identityName/statusRows/backlogItems/pendingDecisions/...
-    Note over Hook,Store: constraint 类型 memory 被 wake() 读进 continuedThreads，<br/>但 gatherGreetingData() 不消费它——死路（§1 核实发现）
-    Hook-->>CC: additionalContext = 开场白文字 + "请原样复述"指令
-    CC->>Model: 注入 additionalContext（无 CLAUDE.md，无宪法文本）
-    Model-->>Model: 只知道"要复述这段开场白"，不知道任何铁律/人格约束
-```
+![2.1 醒来时序：今天（#84 现状，人格缺口画出来）](diagrams/TURNKEY-DESIGN-01-2-1-醒来时序-今天-84-现状-人格缺口画出来.svg)
 
 **故意画出的缺口**：即便身份库配置完整、`AELOOP_BRAIN_IDENTITY_DB` 也设了，今天这条链路里**没有任何一步**告诉模型"你有铁律""你该怎么说话""commit 前要不要经过谁批准"。这正是 operator 在公司电脑上观察到"看起来还是通用助手"的根因，不是配置问题，是设计缺口。
 
 ### 2.2 醒来时序：本设计后（人格真正加载）
 
-```mermaid
-sequenceDiagram
-    participant CC as Claude Code CLI
-    participant CM as CLAUDE.md（新建，见§3方案i）
-    participant Hook as brain-wake-greeting.mjs（延伸）
-    participant Store as identity MemoryStore
-    participant Model as 模型
-
-    CC->>CM: 会话启动，Claude Code 原生读取项目 CLAUDE.md（无需 hook）
-    CM-->>Model: 系统级注入：身份/人格/铁律/醒来协议（静态，全程有效）
-    CC->>Hook: SessionStart(startup/resume/clear)
-    Hook->>Store: gatherGreetingData() + 新增：confirmed constraint memory 摘要
-    Store-->>Hook: 同 #84 六字段 + constraintSummary（若有 unconfirmed constraint，进 pendingDecisions，同已有约定）
-    Hook-->>CC: additionalContext = 开场白文字（动态，逐会话不同）
-    CC->>Model: CLAUDE.md（人格，静态） + additionalContext（在途状态，动态）
-    Model-->>Model: 两条线合流：既知道"我是谁/守什么铁律"，也知道"上次做到哪"
-```
+![2.2 醒来时序：本设计后（人格真正加载）](diagrams/TURNKEY-DESIGN-02-2-2-醒来时序-本设计后人格真正加载.svg)
 
 ### 2.3 red-line 拦截时序（commit/push 审批门为例，其余 hook 同构）
 
-```mermaid
-sequenceDiagram
-    participant Model as 模型（Claude Code 会话里）
-    participant CC as Claude Code CLI（harness）
-    participant Gate as brain-commit-gate.mjs
-    participant Lock as .claude/hooks/lib/brain-lock.mjs
-
-    Model->>CC: 发起 Bash 工具调用："git commit -m ..."
-    CC->>Gate: PreToolUse(Bash) stdin: {tool_name, tool_input.command, session_id, cwd}
-    Gate->>Gate: commandMatchesGatedPattern(cmd)（token化，非正则堆叠）
-    alt 不命中 gated 模式
-        Gate-->>CC: allow（无输出，exit 0）
-    else 命中 commit/push/force-push 类模式
-        Gate->>Gate: git -C cwd rev-parse --show-toplevel 判定目标仓库
-        alt 目标不是本包所在仓库
-            Gate-->>CC: allow（fail-open，范围明确不覆盖别的仓库）
-        else 是本仓库
-            Gate->>Lock: consumeCommitAuthorization(toplevel, sessionId)
-            alt 有效一次性令牌
-                Lock-->>Gate: {consumed:true}
-                Gate-->>CC: allow（令牌立即失效，下次需重新授权）
-            else 无令牌/已消费/超龄
-                Gate-->>CC: deny + 提示 "先得到 operator 明确的可以，再跑 authorize-commit"
-                CC-->>Model: 工具调用被拒绝，附 deny 原因
-            end
-        end
-    end
-```
+![2.3 red-line 拦截时序（commit/push 审批门为例，其余 hook 同构）](diagrams/TURNKEY-DESIGN-03-2-3-red-line-拦截时序commit-push-审批门为例-其余-hook-同构.svg)
 
 ---
 

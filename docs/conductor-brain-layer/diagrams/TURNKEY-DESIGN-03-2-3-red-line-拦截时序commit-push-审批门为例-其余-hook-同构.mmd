@@ -1,0 +1,26 @@
+sequenceDiagram
+    participant Model as 模型（Claude Code 会话里）
+    participant CC as Claude Code CLI（harness）
+    participant Gate as brain-commit-gate.mjs
+    participant Lock as .claude/hooks/lib/brain-lock.mjs
+
+    Model->>CC: 发起 Bash 工具调用："git commit -m ..."
+    CC->>Gate: PreToolUse(Bash) stdin: {tool_name, tool_input.command, session_id, cwd}
+    Gate->>Gate: commandMatchesGatedPattern(cmd)（token化，非正则堆叠）
+    alt 不命中 gated 模式
+        Gate-->>CC: allow（无输出，exit 0）
+    else 命中 commit/push/force-push 类模式
+        Gate->>Gate: git -C cwd rev-parse --show-toplevel 判定目标仓库
+        alt 目标不是本包所在仓库
+            Gate-->>CC: allow（fail-open，范围明确不覆盖别的仓库）
+        else 是本仓库
+            Gate->>Lock: consumeCommitAuthorization(toplevel, sessionId)
+            alt 有效一次性令牌
+                Lock-->>Gate: {consumed:true}
+                Gate-->>CC: allow（令牌立即失效，下次需重新授权）
+            else 无令牌/已消费/超龄
+                Gate-->>CC: deny + 提示 "先得到 operator 明确的可以，再跑 authorize-commit"
+                CC-->>Model: 工具调用被拒绝，附 deny 原因
+            end
+        end
+    end

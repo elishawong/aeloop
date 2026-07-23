@@ -1,56 +1,49 @@
 # Changelog
 
-All notable changes to this project are documented in this file. The format
-follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this
-project does not yet follow semantic versioning (see `version` in
-`package.json`).
+本项目所有值得记录的变更都记在这份文件里。格式遵循
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/);本项目暂未遵循
+语义化版本号(见 `package.json` 里的 `version`)。
 
 ## [Unreleased]
 
-- **2026-07-22** — Semi-auto gate mode (`workflow.gate_mode: "manual" | "semi-auto"`,
-  #63): `semi-auto` auto-approves G1/G2 (coder→tester, tester→fix) with
-  `decidedBy = "system (semi-auto)"`, while G3 (final apply) and Escalation stay
-  human. Default `manual` preserves existing behavior byte-for-byte. Includes a
-  fail-closed `reject_threshold` guard (malformed values fall through to the
-  default so the escalation-to-human safety net can't be silently disabled) and a
-  gate-identity assertion guarding the auto-approval path.
-- **2026-07-21** — A5 CLI/TUI: a real, installable `aeloop` command
-  (`start`/`resume`/`list`) driving the Loop engine end to end against the
-  `subscription` profile — chalk-colorized diff rendering (`diff-render.ts`)
-  and gate views (`gate-view.ts`, including a structurally distinct
-  Escalation banner), a `Prompter` abstraction (`InquirerPrompter` for real
-  terminal use, `FakePrompter` for tests) so the interactive loop
-  (`run-loop.ts`) is testable without a real TTY, real dependency-graph
-  assembly for the subscription profile (`assemble.ts`), argv parsing +
-  dispatch + a documented, permanent Ctrl+C-during-model-call limitation
-  (`main.ts`/`bin.ts`), and one small, additive `runner.ts` export
-  (`getPendingInterrupt()`) giving a fresh CLI process a read-only way to
-  reconstruct a paused run's pending gate for `aeloop resume`. Hard vertical
-  slice covers both the happy path and the threshold-escalation path
-  through real `main()` dispatch, real cli-bridge fixture subprocesses, and
-  a scripted `FakePrompter`. 368 tests passing.
-- **2026-07-21** — Loop orchestration, phase 2: threshold escalation hard
-  branch (`escalation.ts`), audit persistence (`workflow_runs` /
-  `structured_claims` / `approvals` tables in `audit-store.ts`), a
-  `runner.ts` orchestration layer (`startRun()` / `resumeRun()`), and
-  cross-process checkpoint resume (two independent processes, resume driven
-  purely by `dbPath` + `runId`). 300 tests passing.
-- **2026-07-21** — Loop orchestration, phase 1: graph-based coder/tester
-  state machine (`graph.ts`) with G1/G2/G3 approval gates (`gates.ts`),
-  SQLite-backed checkpointing (`checkpoint.ts`), and a real end-to-end
-  vertical slice covering context → prompt → harness → graph → gate
-  interrupt/resume. 254 tests passing.
-- **2026-07-20** — CLI bridge layer: Claude CLI and Codex CLI adapters with
-  real process spawning and JSONL stream parsing, a tool-execution verifier
-  that catches claimed-but-unexecuted tool calls, and a shared
-  spawn/timeout/stdin primitive (`cli-exec.ts`). Internal profile
-  identifiers renamed to credential-model names (`subscription` /
-  `apikey`). 228 tests passing.
-- **2026-07-20** — Harness layer: provider routing, an adapter registry, a
-  direct-API LiteLLM adapter, and schema validation with retry-on-failure
-  that feeds validation errors back into the prompt. 165 tests passing.
-- **2026-07-20** — Engine scaffold, plus the Context layer (SQLite+FTS5
-  memory store, staleness tracking, a transactional confirm/correct/reject
-  flow, rejected-memory filtering) and the Prompt layer (zod-validated
-  output schemas, dynamic persona loading, prompt composer), with a real
-  context → prompt vertical slice. 96 tests passing.
+- **2026-07-22** — 半自动 gate 模式(`workflow.gate_mode: "manual" | "semi-auto"`,
+  #63):`semi-auto` 会以 `decidedBy = "system (semi-auto)"` 自动批准
+  G1/G2(coder→tester、tester→fix),而 G3(最终 apply)和 Escalation 仍保持
+  人工。默认的 `manual` 逐字节保持原有行为不变。内含一个 fail-closed 的
+  `reject_threshold` 兜底(格式错误的值会回落到默认值,让升级给人工的安全网
+  无法被悄悄关掉)以及一个守护自动批准路径的 gate-identity 断言。
+- **2026-07-21** — A5 CLI/TUI:一个真实的、可安装的 `aeloop` 命令
+  (`start`/`resume`/`list`),端到端驱动 Loop 引擎跑 `subscription`
+  profile——chalk 上色的 diff 渲染(`diff-render.ts`)和 gate 视图
+  (`gate-view.ts`,含一个结构上明显不同的 Escalation banner)、一个
+  `Prompter` 抽象(真实终端用 `InquirerPrompter`,测试用 `FakePrompter`),
+  让交互式 loop(`run-loop.ts`)不需要真实 TTY 也能测、subscription profile
+  真实的依赖图装配(`assemble.ts`)、argv 解析 + 分发 + 一个已写明文档的、
+  永久性的"模型调用期间按 Ctrl+C"限制(`main.ts`/`bin.ts`),以及一处很小、
+  纯新增的 `runner.ts` 导出(`getPendingInterrupt()`),让全新的 CLI 进程能
+  只读地重建一个暂停 run 的待处理 gate,供 `aeloop resume` 使用。硬核纵切
+  覆盖了 happy path 和阈值升级路径,都是走真实的 `main()` 分发、真实的
+  cli-bridge fixture 子进程,加一个可编排脚本的 `FakePrompter`。368 个测试
+  通过。
+- **2026-07-21** — Loop 编排,第二阶段:阈值升级的硬分支(`escalation.ts`)、
+  审计持久化(`audit-store.ts` 里的 `workflow_runs` / `structured_claims` /
+  `approvals` 三张表)、一个 `runner.ts` 编排层(`startRun()` / `resumeRun()`),
+  以及跨进程 checkpoint 续跑(两个独立进程,续跑纯靠 `dbPath` + `runId`
+  驱动)。300 个测试通过。
+- **2026-07-21** — Loop 编排,第一阶段:基于 graph 的 coder/tester 状态机
+  (`graph.ts`),带 G1/G2/G3 批准 gate(`gates.ts`)、SQLite 支撑的
+  checkpoint(`checkpoint.ts`),以及一次真实的端到端纵切,覆盖
+  context → prompt → harness → graph → gate 的 interrupt/resume。254 个
+  测试通过。
+- **2026-07-20** — CLI bridge 层:Claude CLI 和 Codex CLI adapter,真实进程
+  spawn + JSONL 流解析,一个能抓到"声称执行了但实际没执行"的工具调用的
+  tool-execution 校验器,以及一个共享的 spawn/timeout/stdin 原语
+  (`cli-exec.ts`)。内部 profile 标识符改名为按凭证模型命名
+  (`subscription` / `apikey`)。228 个测试通过。
+- **2026-07-20** — Harness 层:provider 路由、一个 adapter registry、一个
+  direct-API 的 LiteLLM adapter,以及带失败重试的 schema 校验,重试时会把
+  校验错误喂回 prompt 里。165 个测试通过。
+- **2026-07-20** — 引擎脚手架,外加 Context 层(SQLite+FTS5 记忆存储、
+  staleness 追踪、一个事务性的 confirm/correct/reject 流程、被拒绝记忆的
+  过滤)和 Prompt 层(zod 校验的输出 schema、动态 persona 加载、prompt
+  composer),含一次真实的 context → prompt 纵切。96 个测试通过。

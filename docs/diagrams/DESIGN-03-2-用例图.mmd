@@ -1,0 +1,19 @@
+flowchart LR
+    Dev(("👤 开发者"))
+    subgraph SYS["aeloop"]
+        UC1(["选择 profile(subscription/apikey)"])
+        UC2(["配置 role→model 映射"])
+        UC3(["发起开发任务"])
+        UC4(["查看 diff+理由"])
+        UC5(["批准/拒绝 G1/G2/G3"])
+        UC6(["配置拒绝阈值"])
+        UC7(["确认/纠正未确认的记忆"])
+        UC8(["处理人工升级"])
+        UC9(["查看批准审计"])
+    end
+    Dev-->UC1 & UC2 & UC3 & UC4 & UC5 & UC6 & UC7 & UC8 & UC9
+    Coder(("🤖 Coder\n模型 A")); Tester(("🤖 Tester\n模型 B≠A")); Orc(("⚙️ 编排"))
+    Coder-->UC11(["结构化变更提案 + 置信度"])
+    Coder-->UC12(["根据反馈修复"])
+    Tester-->UC13(["发现的问题清单 + 置信度"])
+    Orc-->UC15(["路由到匹配的模型"]) & UC16(["拒绝计数 + 阈值"]) & UC17(["校验结构化输出"]) & UC18(["核对 tool_execution(cli-bridge)"]) & UC19(["写审计"])

@@ -1,0 +1,53 @@
+flowchart TB
+    DEV(("👤 开发者"))
+    PROF["AI_AGENT_PROFILE\n(subscription | apikey)"]
+    UI["CLI / TUI\n彩色 diff - 理由 - y/n 批准"]
+
+    subgraph OVL["Profile / Overlay 层(aeloop-new - 引擎外)"]
+        OV1["config.yaml\n(providers/roles/threshold)"]
+        OV2["persona overlay\n(CORE + 既有 persona)"]
+        OV3["memory db(每个 profile 独立)"]
+    end
+
+    subgraph L1["第 1 层 - Prompt"]
+        P1["persona 模板加载器\n(纯文本,与厂商无关)"]
+        P2["输出 Schema(zod)\nClaimSchema/CoderOutput/TesterOutput"]
+        P3["PromptComposer\npersona+schema+memory → prompt"]
+    end
+    subgraph L2["第 2 层 - Context(SQLite+FTS5)"]
+        M1[("memories + FTS5")]
+        M2["StalenessEngine"]
+        M3["ConfirmationService(三态)"]
+        M4["ContextInjector\n(唤醒注入 + 过滤已拒绝项)"]
+    end
+    subgraph L3["第 3 层 - Harness / 适配器"]
+        H1["ProviderRouter\nrole → (provider, model)"]
+        H2["LiteLLMAdapter\n(direct-api)"]
+        H3["ClaudeCliAdapter / CodexCliAdapter\n(cli-bridge - aeloop-new,一等公民)"]
+        H5["SchemaValidator(统一入口)"]
+        H6["ToolExecVerifier\n(仅 cli-bridge:核对声称的与实际的工具调用)"]
+    end
+    subgraph L4["第 4 层 - Loop / 编排"]
+        O1["LangGraph StateGraph\n← WorkflowDefinition"]
+        O2["Coder 节点"]
+        O3["Tester 节点"]
+        O4["Approval Gate(interrupt)"]
+        O5["Escalation"]
+        O6[("SqliteSaver checkpoint")]
+        O7["WorkflowDefinition 注册表"]
+    end
+    AUDIT[("approvals + structured_claims 审计")]
+
+    DEV<-->UI<-->O1
+    PROF-->OVL
+    OVL-->P1 & H1 & M1
+    O1-->O2 & O3 & O4 & O5
+    O2 & O3-->P3-->P1 & P2 & H1
+    H1-->H2 & H3
+    H2 & H3-->H5
+    H3-.工具调用流.->H6
+    H5 & H6-.校验.->O2 & O3
+    O2 & O3-->M4-->M1 & M2 & M3
+    O1<-->O6
+    O1-->O7
+    O4-->UI & AUDIT

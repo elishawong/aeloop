@@ -1,494 +1,257 @@
-# Aeloop Solution Design (complete design draft before opening /spec)
+# Aeloop 解决方案设计(开 /spec 前的完整设计草案)
 
-> Upstream judgment call: `UNIFIED-ARCHITECTURE-JUDGMENT.md`
-> Engine: **Aeloop** (private repo `elishawong/aeloop`, built from scratch). Status: **solution design draft, to be handed off to `/spec`; not implementation instructions, not yet committed to the aeloop repo.**
-> Date: 2026-07-20
-> Positioning: this is the complete design for "aeloop engine = shared foundation for the personal subscription profile and the company API/LiteLLM profile." The four-layer mechanism carries forward a design already proven by a prior internal implementation v2 (M0-M3 tested), but **adds two things specific to aeloop**: ① both adapters are first-class from day one (no longer pushing the CLI bridge into the future) ② a profile/overlay mechanism (one engine, two faces). Anything tagged `[prior-proven]` = already has tested evidence from the prior internal implementation and can be reused; `[aeloop-new]` = new relative to the prior internal implementation; `[?]` = to be resolved during /spec or by decision.
-
----
-
-## 0. What this design solves
-
-aeloop = a **model-agnostic, governance-first coder/tester engine**, one codebase running both sides:
-- **Personal subscription profile**: subscription-based quota, coder=claude-cli / tester=codex-cli (CLI bridge).
-- **Company API / LiteLLM profile**: company LiteLLM proxy, coder/tester = different models from the pool (claude/gpt/deepseek).
-
-Three things it must solve (carried forward from the prior internal implementation): ① anti-hallucination (mechanized, enforced via structured-output schemas) ② contextual memory (picking up where it left off on "wake") ③ coder-tester loop + staged human gating.
-
-**Three key upgrades aeloop makes over the prior internal implementation**:
-1. `[aeloop-new]` **CLI bridge adapters are first-class** — the prior internal implementation flagged this 🔒future; aeloop has to do it now, because it's the primary path for the personal subscription profile, **and the only path that can do real `tool_execution` verification** (a pure API can't retrieve the tool-call stream).
-2. `[aeloop-new]` **profile/overlay mechanism** — a single `AI_AGENT_PROFILE` selects an entire overlay (config + persona + memory); the engine stays neutral and doesn't hardcode either side.
-3. `[aeloop-new]` **an independent dual-model closed loop is core, not optional** — coder≠tester cross-model is where both sides converge.
+> 上游判断文档:`UNIFIED-ARCHITECTURE-JUDGMENT.md`
+> 引擎:**Aeloop**(私有仓 `elishawong/aeloop`,从零搭建)。状态:**方案设计草案,待交给 `/spec`;不是实现指令,尚未提交进 aeloop 仓库。**
+> 日期:2026-07-20
+> 定位:这是"aeloop 引擎 = 个人订阅 profile 与公司 API/LiteLLM profile 共用的基座"这件事的完整设计。四层机制延续了此前一个内部实现 v2 已经验证过的设计(M0-M3 都有测试),但**新增两件 aeloop 特有的事**:① 两个适配器从第一天起就是一等公民(不再把 CLI bridge 推迟到未来)② 一套 profile/overlay 机制(一个引擎,两副面孔)。标 `[prior-proven]` = 已有此前内部实现的测试证据,可以复用;`[aeloop-new]` = 相对此前内部实现是新增的;`[?]` = 留给 /spec 或后续决策解决。
 
 ---
 
-## 1. Overall architecture (five layers: four engine layers + profile)
+## 0. 这份设计解决什么问题
 
-```mermaid
-flowchart TB
-    DEV(("👤 Developer"))
-    PROF["AI_AGENT_PROFILE\n(subscription | apikey)"]
-    UI["CLI / TUI\ncolor diff - rationale - y/n approval"]
+aeloop = 一个**模型无关、以治理为核心的 coder/tester 引擎**,同一套代码同时支撑两侧:
+- **个人订阅 profile**:按订阅额度计费,coder=claude-cli / tester=codex-cli(CLI bridge)。
+- **公司 API / LiteLLM profile**:走公司 LiteLLM 代理,coder/tester = 模型池里的不同模型(claude/gpt/deepseek)。
 
-    subgraph OVL["Profile / Overlay layer (aeloop-new - outside engine)"]
-        OV1["config.yaml\n(providers/roles/threshold)"]
-        OV2["persona overlay\n(CORE + prior personas)"]
-        OV3["memory db (per-profile, independent)"]
-    end
+它必须解决三件事(延续自此前内部实现):① 防幻觉(机制化,靠结构化输出 schema 强制)② 上下文记忆("醒来"时能接着上次的进度走)③ coder-tester 闭环 + 分阶段人工把关。
 
-    subgraph L1["Layer 1 - Prompt"]
-        P1["persona template loader\n(plain text, vendor-agnostic)"]
-        P2["output Schema (zod)\nClaimSchema/CoderOutput/TesterOutput"]
-        P3["PromptComposer\npersona+schema+memory → prompt"]
-    end
-    subgraph L2["Layer 2 - Context (SQLite+FTS5)"]
-        M1[("memories + FTS5")]
-        M2["StalenessEngine"]
-        M3["ConfirmationService (three states)"]
-        M4["ContextInjector\n(wake-time injection + filters rejected)"]
-    end
-    subgraph L3["Layer 3 - Harness / Adapters"]
-        H1["ProviderRouter\nrole → (provider, model)"]
-        H2["LiteLLMAdapter\n(direct-api)"]
-        H3["ClaudeCliAdapter / CodexCliAdapter\n(cli-bridge - aeloop-new, first-class)"]
-        H5["SchemaValidator (unified entry point)"]
-        H6["ToolExecVerifier\n(cli-bridge only: checks claimed vs actual tool calls)"]
-    end
-    subgraph L4["Layer 4 - Loop / Orchestration"]
-        O1["LangGraph StateGraph\n← WorkflowDefinition"]
-        O2["Coder Node"]
-        O3["Tester Node"]
-        O4["Approval Gate (interrupt)"]
-        O5["Escalation"]
-        O6[("SqliteSaver checkpoint")]
-        O7["WorkflowDefinition Registry"]
-    end
-    AUDIT[("approvals + structured_claims audit")]
-
-    DEV<-->UI<-->O1
-    PROF-->OVL
-    OVL-->P1 & H1 & M1
-    O1-->O2 & O3 & O4 & O5
-    O2 & O3-->P3-->P1 & P2 & H1
-    H1-->H2 & H3
-    H2 & H3-->H5
-    H3-.tool call stream.->H6
-    H5 & H6-.validation.->O2 & O3
-    O2 & O3-->M4-->M1 & M2 & M3
-    O1<-->O6
-    O1-->O7
-    O4-->UI & AUDIT
-```
-
-**Why layer it this way**: switching models only touches the H layer (swap adapter/config); switching products (subscription profile ↔ apikey profile) only swaps the profile overlay; switching workflows only swaps O7's definition file. Persona text, memory structure, and engine code all stay untouched.
+**aeloop 相对此前内部实现的三处关键升级**:
+1. `[aeloop-new]` **CLI bridge 适配器从第一天起就是一等公民**——此前的内部实现把这个标成 🔒 未来再做;aeloop 现在就必须做,因为它是个人订阅 profile 的主路径,**也是唯一能做真正 `tool_execution` 核验的路径**(纯 API 拿不到工具调用流)。
+2. `[aeloop-new]` **profile/overlay 机制**——一个 `AI_AGENT_PROFILE` 选中整套 overlay(配置 + persona + 记忆);引擎本身保持中立,不为任一侧硬编码。
+3. `[aeloop-new]` **独立双模型闭环是核心能力,不是可选项**——coder≠tester 的跨模型核验,是两侧共同收敛的地方。
 
 ---
 
-## 1.5 How the four layers relate: nested, not parallel (a Loop Engineering perspective)
+## 1. 总体架构(五层:四层引擎 + profile)
 
-The diagram above draws the four layers as side-by-side boxes, which can be misread as "four parallel modules." They're actually **nested layer by layer** — which is exactly the industry's 2026 consensus "loop engineering" framework (Prompt→Context→Harness→Loop evolving year over year, **each outer layer wraps the inner one rather than replacing it**):
+![1. 总体架构(五层:四层引擎 + profile)](diagrams/DESIGN-01-1-总体架构五层-四层引擎-profile.svg)
 
-| Layer | Evolution | What it owns (sole responsibility) | Input ←/Output → |
+**为什么这样分层**:换模型只动 H 层(换适配器/配置);换产品(subscription profile ↔ apikey profile)只换 profile overlay;换工作流只换 O7 的定义文件。persona 文本、记忆结构、引擎代码全都不用动。
+
+---
+
+## 1.5 四层之间的关系:嵌套而非并列(一个 Loop Engineering 视角)
+
+上面那张图把四层画成并排的方框,容易被误读成"四个并行模块"。它们其实是**逐层嵌套**的——这正是业界 2026 年的共识"loop engineering"框架(Prompt→Context→Harness→Loop 逐年演进,**每一层外层都是包裹内层,而不是替代内层**):
+
+| 层 | 演进年份 | 独占的职责 | 输入 ←/输出 → |
 |---|---|---|---|
-| **Prompt** (innermost) | 2022-24 | The **contract** for a single request: persona (what to ask) + schema (what shape the answer must take) | ← memory from Context; → a well-formed prompt |
-| **Context** (wraps Prompt) | 2025 | What the model **sees**: memory retrieval/injection, stale/rejected filtering | ← the task; → context fed to Prompt |
-| **Harness** (wraps Context) | 2026 | **Who runs it and how**: model selection (ProviderRouter), adapters, structured validation, tool verification | ← composed prompt; → validated structured output |
-| **Loop** (outermost) | 2026 | **The whole loop**: coder→gate→tester→reject count→threshold→escalation→checkpoint | ← the goal; → written to disk + audit trail |
+| **Prompt**(最内层) | 2022-24 | 一次请求的**契约**:persona(问什么)+ schema(答案要长成什么形状) | ← 来自 Context 的 memory;→ 一份组装好的 prompt |
+| **Context**(包裹 Prompt) | 2025 | 模型**看到什么**:记忆检索/注入,过滤 stale/已拒绝项 | ← 任务本身;→ 喂给 Prompt 的上下文 |
+| **Harness**(包裹 Context) | 2026 | **谁来跑、怎么跑**:选模型(ProviderRouter)、适配器、结构化校验、工具核验 | ← 组装好的 prompt;→ 校验过的结构化输出 |
+| **Loop**(最外层) | 2026 | **整个闭环**:coder→gate→tester→拒绝计数→阈值→升级→checkpoint | ← 目标;→ 写盘 + 审计轨迹 |
 
-**Nested = the outer layer uses the inner one, the inner one doesn't know the outer exists** (M2 review has already verified there's no reverse dependency: prompt doesn't import harness/loop, context doesn't import harness/loop):
-- One **Loop** iteration = multiple **Harness** calls (one for coder, one for tester);
-- One **Harness** call = runs one **Prompt**;
-- One **Prompt** = assembled from **Context**.
+**嵌套 = 外层用内层,内层不知道外层存在**(M2 复审已经验证过没有反向依赖:prompt 不 import harness/loop,context 不 import harness/loop):
+- 一轮 **Loop** 迭代 = 多次 **Harness** 调用(coder 一次、tester 一次);
+- 一次 **Harness** 调用 = 跑一次 **Prompt**;
+- 一次 **Prompt** = 由 **Context** 组装而来。
 
-```mermaid
-flowchart LR
-    Goal(("Goal"))-->Loop
-    subgraph Loop["🔁 Loop: loop orchestration + gating + threshold + checkpoint"]
-      subgraph Harness["⚙️ Harness: model selection + adaptation + validation + tool verification"]
-        subgraph Context["🧠 Context: what this model sees (memory injection/filtering)"]
-          Prompt["📝 Prompt: persona + schema (the contract for one request)"]
-        end
-      end
-    end
-    Loop-->Out(("write to disk + audit"))
-```
+![1.5 四层之间的关系:嵌套而非并列(一个 Loop Engineering 视角)](diagrams/DESIGN-02-1-5-四层之间的关系-嵌套而非并列一个-loop-engineering-视角.svg)
 
-**One turn of the data flow**: Loop drives the Coder node → asks the Prompt layer for a prompt (PromptComposer pulls memory from Context + assembles persona + schema) → goes through Harness, selects model A, sends it, validates the structured output (cli-bridge also checks `tool_execution`) → back to Loop → the G1 gate → the same turn runs Tester (model B) → Loop tallies rejects/threshold/checkpoint → next step.
+**一轮数据流**:Loop 驱动 Coder 节点 → 向 Prompt 层要一份 prompt(PromptComposer 从 Context 拉记忆 + 组装 persona + schema)→ 过 Harness,选模型 A,发送,校验结构化输出(cli-bridge 还会核对 `tool_execution`)→ 回到 Loop → G1 gate → 同一轮跑 Tester(模型 B)→ Loop 汇总拒绝次数/阈值/checkpoint → 下一步。
 
-**Why this nesting is load-bearing for aeloop**: the core insight — **"deterministic validation > model self-assessment"** — is exactly the linchpin of governance-first design. It lands on the **outer two layers**: Harness's SchemaValidator/ToolExecVerifier (mechanized verification) + Loop's independent Tester (model B reviewing model A). **Anti-hallucination doesn't rely on "asking the model to be honest" at the Prompt layer — it's backstopped mechanically by the outer two layers.** This is where aeloop diverges from ruflo (verified 2026-07-21 by actually reading the ruflo source, correcting an earlier overclaim of "light inner-layer governance" — see internal engineering notes): ruflo **separately** has mature orchestration governance — security / anti-prompt-injection / anti-collusion, behavioral-drift downweighting, external ground-truth anchoring, regression witnesses — it isn't "light governance," its target is just **attack prevention + drift prevention**, not "proving a coding agent didn't lie." More precisely, the divide is: ruflo is heavy on orchestration and its governance leans toward security/drift/resources/external anchoring, while it's **light on "verifiable coding-loop governance"** — it lacks what aeloop leads with: ① deterministic `tool_execution` verification (claim vs. trace) ② mandatory cross-model adversarial review ③ human approval gates + forced escalation on repeated rejection; all four of aeloop's layers serve this "verifiable coding loop."
+**这套嵌套关系对 aeloop 为什么是承重的**:核心洞察——**"确定性校验 > 模型自我评估"**——正是治理优先设计的关键支点。它落在**外面两层**:Harness 的 SchemaValidator/ToolExecVerifier(机制化校验)+ Loop 的独立 Tester(模型 B 复审模型 A)。**防幻觉不依赖在 Prompt 层"要求模型诚实"——而是靠外面两层做机制化兜底。** aeloop 和 ruflo 的分野正在这里(2026-07-21 通过实际阅读 ruflo 源码核实,纠正了此前"内层治理偏轻"这个过度断言——详见内部工程笔记):ruflo **另有**一套成熟的编排治理——安全 / 反 prompt injection / 反串谋、行为漂移降权、外部真值锚定、回归见证——它不是"治理轻",它的目标本来就是**防攻击 + 防漂移**,不是"证明一个写代码的 agent 没有说谎"。更准确地说,分野是:ruflo 在编排上很重,它的治理偏向安全/漂移/资源/外部锚定,但在**"可验证的编码闭环治理"上偏轻**——它缺 aeloop 主打的这几样:① 确定性的 `tool_execution` 核验(声称 vs 实际轨迹)② 强制的跨模型对抗式复审 ③ 人工批准 gate + 连续拒绝强制升级;aeloop 的这四层都是为这个"可验证的编码闭环"服务的。
 
-## 1.6 How aeloop applies these four layers (layer → code mapping)
+## 1.6 aeloop 如何落地这四层(层 → 代码映射)
 
-| Layer | src directory | Key files | Profile impact |
+| 层 | src 目录 | 关键文件 | 对 profile 的影响 |
 |---|---|---|---|
-| Prompt | `src/prompt/` | schema - personas - composer | Persona text comes from the profile's `personas/` |
-| Context | `src/context/` | store - staleness - confirmation - injector | Memory db is independent per profile |
-| Harness | `src/harness/` | provider-router - adapters/* - schema-validator - tool-exec-verifier | Which adapter is used is decided by the profile config (subscription=cli-bridge / apikey=litellm) |
-| Loop | `src/loop/` | graph - nodes - gates - escalation - checkpoint | workflow def + threshold can be overridden per profile |
-| (outer) Profile | `src/profile/` + `profiles/*` | loader + config.yaml | `AI_AGENT_PROFILE` selects the whole overlay |
+| Prompt | `src/prompt/` | schema - personas - composer | persona 文本来自该 profile 的 `personas/` |
+| Context | `src/context/` | store - staleness - confirmation - injector | 每个 profile 的记忆库互相独立 |
+| Harness | `src/harness/` | provider-router - adapters/* - schema-validator - tool-exec-verifier | 用哪个适配器由 profile 配置决定(subscription=cli-bridge / apikey=litellm) |
+| Loop | `src/loop/` | graph - nodes - gates - escalation - checkpoint | workflow 定义 + 阈值可按 profile 覆盖 |
+| (外层)Profile | `src/profile/` + `profiles/*` | loader + config.yaml | `AI_AGENT_PROFILE` 选中整套 overlay |
 
-**In one sentence**: aeloop = one src directory per layer (strictly no reverse dependencies) + one profile overlay layer that puts "two faces" on the outside. Switching models only touches Harness, switching products only touches Profile, switching flows only touches Loop's workflow def.
+**一句话**:aeloop = 每层一个 src 目录(严格无反向依赖)+ 一层 profile overlay 把"两副面孔"包在外面。换模型只动 Harness,换产品只动 Profile,换流程只动 Loop 的 workflow 定义。
 
-## 1.7 The hook for later going dynamic/plugin-based (leave it now, don't build it now)
+## 1.7 给以后走向动态化/插件化留的钩子(现在只留钩子,不现在建)
 
-- From day one the engine is driven by reading a **WorkflowDefinition**; `NodeSpec.role` is an open string, and Gate is an edge attribute — **the engine never hardcodes `if role==="coder"`**.
-- **Improvement over the prior internal implementation**: persona/schema is looked up dynamically by role name via the registry, instead of the hardcoded `{coder,tester}` Record a prior internal implementation used — adding a role doesn't require touching the composer.
-- Adding a role = binding a persona.md + schema + config; adding a flow = adding a workflow `.json`; a real plugin = registering `{role,persona,schema,adapter}` into the registry; a custom workflow **UI** (ruflo-like) = added as a later layer, the data model already supports it.
-- **Discipline**: the MVP is only one coder-tester loop. **Leave the hook, don't build the plugin system/UI now** — that's exactly where ruflo got bloated; harden it once there are 2-3 real workflow needs (YAGNI).
+- 引擎从第一天起就靠读取一份 **WorkflowDefinition** 驱动;`NodeSpec.role` 是个开放字符串,Gate 是边上的属性——**引擎从不硬编码 `if role==="coder"`**。
+- **相对此前内部实现的改进**:persona/schema 按角色名通过注册表动态查找,不像此前内部实现那样用硬编码的 `{coder,tester}` Record——新增一个角色不需要动 composer。
+- 新增一个角色 = 绑定一份 persona.md + schema + config;新增一条流程 = 新增一个 workflow `.json`;真正的插件化 = 把 `{role,persona,schema,adapter}` 注册进注册表;类 ruflo 的自定义工作流 **UI** = 作为后续一层加上去,数据模型已经支持。
+- **纪律**:MVP 只有一条 coder-tester 闭环。**留钩子,现在不建插件系统/UI**——这正是 ruflo 变臃肿的地方;等真的出现 2-3 个实打实的工作流需求再去做(YAGNI)。
 
-> **A future outermost "Conductor / dialogue coordination layer"** (scheduled after A6, issue #2, just a note for now — don't build it): one more ring outside the four layers `Prompt ⊂ Context ⊂ Harness ⊂ Loop` — deciding "whether to enter the loop / when to interrupt a running loop / or just have free-form discussion and brainstorming." **Profile difference**: the personal subscription profile is a **thin shell / pass-through** (the advisor + Claude Code interaction + `/spec` brainstorming already naturally carries this layer, don't rebuild it), while the company API/LiteLLM profile is the one that needs a real orchestrator (the developer talks directly to the product, with nothing else doing the routing). The source case = a prior internal implementation's v2 orchestrator plan, but it needs to land as a **corrected version** (otherwise it inherits the same holes): ① developer control commands approve/reject/stop/confirm go through **deterministic code parsing**, not an LLM; ② interrupts go through a **real checkpoint**, no dangling routes left behind; ③ conversation history **lives in the Context layer**, no separate memory persistence invented; ④ role schemas go through the **dynamic registry** (= the `schema-registry.ts` already landed in this A0+A1). See issue #2 for details.
-
----
-
-## 2. Use case diagram
-
-```mermaid
-flowchart LR
-    Dev(("👤 Developer"))
-    subgraph SYS["aeloop"]
-        UC1(["select profile (subscription/apikey)"])
-        UC2(["configure role→model mapping"])
-        UC3(["start a dev task"])
-        UC4(["view diff+rationale"])
-        UC5(["approve/reject G1/G2/G3"])
-        UC6(["configure reject threshold"])
-        UC7(["confirm/correct unconfirmed memory"])
-        UC8(["handle human escalation"])
-        UC9(["view approval audit"])
-    end
-    Dev-->UC1 & UC2 & UC3 & UC4 & UC5 & UC6 & UC7 & UC8 & UC9
-    Coder(("🤖 Coder\nmodel A")); Tester(("🤖 Tester\nmodel B≠A")); Orc(("⚙️ orchestration"))
-    Coder-->UC11(["structured change proposal + confidence"])
-    Coder-->UC12(["fix based on feedback"])
-    Tester-->UC13(["list of issues found + confidence"])
-    Orc-->UC15(["route to matching model"]) & UC16(["reject count + threshold"]) & UC17(["validate structured output"]) & UC18(["check tool_execution (cli-bridge)"]) & UC19(["write audit"])
-```
+> **未来最外层的"Conductor / 对话协调层"**(排在 A6 之后,issue #2,这里先记一笔,现在不建):在四层 `Prompt ⊂ Context ⊂ Harness ⊂ Loop` 外面再加一圈——决定"要不要进入闭环 / 什么时候打断正在跑的闭环 / 还是就自由讨论头脑风暴"。**profile 差异**:个人订阅 profile 是一层**薄壳 / 透传**(顾问 + 与 Claude Code 的交互 + `/spec` 头脑风暴本身天然就带着这一层,不用重建),而公司 API/LiteLLM profile 才真正需要一个编排器(开发者直接对着产品说话,没有别的东西做路由)。原始案例 = 此前内部实现 v2 的编排方案,但落地时需要是一个**修正版**(否则会继承同样的坑):① 开发者的控制指令 approve/reject/stop/confirm 走**确定性代码解析**,不走 LLM;② 中断走**真正的 checkpoint**,不留悬空路由;③ 对话历史**活在 Context 层**,不另造一套记忆持久化;④ 角色 schema 走**动态注册表**(= 这份 A0+A1 里已经落地的 `schema-registry.ts`)。详见 issue #2。
 
 ---
 
-## 3. Sequence diagram — dual-model loop + three gates
+## 2. 用例图
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Dev as Developer
-    participant UI as CLI/TUI
-    participant Orc as Orchestration (LangGraph)
-    participant Mem as Context
-    participant Coder as Coder (model A)
-    participant Tester as Tester (model B≠A)
-    participant Audit as approvals
-
-    Dev->>UI: submit task (--profile subscription|apikey)
-    UI->>Orc: start_workflow
-    Orc->>Mem: ContextInjector injects (core full load + FTS5 recall, filters rejected, stale/unconfirmed flagged with a warning)
-    Orc->>Coder: invoke(coder, prompt+ctx, schema)
-    Coder-->>Orc: {diff, claims[], confidence}
-    Orc->>Orc: SchemaValidator (fail→retry once→still fails, flags lowConfidence, never fails silently)
-    opt cli-bridge path
-        Orc->>Orc: ToolExecVerifier (if a claim says tool_execution, there must be a real tool-call record, otherwise flag "claimed ≠ actual")
-    end
-    rect rgb(255,247,214)
-    Note over Dev,UI: G1 — approve to send for review?
-    Orc->>UI: diff + rationale (claims/confidence)
-    alt approved
-        Dev->>UI: 👍 / Audit(G1,approved)
-    else rejected (back to Coder, doesn't count toward reject total)
-        Dev->>UI: 👎+feedback / Audit(G1,rejected)
-    end
-    end
-    Orc->>Tester: invoke(tester, diff+ctx, schema)  %% model B, independent perspective
-    Tester-->>Orc: {verdict, issues[], confidence}
-    alt rejected and count<threshold
-        Orc->>Orc: reject_count += 1
-        rect rgb(255,230,230)
-        Note over Dev,UI: G2 — approve auto-fix?
-        end
-    else rejected and count>=threshold
-        Orc->>UI: ⚠️ forced escalation (hard branch, bypasses G2)
-        Orc->>Audit: Audit(ESCALATION,forced)
-    end
-    rect rgb(214,255,222)
-    Note over Dev,UI: G3 — final sign-off to write
-    end
-    Orc->>Orc: writes files to the workspace (no automatic git commit/push)
-    Orc-->>Dev: done + audit trail
-```
+![2. 用例图](diagrams/DESIGN-03-2-用例图.svg)
 
 ---
 
-## 4. State machine (reject count + threshold + escalation) `[prior-proven]` M1 already proven
+## 3. 时序图 —— 双模型闭环 + 三道 gate
 
-```mermaid
-flowchart TD
-    Start(["task starts"])-->Draft["Coder (model A): generate/revise diff"]
-    Draft-->G1{{"G1 send for review?"}}
-    G1-- reject: feedback back to Coder -->Draft
-    G1-- approve -->Review["Tester (model B): review"]
-    Review-->V{"verdict"}
-    V-- pass -->G3{{"G3 sign off?"}}
-    G3-- reject: new issue -->Draft
-    G3-- approve -->Apply["write to disk (no auto push)"]-->End(["done"])
-    V-- rejected -->Inc["reject_count+=1"]
-    Inc-->T{"count>=threshold? (default 2)"}
-    T-- no -->G2{{"G2 approve fix?"}}
-    G2-- approve -->Fix["Coder: fix"]-->Review
-    G2-- escalate voluntarily -->Esc
-    T-- "yes (hard branch, cannot be bypassed)" -->Esc["escalate to human"]
-    Esc-->HD{"human decision"}
-    HD-- revise code/restate -->Draft
-    HD-- force pass -->G3
-    HD-- abandon -->Cancel(["cancelled"])
-```
+![3. 时序图 —— 双模型闭环 + 三道 gate](diagrams/DESIGN-04-3-时序图-双模型闭环-三道-gate.svg)
 
 ---
 
-## 5. DB schema (single SQLite file - one independent copy per profile) `[prior-proven]` M2 already implemented
+## 4. 状态机(拒绝计数 + 阈值 + 升级)`[prior-proven]` M1 已验证
 
-> The engine defines the schema (one shared set); **the data is independent per profile** (the subscription profile's memory ≠ the apikey profile's memory, separate db files each). Relative to the prior internal implementation's M2, this fills in: `confirmed_at/confirmed_by` (memories), `actor` (confirmations), `updated_at` (system_config) — M2 review found these three columns missing, and aeloop adds them all at once.
-
-> **ContextInjector's "core memory" definition (authoritative, written down in Review Round 2 #4)**: the core `type`s that are **loaded unconditionally in full** on injection = `identity` / `constraint` / `decision` (identity core + hard constraints + settled decisions — always visible on "wake"); all other types (`snapshot`/`active_task`/`idea`/`postmortem`/`map`/`agent_spec`/`requirement`/`relation`/`project_registry`, etc.) only enter the context **when an FTS5 keyword recall hits them**. This "core loads in full + recall is a union" distinction is what makes FTS recall actually matter — A1's Review Round 1 blocker #3 was exactly this: an early `core = the whole table` turned FTS into dead code. ⚠️ **To be re-evaluated**: `agent_spec`/`map`/`relation`/`project_registry` also lean toward "usually needed" — revisit whether to fold them into the core set once A2+ actually consumes memory (the current set is defined in `injector.ts:CORE_MEMORY_TYPES`).
-
-```mermaid
-erDiagram
-    MEMORIES {
-        integer id PK
-        text type "12 types: identity/snapshot/active_task/idea/decision/postmortem/map/constraint/relation/agent_spec/requirement/project_registry"
-        text title
-        text content
-        text source_file
-        text tags
-        text confidence_state "unconfirmed/confirmed/rejected"
-        integer stale_override_days "NULL falls back to system_config"
-        text created_at
-        text updated_at
-        text confirmed_at
-        text confirmed_by
-    }
-    MEMORY_CONFIRMATIONS {
-        integer id PK
-        integer memory_id FK
-        text action "confirm/correct/reject"
-        text old_content
-        text new_content
-        text actor
-        text created_at
-    }
-    SYSTEM_CONFIG {
-        text key PK "default_stale_days/default_reject_threshold/..."
-        text value
-        text updated_at
-    }
-    WORKFLOW_RUNS {
-        integer id PK
-        text task_id
-        text workflow_def_id
-        text profile "subscription|apikey (aeloop-new)"
-        text status "running/escalated/completed/cancelled"
-        integer reject_count
-        integer reject_threshold "snapshot for this run"
-        text current_state
-        text langgraph_thread_id
-        text created_at
-        text updated_at
-    }
-    STRUCTURED_CLAIMS {
-        integer id PK
-        integer run_id FK
-        text step_ref
-        text actor "coder/tester"
-        text claim_text
-        text confidence "verified/inferred/unconfirmed/stale"
-        text source_ref
-        text verified_by "tool_execution/human/unverified"
-        text tool_exec_checked "aeloop-new: pass/fail/na (cli-bridge only)"
-        text model_used
-        text provider_used
-        text created_at
-    }
-    APPROVALS {
-        integer id PK
-        integer run_id FK
-        text gate_type "G1_SEND_TO_TESTER/G2_SEND_TO_FIX/G3_FINAL_MERGE/ESCALATION_ACK"
-        text step_ref
-        text diff_ref "hash/path, no large inline text"
-        text reasoning_text
-        text decision "approved/rejected/override"
-        text decision_reason
-        text decided_by
-        text decided_at
-        integer latency_seconds
-    }
-    MEMORIES ||--o{ MEMORY_CONFIRMATIONS : "confirm/correct history"
-    WORKFLOW_RUNS ||--o{ STRUCTURED_CLAIMS : "structured claims"
-    WORKFLOW_RUNS ||--o{ APPROVALS : "approval at each gate"
-```
-
-**Schema additions relative to the prior internal implementation** `[aeloop-new]`: `workflow_runs.profile` (which overlay it ran with), `structured_claims.tool_exec_checked` (the cli-bridge behavioral-consistency check result).
+![4. 状态机(拒绝计数 + 阈值 + 升级)`[prior-proven]` M1 已验证](diagrams/DESIGN-05-4-状态机拒绝计数-阈值-升级prior-proven-m1-已验证.svg)
 
 ---
 
-## 6. File structure (target - adapted from the src/ layout already proven by the prior internal implementation)
+## 5. 数据库 schema(单个 SQLite 文件 - 每个 profile 各一份独立副本)`[prior-proven]` M2 已实现
 
-> aeloop is currently an empty repo (README only). Below is the **target structure**; files tagged `[prior-proven]` already have a corresponding implementation in the prior internal implementation that can be referenced when rewriting (code can't cross the air gap, so it's re-authored from the design on a personal machine).
+> 引擎定义 schema(一套共用结构);**数据按 profile 各自独立**(subscription profile 的记忆 ≠ apikey profile 的记忆,各自独立的 db 文件)。相对此前内部实现的 M2,这里补上了:`confirmed_at/confirmed_by`(memories)、`actor`(confirmations)、`updated_at`(system_config)——M2 复审发现这三列缺失,aeloop 一次性全部补齐。
+
+> **ContextInjector"核心记忆"的定义(权威,写在 Review Round 2 #4)**:注入时**无条件全量加载**的核心 `type` = `identity` / `constraint` / `decision`(身份核心 + 硬约束 + 已定决策——"醒来"时始终可见);其余所有类型(`snapshot`/`active_task`/`idea`/`postmortem`/`map`/`agent_spec`/`requirement`/`relation`/`project_registry` 等)只在 **FTS5 关键词召回命中时**才进入上下文。"核心全量加载 + 召回是并集"这个区分,正是让 FTS 召回真正发挥作用的关键——A1 的 Review Round 1 阻断项 #3 说的正是这个:早期版本"core = 整张表"导致 FTS 变成死代码。⚠️ **待重新评估**:`agent_spec`/`map`/`relation`/`project_registry` 也偏向"通常都需要"——等 A2 以后真正开始消费记忆时,重新评估是否要把它们并入核心集合(当前集合定义在 `injector.ts:CORE_MEMORY_TYPES`)。
+
+![5. 数据库 schema(单个 SQLite 文件 - 每个 profile 各一份独立副本)`[prior-proven]` M2 已实现](diagrams/DESIGN-06-5-数据库-schema单个-sqlite-文件-每个-profile-各一份独立副本prior-p.svg)
+
+**相对此前内部实现新增的 schema** `[aeloop-new]`:`workflow_runs.profile`(用哪个 overlay 跑的)、`structured_claims.tool_exec_checked`(cli-bridge 行为一致性核验结果)。
+
+---
+
+## 6. 文件结构(目标态 - 沿用此前内部实现已验证的 src/ 布局改造而来)
+
+> aeloop 目前是个空仓库(只有 README)。下面是**目标结构**;标 `[prior-proven]` 的文件在此前内部实现里已有对应实现,重写时可以参照(代码不能跨过隔离边界,所以是在个人机器上照设计重新编写)。
 
 ```
-aeloop/                              # elishawong/aeloop (private)
+aeloop/                              # elishawong/aeloop(私有)
 ├── package.json / tsconfig.json / vitest.config.ts
 ├── README.md / LICENSE / .gitignore
-├── .env.example                     # placeholders for LITELLM_BASE_URL / LITELLM_TOKEN etc.
+├── .env.example                     # LITELLM_BASE_URL / LITELLM_TOKEN 等占位符
 ├── src/
-│   ├── index.ts                     # engine entry barrel
-│   ├── shared/                      # cross-layer shared types
+│   ├── index.ts                     # 引擎入口 barrel
+│   ├── shared/                      # 跨层共享类型
 │   ├── prompt/                      # L1 [prior-proven]
-│   │   ├── schema.ts                #   ClaimSchema/CoderOutput/TesterOutput (zod)
-│   │   ├── personas.ts              #   persona loader (reads from the path the profile specifies)
-│   │   ├── composer.ts              #   PromptComposer (+ filters rejected [fills a gap in the prior implementation])
+│   │   ├── schema.ts                #   ClaimSchema/CoderOutput/TesterOutput(zod)
+│   │   ├── personas.ts              #   persona 加载器(从 profile 指定的路径读取)
+│   │   ├── composer.ts              #   PromptComposer(+ 过滤已拒绝项 [补上此前实现的缺口])
 │   │   └── *.test.ts
 │   ├── context/                     # L2 [prior-proven]
-│   │   ├── store.ts                 #   SQLite+FTS5, RecallError never fails silently
+│   │   ├── store.ts                 #   SQLite+FTS5,RecallError 绝不静默失败
 │   │   ├── staleness.ts / config.ts #   StalenessEngine + SystemConfig
-│   │   ├── confirmation.ts          #   three states (+ wrapped in db.transaction [fills a gap in the prior implementation])
-│   │   ├── injector.ts              #   ContextInjector [aeloop fills a gap: the prior implementation's M2 never built this]
+│   │   ├── confirmation.ts          #   三态(+ 包进 db.transaction [补上此前实现的缺口])
+│   │   ├── injector.ts              #   ContextInjector [aeloop 补的缺口:此前实现的 M2 从没建过这个]
 │   │   ├── types.ts / errors.ts
 │   │   └── *.test.ts
-│   ├── harness/                     # L3 [partially prior-proven]
+│   ├── harness/                     # L3 [部分 prior-proven]
 │   │   ├── types.ts / errors.ts / config.ts
 │   │   ├── provider-router.ts       #   role → (provider, model)
-│   │   ├── schema-validator.ts      #   unified validation entry point (retries once → lowConfidence)
+│   │   ├── schema-validator.ts      #   统一校验入口(重试一次 → lowConfidence)
 │   │   ├── adapters/
-│   │   │   ├── litellm-adapter.ts   #   [prior-proven] the prior implementation's primary path
-│   │   │   ├── claude-cli-adapter.ts#   [aeloop-new] claude -p headless (already verified feasible)
-│   │   │   └── codex-cli-adapter.ts #   [aeloop-new] codex exec (needs a spike first)
-│   │   ├── tool-exec-verifier.ts    #   [aeloop-new] cli-bridge behavioral-consistency check
+│   │   │   ├── litellm-adapter.ts   #   [prior-proven] 此前实现的主路径
+│   │   │   ├── claude-cli-adapter.ts#   [aeloop-new] claude -p headless(已验证可行)
+│   │   │   └── codex-cli-adapter.ts #   [aeloop-new] codex exec(需要先跑 spike)
+│   │   ├── tool-exec-verifier.ts    #   [aeloop-new] cli-bridge 行为一致性核验
 │   │   └── *.test.ts
-│   ├── loop/                        # L4 [the prior implementation's M4 was never built; aeloop builds it first - M1 spike already proved the pattern]
-│   │   ├── graph.ts                 #   LangGraph StateGraph compiled from a WorkflowDefinition
+│   ├── loop/                        # L4 [此前实现的 M4 从没建过;aeloop 第一次建 - M1 spike 已验证过模式]
+│   │   ├── graph.ts                 #   由 WorkflowDefinition 编译出的 LangGraph StateGraph
 │   │   ├── nodes/coder.ts / tester.ts
 │   │   ├── gates.ts                 #   G1/G2/G3 interrupt
-│   │   ├── escalation.ts            #   hard branch on threshold
-│   │   ├── checkpoint.ts            #   SqliteSaver wiring
-│   │   └── workflow-def.ts          #   Registry
-│   ├── cli/                         # L-interaction [the prior implementation's M5 was never built]
+│   │   ├── escalation.ts            #   阈值触发的硬分支
+│   │   ├── checkpoint.ts            #   SqliteSaver 接线
+│   │   └── workflow-def.ts          #   注册表
+│   ├── cli/                         # L-interaction [此前实现的 M5 从没建过]
 │   │   ├── tui.ts / diff-render.ts / approval-prompt.ts
 │   └── profile/
-│       └── loader.ts                #   [aeloop-new] AI_AGENT_PROFILE → loads the overlay
+│       └── loader.ts                #   [aeloop-new] AI_AGENT_PROFILE → 加载 overlay
 ├── workflows/
-│   └── coder-tester-loop.json       #   the one definition built into the MVP
+│   └── coder-tester-loop.json       #   MVP 内置的唯一一份定义
 ├── profiles/
-│   └── subscription/                #   [personal overlay, fine to keep in the private repo]
+│   └── subscription/                #   [个人 overlay,放在私有仓里没问题]
 │       ├── config.yaml              #     providers.claude-cli/codex-cli + roles
-│       ├── personas/                #     coder/tester personas (inherit the spirit of CORE, vendor-agnostic)
-│       └── memory.db                #     (gitignored, runtime state)
-│   # profiles/apikey/  ← only in the company's internal git, never enters this repo (.gitignore blocks it)
-└── spikes/                          # one-off disproof spikes (codex exec / e2e closed loop)
+│       ├── personas/                #     coder/tester persona(继承 CORE 的精神,与厂商无关)
+│       └── memory.db                #     (已 gitignore,运行态)
+│   # profiles/apikey/  ← 只活在公司内部 git,永不进这个仓库(.gitignore 挡住)
+└── spikes/                          # 一次性验证 spike(codex exec / e2e 闭环)
 ```
 
-**Profile boundary**: `profiles/subscription/` is acceptable inside the private repo; `profiles/apikey/` **only lives in the company's internal git**, this repo's `.gitignore` explicitly blocks it to prevent accidental inclusion.
-
-**External persona-set roots** (issue #42, `src/profile/personas-root.ts`): a `config.yaml` may set an optional `personas: <name>` field to point `PromptComposer` at role persona files outside the profile's own directory — `<AELOOP_PERSONAS_ROOT>/<name>/personas` instead of the default `<profileDir>/personas`. This lets a deployment keep `profiles/apikey/config.yaml` in the profile tree while its actual `coder.md`/`tester.md` persona files live in a separate, non-public location. This is unrelated to Conductor's `brains/company/`/`brains/personal/` directories (see `brains/README.md`) — those hold Brain `manifest.yaml`/`system-prompt.md` artifacts consumed by Conductor, not by Aeloop's PromptComposer; `personas` never reads from or points at them. `personas` is optional and has no implicit default — a profile that omits it keeps exactly today's `<profileDir>/personas` behavior. `<name>` must be a single safe path segment (reuses `shared/safe-path.ts`, the same containment/symlink-escape checks `profile`/role names already go through); an unsafe name, a missing `AELOOP_PERSONAS_ROOT`, or a nonexistent root directory all fail closed with a typed error rather than silently falling back to the legacy path.
+**Profile 边界**:`profiles/subscription/` 放在私有仓里是可以的;`profiles/apikey/` **只活在公司内部 git**,本仓的 `.gitignore` 明确挡住它以防误提交。
 
 ---
 
-## 7. Adapter layer design (dual adapters, first-class) `[aeloop-new]`
+## 7. 适配器层设计(双适配器,一等公民)`[aeloop-new]`
 
 ```typescript
 interface ModelAdapter {
   readonly id: string;                 // "litellm" | "claude-cli" | "codex-cli"
   readonly kind: "direct-api" | "cli-bridge";
-  checkAvailability(): Promise<AvailabilityResult>;   // must do a real liveness probe (visible in deepseek's list ≠ actually callable)
+  checkAvailability(): Promise<AvailabilityResult>;   // 必须做真实的存活探测(在 deepseek 的列表里能看到 ≠ 真的能调用)
   invoke(req: InvokeRequest): Promise<InvokeResult>;
-  // cli-bridge only: returns the tool-call stream for ToolExecVerifier to check
+  // 仅 cli-bridge:返回工具调用流,供 ToolExecVerifier 核验
   toolTrace?(): ToolCallRecord[];
 }
 ```
 
-| Profile | coder | tester | Notes |
+| Profile | coder | tester | 备注 |
 |---|---|---|---|
-| **subscription** | claude-cli | codex-cli | Subscription-based, no apikey; cli-bridge → **can do real `tool_execution` verification** |
-| **apikey** | litellm(claude) | litellm(gpt/deepseek) | Company proxy; pure API → `tool_execution` verification isn't available, falls back to "native confidence" strength |
+| **subscription** | claude-cli | codex-cli | 按订阅额度,不用 apikey;cli-bridge → **能做真正的 `tool_execution` 核验** |
+| **apikey** | litellm(claude) | litellm(gpt/deepseek) | 公司代理;纯 API → 拿不到 `tool_execution` 核验,退回用"模型自报置信度"这个较弱的信号 |
 
-**config.yaml (one per profile)**:
+**config.yaml(每个 profile 一份)**:
 ```yaml
-profile: subscription                # or apikey
+profile: subscription                # 或 apikey
 providers:
   claude-cli: { kind: cli-bridge, cmd: "claude" }
   codex-cli:  { kind: cli-bridge, cmd: "codex" }
   litellm:    { kind: direct-api, base_url: ${LITELLM_BASE_URL}, api_key: ${LITELLM_TOKEN} }
 roles:
   coder:  { provider: claude-cli }
-  tester: { provider: codex-cli }    # must be a different model than coder's (independent perspective)
-harness:
-  schema_max_attempts: 2               # default 2; positive integer
+  tester: { provider: codex-cli }    # 必须和 coder 用不同模型(独立视角)
 workflow:
   reject_threshold: 2
-  gate_mode: manual                    # or "semi-auto"; default "manual" when absent
 ```
 
-**Profile boundary — `harness.schema_max_attempts` vs `workflow.reject_threshold`** (issue #45): these are two independent knobs, not aliases of each other.
-- `harness.schema_max_attempts` (default `2`, must be a positive integer): the **total number of model attempts allowed per schema validation** inside `SchemaValidator` — i.e. how many times the harness retries a single structured-output call when the model's response fails to parse/validate against the expected schema, before giving up on that call.
-- `workflow.reject_threshold` (default `2`): a **tester rejection escalation** counter at the G1/G2/G3 loop level — how many times the tester can reject the coder's work (tracked as `reject_count` against the run's snapshotted `reject_threshold`, see §schema `WORKFLOW_RUN`) before the run forces escalation.
-
-They live in different layers (harness/adapter call retries vs. the LangGraph review loop) and must not be conflated when tuning either profile.
-
-**`workflow.gate_mode`** (issue #63, full design: `docs/feature/semi-auto-gate-mode/PRD.md`): a human-gate automation toggle, `"manual"` (default when absent — the behavior described everywhere else in this document) or `"semi-auto"`. In `"semi-auto"`, `src/cli/run-loop.ts`'s `runInteractiveLoop()` auto-approves G1 (send draft to tester) and G2 (send tester findings back to the coder) with no human prompt, recording the decision under a distinct `decided_by` value (`"system (semi-auto)"`) rather than the real human's username, so the audit trail (§5 `APPROVAL`) always tells an automated approval apart from a human one. **G3 (final apply) and Escalation always stay human, in every mode** — this is the one safety invariant `gate_mode` can never override, enforced by `run-loop.ts` only ever consulting a fixed, closed `AUTO_APPROVABLE_GATES = {G1, G2}` set (not derived from config) plus a defensive gate-identity assertion against `workflow_runs.current_state` before any auto-approval. `profile/loader.ts` validates the value fail-closed at load time — anything other than `"manual"`/`"semi-auto"` throws `ProfileConfigParseError` rather than silently defaulting.
-
 ---
 
-## 8. Milestones (aeloop from scratch - reusing the design already proven by the prior internal implementation)
+## 8. 里程碑(aeloop 从零搭建 - 复用此前内部实现已验证的设计)
 
-| Milestone | Content | Relative to the prior internal implementation |
+| 里程碑 | 内容 | 相对此前内部实现 |
 |---|---|---|
-| **A0 scaffold** | New repo src/ skeleton + tsconfig + vitest + empty profile loader shell | Newly authored |
-| **A1 Context+Prompt** | REQ-M1~M4 + P1~P3 **+ ContextInjector + fills three gaps (rejected filtering/transactions/missing columns)** | `[prior-proven]` design, rewritten + fills what M2 left behind |
-| **A2 Harness** | ProviderRouter + LiteLLMAdapter + SchemaValidator | `[prior-proven]` rewritten |
-| **A3 CLI bridge + verification** | ClaudeCliAdapter + CodexCliAdapter + ToolExecVerifier | `[aeloop-new]` entirely new, run the codex exec spike first |
-| **A4 Loop** | LangGraph orchestration + G1/G2/G3 + forced escalation on threshold + audit | `[the prior implementation's M4 was never built]`, M1 spike already proved the pattern |
-| **A5 CLI/TUI** | Color diff + y/n approval + visually distinct escalation state | `[the prior implementation's M5 was never built]` |
-| **A6 dual-profile acceptance run** | Run one real task through subscription (claude+codex) and one through apikey (litellm) | `[aeloop-new]` acceptance on both sides |
+| **A0 脚手架** | 新仓 src/ 骨架 + tsconfig + vitest + 空的 profile loader 壳 | 全新编写 |
+| **A1 Context+Prompt** | REQ-M1~M4 + P1~P3 **+ ContextInjector + 补齐三个缺口(过滤已拒绝项/事务/缺失列)** | `[prior-proven]` 设计,重写 + 补上 M2 落下的部分 |
+| **A2 Harness** | ProviderRouter + LiteLLMAdapter + SchemaValidator | `[prior-proven]` 重写 |
+| **A3 CLI bridge + 核验** | ClaudeCliAdapter + CodexCliAdapter + ToolExecVerifier | `[aeloop-new]` 完全新建,先跑 codex exec spike |
+| **A4 Loop** | LangGraph 编排 + G1/G2/G3 + 阈值触发强制升级 + 审计 | `[此前实现的 M4 从没建过]`,M1 spike 已验证过模式 |
+| **A5 CLI/TUI** | 彩色 diff + y/n 批准 + 视觉上区分升级状态 | `[此前实现的 M5 从没建过]` |
+| **A6 双 profile 验收跑** | 通过 subscription(claude+codex)跑一个真实任务、通过 apikey(litellm)跑一个真实任务 | `[aeloop-new]` 两侧都要验收 |
 
-**Do the diamond first** (the highest-ROI call from the judgment doc): stand up A1's **ClaimSchema + structured output** + A3's **ToolExecVerifier** (the one gate that's real anti-hallucination) first.
+**先啃硬骨头**(判断文档里 ROI 最高的建议):优先搭起 A1 的 **ClaimSchema + 结构化输出** + A3 的 **ToolExecVerifier**(这是唯一真正意义上的防幻觉 gate)。
 
 ---
 
-## 8.5 Holes exposed by the prior internal implementation's M2/M3 → aeloop's required fixes (source of PRD acceptance items)
+## 8.5 此前内部实现 M2/M3 暴露的坑 → aeloop 必须补的修复(PRD 验收项的来源)
 
-> Basis: adversarial review evidence from the prior internal implementation's M2/M3 (2026-07-17). These are places the prior implementation's clean-room build **missed across two consecutive milestones**; aeloop avoids them from day one, and the PRD writes them up as hard acceptance items.
+> 依据:对此前内部实现 M2/M3 的对抗式复审证据(2026-07-17)。这些是此前实现的洁净室搭建**连续两个里程碑都踩过**的坑;aeloop 从第一天起就要避开,PRD 把它们写成硬性验收项。
 
-**⚠️ Methodology warning (the most important one)**: the prior implementation's M2/M3 were both "layer written, tests green, but never wired together" — all three layers had fully green tests individually, but there was no glue stringing them together (ContextInjector was the empty bottle). **Every aeloop milestone must close out with one thin vertical slice actually wired end to end** (even if the downstream is mocked), proving the glue exists — stacking isolated green tests alone is not allowed.
+**⚠️ 方法论警告(最重要的一条)**:此前实现的 M2/M3 都是"每层各自写完,测试全绿,但从没被真正串起来"——三层各自测试都是全绿,但没有胶水代码把它们串在一起(ContextInjector 就是那个空瓶子)。**aeloop 每个里程碑收尾时都必须真正端到端串起一条薄的垂直切片**(哪怕下游是 mock 的),证明胶水真的存在——只堆孤立的绿色测试是不被允许的。
 
-| # | Hole in the prior implementation | aeloop's required fix (acceptance item) | Lands in |
+| # | 此前实现的坑 | aeloop 必须补的修复(验收项) | 落在哪个里程碑 |
 |---|---|---|---|
-| 1 | ProviderRouter didn't exist; LiteLLMAdapter hardcoded the provider and ignored `RoleConfig.provider` → in practice only LiteLLM could be used | **Actually build ProviderRouter**: read `RoleConfig.provider` → pick the adapter; adding a provider requires zero changes to orchestration code (aeloop is born with 2+ adapters, can't dodge this) | A2 |
-| 2 | ContextInjector didn't exist; the Context→Prompt→Harness loop never actually closed | **ContextInjector + a real closed loop** is a first-class deliverable; A1 must close out with a working Context→Prompt vertical slice | A1 |
-| 3 | SchemaValidator retried by sending the exact same request (didn't help it fix anything) | The retry **feeds the previous validation error back to the model**, it doesn't resend the same request | A2 |
-| 4 | InvokeResult only had content/httpStatus | **Include `provider`/`model` (+ aeloop's `tool_exec_checked`)**, so the audit trail can know who actually answered | A2/A3 |
-| 5 | adapter's `JSON.parse` had no try-catch → threw a bare SyntaxError | Wrap it in try-catch → a unified `AdapterInvokeError` | A2 |
-| 6 | HTTP errors only covered 400; a trailing slash on baseUrl / a missing api_key were untested | 401/403/429/5xx + trailing slash + missing api_key **must all have tests** | A2 |
-| 7 | none of confirmation's three methods used `db.transaction`; memories was missing confirmed_at/by, confirmations was missing actor, system_config was missing updated_at | Wrap in transactions + fill in every missing column (align with the §5 ER diagram) | A1 |
-| 8 | nothing owned rejected filtering; replaceLatest / missing-persona-path had no tests; dist didn't copy .md files; no lint | ContextInjector filters rejected; add these tests; build copies personas/*.md; wire up a lint script | A0/A1 |
+| 1 | ProviderRouter 根本不存在;LiteLLMAdapter 硬编码 provider,忽略 `RoleConfig.provider` → 实际上只能用 LiteLLM | **真正建出 ProviderRouter**:读 `RoleConfig.provider` → 选适配器;新增一个 provider 不需要改动任何编排代码(aeloop 生来就有 2+ 个适配器,躲不开这个) | A2 |
+| 2 | ContextInjector 根本不存在;Context→Prompt→Harness 这条链从没真正闭环过 | **ContextInjector + 真正的闭环**是第一等交付物;A1 收尾时必须有一条能跑通的 Context→Prompt 垂直切片 | A1 |
+| 3 | SchemaValidator 重试时发的是一模一样的请求(对修复毫无帮助) | 重试**要把上一次的校验错误喂回给模型**,不是重发同一个请求 | A2 |
+| 4 | InvokeResult 只有 content/httpStatus | **补上 `provider`/`model`(+ aeloop 的 `tool_exec_checked`)**,让审计轨迹知道到底是谁回答的 | A2/A3 |
+| 5 | 适配器的 `JSON.parse` 没有 try-catch → 直接抛出裸的 SyntaxError | 包进 try-catch → 统一成 `AdapterInvokeError` | A2 |
+| 6 | HTTP 错误只覆盖了 400;baseUrl 结尾带斜杠 / 缺 api_key 都没测过 | 401/403/429/5xx + 结尾斜杠 + 缺 api_key **必须全部有测试** | A2 |
+| 7 | confirmation 的三个方法都没用 `db.transaction`;memories 缺 confirmed_at/by,confirmations 缺 actor,system_config 缺 updated_at | 包进事务 + 补齐每一个缺失列(对齐 §5 的 ER 图) | A1 |
+| 8 | 没有任何东西负责过滤已拒绝项;replaceLatest / persona 路径缺失都没测试;dist 没有拷贝 .md 文件;没有 lint | ContextInjector 过滤已拒绝项;补上这些测试;build 拷贝 personas/*.md;接上 lint 脚本 | A0/A1 |
 
-**Overall acceptance principle**: aeloop's "done" ≠ tests are green — it means **the milestone's vertical slice is actually wired up + every corresponding item in the table above passes**. Review checks this table item by item (especially "is it actually wired"), following the same **adversarial, actually-run-the-commands, don't-take-the-doc's-word-for-it** approach used to review the prior implementation's M3.
-
----
-
-## 9. Spikes that must run before work starts
-
-1. `[needs a spike]` **codex exec non-interactive mode** (a prerequisite for A3; `claude -p` is already verified, codex `--help` returning empty hasn't been verified working).
-2. `[needs a spike]` **deepseek liveness probe + structured output** (the tester half of the apikey profile; deepseek-v3.2 has been seen visible-in-list but returning 400 on invocation, and json_schema support is unverified).
-3. `[prior-proven]` LangGraph cross-process interrupt/resume, LiteLLM json_schema passthrough, minimal e2e closed loop — the prior internal implementation already proved these out; aeloop just needs to re-verify after rewriting.
+**总体验收原则**:aeloop 的"完成" ≠ 测试全绿——它意味着**这个里程碑的垂直切片真正被串起来了 + 上表每一项都过了**。复审要逐条核对这张表(尤其是"是不是真的串起来了"),沿用复审此前实现 M3 时那套**对抗式、实际跑命令、不轻信文档自己怎么说**的做法。
 
 ---
 
-## 10. Open points left for /spec to work out
+## 9. 动手前必须先跑的 spike
 
-- `[?]` Whether A1~A6 is exactly how /spec should split milestones, or whether it should re-split them.
-- `[?]` The semantics of ContextInjector's "wake-time injection": whether aeloop should bake the spirit of the existing CORE wake protocol from the personal subscription profile's product into this layer (the judgment doc's reminder: the existing wake mechanism on that side is more complete than the prior internal implementation's — don't regress it).
-- `[?]` The overlay-discovery convention for the profile loader (path/env/default).
-- `[?]` The LangGraph dependency has already cleared review on the company's JFrog (installed the same way on the personal side), but whether to swap `node:sqlite` for `better-sqlite3` to cut a dependency (the judgment doc lists this as an optional lever).
-- `[?]` The schema for workflow-def (leaving a hook for future custom workflows; the MVP only ships one built in).
+1. `[需要 spike]` **codex exec 非交互模式**(A3 的前置条件;`claude -p` 已验证过,codex `--help` 返回空还没验证能跑通)。
+2. `[需要 spike]` **deepseek 存活探测 + 结构化输出**(apikey profile 里 tester 那一半;deepseek-v3.2 曾经出现在列表里但调用返回 400,json_schema 支持未验证)。
+3. `[prior-proven]` LangGraph 跨进程 interrupt/resume、LiteLLM json_schema 透传、最小 e2e 闭环——此前内部实现已经验证过这些;aeloop 重写后只需要重新验证一遍。
 
 ---
 
-## Appendix: relationship to the judgment doc
-This design is the **concrete elaboration** (how to build it) of `UNIFIED-ARCHITECTURE-JUDGMENT.md` (the direction). The judgment doc settles "steal the design, not the implementation + engine neutrality + one-way valve + dual-model closed loop"; this doc turns that into diagrams/tables/structure that /spec can work from. Neither document has entered the aeloop repo — the aeloop skeleton will be formally authored during the /spec→build handoff.
+## 10. 留给 /spec 定夺的开放项
+
+- `[?]` A1~A6 是不是 /spec 应该采用的里程碑切法,还是要重新切分。
+- `[?]` ContextInjector"唤醒时注入"的语义:aeloop 是否应该把个人订阅 profile 产品里既有 CORE 唤醒协议的精神,也灌进这一层(判断文档里的提醒:那一侧现有的唤醒机制比此前内部实现更完整——不要退步)。
+- `[?]` profile loader 的 overlay 发现约定(路径/环境变量/默认值)。
+- `[?]` workflow-def 的 schema(为未来自定义工作流留钩子;MVP 只内置一条)。
+
+---
+
+## 附:与判断文档的关系
+本设计是 `UNIFIED-ARCHITECTURE-JUDGMENT.md`(方向)的**具体展开**(怎么建)。判断文档定了"抄设计不抄实现 + 引擎中立 + 单向阀 + 双模型闭环";这份文档把它变成 /spec 能直接使用的图/表/结构。这两份文档都还没进 aeloop 仓库——aeloop 的骨架会在 /spec→build 的交接过程中正式编写。

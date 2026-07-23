@@ -1,0 +1,13 @@
+sequenceDiagram
+    participant CC as Claude Code CLI
+    participant Hook as brain-wake-greeting.mjs
+    participant Store as identity MemoryStore
+    participant Model as 模型（本次会话实际用的哪个）
+
+    CC->>Hook: SessionStart(startup/resume/clear)
+    Hook->>Store: gatherGreetingData()
+    Store-->>Hook: identityName/statusRows/backlogItems/pendingDecisions/...
+    Note over Hook,Store: constraint 类型 memory 被 wake() 读进 continuedThreads，<br/>但 gatherGreetingData() 不消费它——死路（§1 核实发现）
+    Hook-->>CC: additionalContext = 开场白文字 + "请原样复述"指令
+    CC->>Model: 注入 additionalContext（无 CLAUDE.md，无宪法文本）
+    Model-->>Model: 只知道"要复述这段开场白"，不知道任何铁律/人格约束

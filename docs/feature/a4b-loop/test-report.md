@@ -19,105 +19,105 @@
 }
 ---END ATTESTATION---
 
-# A4b Loop — Zorro test-report (adversarial independent review)
+# A4b Loop — Zorro 测试报告(对抗式独立复审)
 
-- Object under review: `feature/issue-13-a4b-loop` (uncommitted worktree, baseline aeloop main `c6589b7`)
-- Second-signer engine: Codex `gpt-5.6-sol` (read-only), `raw_output_sha256` non-empty, hash of the on-disk evidence file matches (`.helix/zorro-raw-output/8620ab5c….txt`)
-- Independent re-run: `pnpm build` / `pnpm lint` / `pnpm test` = 33 files, **276/276 green** (ran myself, not taken on self-report)
-- Mutation testing: hand-broke production code to verify tests go red/green (details below), workspace restored byte-identical after edits (shasum of all four files re-verified identical, HEAD untouched)
+- 审查对象:`feature/issue-13-a4b-loop`(未 commit 的 worktree,基线 aeloop main `c6589b7`)
+- 二签引擎:Codex `gpt-5.6-sol`(只读),`raw_output_sha256` 非空,落盘证据文件的 hash 匹配(`.helix/zorro-raw-output/8620ab5c….txt`)
+- 独立重跑:`pnpm build` / `pnpm lint` / `pnpm test` = 33 个文件,**276/276 全绿**(自己跑的,不是听自报)
+- 变异测试:手动破坏生产代码验证测试会不会变红/变绿(细节见下),编辑后工作区逐字节恢复原样(四个文件的 shasum 重新核对一致,HEAD 未动)
 
-## Review verdict: FAIL
+## 复审结论:FAIL
 
-Both models independently judged FAIL. Core problem: **the "cannot be bypassed" invariant of the escalation hard branch is not locked by any test** (I confirmed this by hand-mutating), on top of **audit writes being unsafe across runs/failure scenarios** — and "an auditable chain" is precisely aeloop's differentiating selling point.
+两个模型都独立判定 FAIL。核心问题:**升级硬分支"不可绕过"这条不变量没有被任何测试锁住**(我手动变异确认过),再加上**审计写入在跨 run/失败场景下不安全**——而"一条可审计的链路"正是 aeloop 的差异化卖点。
 
 ---
 
-## 1. Requirement fit (checked line by line against PRD §8)
+## 1. 需求符合度(逐行对照 PRD §8)
 
-| Acceptance item | Verdict | Evidence |
+| 验收项 | 结论 | 证据 |
 |---|---|---|
-| build/lint/test all green 276/276 | Met | Ran myself |
-| Threshold genuinely triggers escalation, both boundaries tested | **Partial** | Below (count<threshold→g2) and equal (count==threshold→escalation) are both tested; but **the re-escalation path for count>threshold ("hard branch cannot be bypassed") has zero test coverage** — the `>=`→`===` mutation survives (see mutation ①) |
-| Escalation three-way choice, all routes + tested | Met | graph.test has three independent test cases for revise/force_pass/abandon, all driving a real graph |
-| G2 active-escalation branch | Met | The "G2 receiving escalate" test case |
-| Three audit tables genuinely created + genuinely written to | Met (but see bug#2/#3) | audit-store.test 9 cases + runner.test + e2e |
-| checkpoint cross-process productionization | Met (but see bug#4, a known limitation) | Two real processes, different pids, communicating only via disk SQLite |
-| Vertical slice must connect end to end (including escalation) | Met | e2e uses a real cli-bridge fixture→runner→all three tables queryable (§8.5's glue genuinely exists) |
-| Graph nodes/gates zero I/O | Met | grep zero hits, verified myself |
-| No reverse cross-layer dependencies | Met | `grep -rln "from.*loop" src/harness src/context src/prompt` empty; audit-store has zero context coupling; runner's type-only `ContextInjectionResult` import (Loop→Context is an allowed direction) |
+| build/lint/test 全绿 276/276 | 达标 | 自己跑的 |
+| threshold 真的能触发 escalation,两个边界都测了 | **部分达标** | 低于(count<threshold→g2)和等于(count==threshold→escalation)都测了;但**count>threshold 的再次升级路径("硬分支不可绕过")零测试覆盖**——`>=`→`===` 的变异能存活(见变异①) |
+| Escalation 三选一,所有路径 + 测试 | 达标 | graph.test 有三个独立测试用例分别测 revise/force_pass/abandon,都驱动了真实 graph |
+| G2 主动升级分支 | 达标 | "G2 收到 escalate" 那个测试用例 |
+| 三张审计表真的建出来 + 真的写进去了 | 达标(但见 bug#2/#3) | audit-store.test 9 个用例 + runner.test + e2e |
+| checkpoint 跨进程生产化 | 达标(但见 bug#4,一个已知局限) | 两个真实进程,不同 pid,只靠磁盘 SQLite 通信 |
+| 纵切必须端到端真连接(包括 escalation) | 达标 | e2e 用真实的 cli-bridge fixture→runner→三张表都能查到(§8.5 说的那种"胶水"确实存在) |
+| graph 节点/gate 零 I/O | 达标 | grep 零命中,自己验证的 |
+| 没有反向跨层依赖 | 达标 | `grep -rln "from.*loop" src/harness src/context src/prompt` 为空;audit-store 跟 context 零耦合;runner 对 `ContextInjectionResult` 是类型层面的 import(Loop→Context 是允许的方向) |
 
-## 2. Mutation testing results (decisive evidence)
+## 2. 变异测试结果(决定性证据)
 
-| # | Mutation | Location | Corresponding test | Result |
+| # | 变异 | 位置 | 对应测试 | 结果 |
 |---|---|---|---|---|
-| ① | `rejectCount >= rejectThreshold` → `=== ` | gates.ts:143 | graph.test/runner.test/e2e, all of them | **Survived (all green)** — no test drives count>threshold, the hard branch can be silently bypassed by `===` without being caught |
-| ② | review's escalation pathMap target `escalation`→`g2` | graph.ts:95 | graph.test | Caught (5 red) — structural routing error was caught |
+| ① | `rejectCount >= rejectThreshold` → `=== ` | gates.ts:143 | graph.test/runner.test/e2e,全部 | **存活(全绿)**——没有测试驱动 count>threshold,硬分支可以被 `===` 悄悄绕过而不被抓到 |
+| ② | review 的 escalation pathMap 目标 `escalation`→`g2` | graph.ts:95 | graph.test | 被抓到(5 个变红)——结构性路由错误被抓到了 |
 
-Mutation ① is this round's hardest piece of FAIL evidence: DESIGN §4 explicitly states escalation is a "hard branch, cannot be bypassed." Real counterexample — threshold=2, count reaches 2, escalates, human picks revise back to draft, tester rejects again making count=3; the correct `>=` should escalate again, but `===` would route back to g2, silently bypassing the hard branch. The existing revise test stops at the next G1 and never drives another rejection after that, so this can't be caught. Mutation ② proves the test suite is effective against structural routing — my criticism targets a specific coverage gap, not the suite spinning idle.
+变异①是这一轮最硬的 FAIL 证据:DESIGN §4 明确说 escalation 是一条"硬分支,不可绕过"。真实反例——threshold=2,count 到 2,升级,人工选 revise 回 draft,tester 再次拒绝让 count=3;正确的 `>=` 应该再次升级,但 `===` 会路由回 g2,悄悄绕过硬分支。既有的 revise 测试停在下一个 G1 就结束了,后面从来没有再驱动一次拒绝,所以这个没法被抓到。变异②证明测试套件对结构性路由是有效的——我的批评针对的是一个具体的覆盖缺口,不是说整个套件在空转。
 
-## 3. Bugs found
+## 3. 发现的 bug
 
-### 🔴 Blocker
+### 🔴 阻断级
 
-- **B1 (= mutation ①): the escalation hard-branch invariant is not locked by any test.** gates.ts:143. The `>=`→`===` mutation survives (verified by hand). The re-escalation path for count>threshold (DESIGN §4 "cannot be bypassed") has zero coverage. **Requiring Cypher to: add a test driving count past threshold (e.g. revise back to draft, then reject again), asserting it still routes to escalation.**
-- **B2: `resumeRun`'s audit writes are not bound to the correct run.** runner.ts:302–315. The function independently accepts `runId` and `threadId`: `threadId` is used to advance the graph via the LangGraph checkpoint, `runId` is used for **all** claim/approval/`workflow_runs` writes — whether the two belong to the same run is **never validated**. Pass in a mismatched pair (A's runId + B's threadId) → it advances B's graph, but writes B's approvals/claims/state/reject_count **under A's name**, silently contaminating the audit chain. Every runner test only ever creates one run per store, so this can't be caught. For a product whose whole selling point is "governance/auditability," this is a core correctness hole. **Fix: `resumeRun` should only accept `runId`, and internally `getRunById` to fetch the threadId (runner already holds the audit store anyway), or assert the pair matches.**
-- **B3: runner never uses `runInTransaction`, so multi-row audit writes aren't atomic.** runner.ts:140–239, every insertClaim/insertApproval/updateRunProgress autocommits on its own; PRD §4.2/§5 explicitly assign `runInTransaction` to runner to "wrap multi-row writes like inserting several claims into a single transaction," but the implementation never uses it (grep zero hits, verified by hand). If an insert throws partway through a single call → half a claim lands in the DB + `workflow_runs.status` never refreshes, leaving the audit state inconsistent. (Full atomicity across the LangGraph checkpoint connection is arguably out of scope, but grouping multiple rows within a single call is explicit PRD design that got skipped.)
+- **B1(=变异①):升级硬分支这条不变量没有被任何测试锁住。** gates.ts:143。`>=`→`===` 的变异能存活(手动验证过)。count>threshold 的再次升级路径(DESIGN §4"不可绕过")零覆盖。**要求 Cypher:加一个测试,把 count 打过 threshold(比如 revise 回 draft,再拒绝一次),断言它依然路由到 escalation。**
+- **B2:`resumeRun` 的审计写入没有绑定到正确的 run。** runner.ts:302–315。这个函数独立接受 `runId` 和 `threadId`:`threadId` 用来通过 LangGraph checkpoint 推进 graph,`runId` 用来写**所有**claim/approval/`workflow_runs`——这两者是不是属于同一个 run,**从来没有被校验过**。传一对不匹配的值(A 的 runId + B 的 threadId)→ 会推进 B 的 graph,但把 B 的 approvals/claims/state/reject_count 写进 A 的名下,悄悄污染审计链。每个 runner 测试都只在一个 store 里创建一个 run,所以这个抓不到。对一个卖点就是"治理/可审计"的产品来说,这是个核心正确性漏洞。**修法:`resumeRun` 应该只接受 `runId`,内部 `getRunById` 拿到 threadId(runner 反正已经持有审计存储),或者断言这一对是匹配的。**
+- **B3:runner 从来没用过 `runInTransaction`,多行审计写入不是原子的。** runner.ts:140–239,每个 insertClaim/insertApproval/updateRunProgress 各自独立提交;PRD §4.2/§5 明确把 `runInTransaction` 分配给 runner,用来"把插入好几条 claim 这类多行写入包进一个事务",但实现从来没用过(grep 零命中,手动验证)。如果某次调用中途某个 insert 抛错 → 半条 claim 落进 DB + `workflow_runs.status` 永远不刷新,审计状态不一致。(跨 LangGraph checkpoint 连接的完全原子性可以说不在范围内,但把多行分组在一次调用里是 PRD 明写的设计,却被跳过了。)
 
-### Pending Commander's ruling / known limitations (not a hard blocker)
+### 待指挥官裁决 / 已知局限(不是硬阻断)
 
-- **D1 (Codex judges blocker): step_ref collisions across processes.** runner.ts:29/104. The counter lives only in `RunHandle`; a new process starts from `{}`, so if a cross-process resume loops back to a node again (e.g. a second draft), it will overwrite `draft#1` instead of writing `draft#2`, making the audit round-number ambiguous. **This is already honestly flagged as a "known limitation, outside the single-hop cross-process acceptance path" in both runner.ts's header comment and PRD §9.2 decision 4, and I've confirmed it is indeed outside all of A4b's acceptance paths.** But it weakens the "productionized cross-process resume" selling point (graph state is production-grade, audit attribution is not). Cheap, robust fix = rebuild the counter from the DB on resume. Recommend opening a tracking issue.
-- **D2 (Codex judges blocker): the threshold-source priority chain is not implemented.** config.yaml→system_config→hardcoded 2 is wired up nowhere; `startRun` only accepts an already-computed number, and e2e/tests hardcode `rejectThreshold`. **But this is explicitly delegated to the caller/future A5 by PRD §9.2 decision 2 + §2's non-goals**, and Codex, not knowing this, judged it a blocker — I don't accept that severity rating. It's still worth flagging to the Commander under §8.5's "green layer missing glue": there is no test proving the config→run threshold flow. Decision 2 is itself one of the six decisions explicitly asking for Commander confirmation.
+- **D1(Codex 判定阻断级):跨进程的 step_ref 冲突。** runner.ts:29/104。计数器只活在 `RunHandle` 里;新进程从 `{}` 开始,所以如果跨进程续跑又绕回同一个节点(比如第二次 draft),它会覆盖 `draft#1` 而不是写 `draft#2`,让审计的轮次编号变得模糊。**这一点已经在 runner.ts 的头注释和 PRD §9.2 决定 4 里被如实标为"已知局限,在单跳跨进程验收路径之外",我也确认过它确实在 A4b 所有验收路径之外。** 但它削弱了"跨进程续跑生产化"这个卖点(graph state 是生产级的,审计归属不是)。便宜又稳健的修法 = 续跑时从 DB 重建计数器。建议开一个追踪 issue。
+- **D2(Codex 判定阻断级):threshold 来源优先级链没有实现。** config.yaml→system_config→写死 2 这条链哪里都没接线;`startRun` 只接受一个已经算好的数字,e2e/测试里都是写死 `rejectThreshold`。**但这是 PRD §9.2 决定 2 + §2 的非目标明确委托给调用方/未来 A5 的**,Codex 不知道这一点,判成了阻断级——我不接受这个严重度评级。仍然值得按 §8.5"绿色层缺胶水"的思路提醒指挥官一句:没有测试证明 config→run threshold 这条流真的通。决定 2 本身就是明确要求指挥官确认的六个决定之一。
 
-### 🟡 Minor
+### 🟡 轻微
 
-- **M1: `approvals.diff_ref` inlines the entire diff.** runner.ts:197. DESIGN §5 says "hash/path, not inlining large text." This falls under an already-documented decision in PRD §9.2#2 (diffRef has been inlined since A4a) — acceptable, but logged.
-- **M2: runner discards the gate's true `decidedAt`.** runner.ts:197 only passes decision/reasoningText, not `entry.decidedAt`; insertApproval uses its own persist-time timestamp → `approvals.decided_at` ≠ the true moment of decision recorded in the checkpoint. Minor for audit fidelity, easy fix (pass `entry.decidedAt` through).
-- **M3 (hallucination gate): comment contradicts code.** gates.ts:110's comment says "GateDecision only has two values" (now three: approved/rejected/escalate); types.ts:155 says runner computes the threshold priority, runner.ts:83 says the caller computes it — both contradict each other and neither is implemented. Fix the comments.
+- **M1:`approvals.diff_ref` 内联了整个 diff。** runner.ts:197。DESIGN §5 说的是"hash/路径,不要内联大段文本"。这属于 PRD §9.2#2 已经记录过的一个决定(diffRef 从 A4a 起就是内联的)——可以接受,但记一笔。
+- **M2:runner 丢掉了 gate 的真实 `decidedAt`。** runner.ts:197 只传了 decision/reasoningText,没传 `entry.decidedAt`;insertApproval 用的是自己持久化那一刻的时间戳 → `approvals.decided_at` ≠ checkpoint 里记录的真实决定时刻。对审计精度来说是个小问题,修起来容易(把 `entry.decidedAt` 传过去)。
+- **M3(幻觉门):注释跟代码矛盾。** gates.ts:110 的注释说"GateDecision 只有两个值"(现在是三个:approved/rejected/escalate);types.ts:155 说 runner 计算 threshold 优先级,runner.ts:83 说调用方计算——两者互相矛盾,而且都没实现。修一下注释。
 
-## 4. Bug attribution breakdown
+## 4. bug 归因拆解
 
-| Attribution | Items |
+| 归因 | 项目 |
 |---|---|
-| Boundary conditions | B1 (`>=` threshold boundary untested) |
-| Integration issues | B2 (run/thread binding), B3 (transaction/atomicity), D1 (cross-process counter) |
-| Requirement-understanding gap | D2 (priority chain deferred, the disagreement is over severity, not the fact) |
-| Other (audit fidelity/docs) | M1, M2, M3 |
+| 边界条件 | B1(`>=` threshold 边界没测) |
+| 集成问题 | B2(run/thread 绑定)、B3(事务/原子性)、D1(跨进程计数器) |
+| 需求理解落差 | D2(优先级链延后,分歧在严重度,不在事实本身) |
+| 其他(审计精度/文档) | M1、M2、M3 |
 
-## 5. Actionable test list distilled (required for Cypher to add on rework)
+## 5. 提炼出来的可执行测试清单(Cypher 返工时必须加)
 
-- P0: a test driving `rejectCount > rejectThreshold` for re-escalation (locks B1's hard-branch invariant, directly kills the `===` mutation).
-- P0: an assertion that `resumeRun` given a mismatched runId/threadId pair should reject/not contaminate another run (locks B2).
-- P1: an assertion that a mid-write failure in runner's multi-row write should roll back the whole group (locks B3).
-- P1 (suggested): step_ref uniqueness across multiple cross-process resumes (locks D1, or switch to rebuilding the counter from the DB).
+- P0:一个驱动 `rejectCount > rejectThreshold` 再次升级的测试(锁住 B1 的硬分支不变量,直接杀死 `===` 变异)。
+- P0:断言 `resumeRun` 收到不匹配的 runId/threadId 对时应该拒绝/不污染另一个 run(锁住 B2)。
+- P1:断言 runner 多行写入中途失败时整组回滚(锁住 B3)。
+- P1(建议):多次跨进程续跑时 step_ref 的唯一性(锁住 D1,或者改成从 DB 重建计数器)。
 
-## 6. Seven quality gates
+## 6. 七道质量门
 
-- Requirement fit ✗ (hard-branch invariant untested, §8's "both boundaries tested" is a bit of an overstatement)
-- Impact scope ⚠ (6 deviations disclosed, but B2's cross-run binding / B3's transaction omission weren't raised as impact areas)
-- Placeholder rejection ✓ (no TODO/stub/fake data)
-- Dangerous code ✓ (no drop-database/secrets/injection/exfiltration)
-- Hallucination check ⚠ (M3 stale/contradictory comment; §8's checkboxes overstate coverage slightly; no substantive fake data)
-- Documentation completeness ⚠ (PRD is thorough and includes impact/test strategy inline, but there's no standalone impact.md/test-plan.md; this test-report file fills that in)
-- Documentation sync (major-design level) N.A. (project-level aeloop; DESIGN §1.5 already synced; the base's four authority documents aren't involved)
+- 需求符合度 ✗(硬分支不变量没测,§8"两个边界都测了"有点言过其实)
+- 影响范围 ⚠(披露了 6 处偏差,但 B2 的跨 run 绑定 / B3 的事务缺失没有作为影响范围被提出来)
+- 占位符拒绝 ✓(没有 TODO/stub/假数据)
+- 危险代码 ✓(没有 drop-database/密钥/注入/外泄)
+- 幻觉检查 ⚠(M3 陈旧/矛盾的注释;§8 的勾选框对覆盖率有轻微夸大;没有实质性假数据)
+- 文档完整性 ⚠(PRD 很详尽,内嵌了 impact/测试策略,但没有独立的 impact.md/test-plan.md;这份 test-report 文件补上了这块)
+- 文档同步(大设计级别) 不适用(项目级 aeloop;DESIGN §1.5 已同步;基地的四份权威文档不涉及)
 
-## 7. Knowledge-base cross-check (checking it, not maintaining it)
+## 7. 知识库交叉核对(核对它,不是维护它)
 
-- Touches already-indexed modules: **yes** (escalation.ts/audit-store.ts/runner.ts newly added + gates/graph/types changed).
-- Cross-checked against `CHARTS/knowledge/aeloop.md`: **largely accurate**, interfaces/paths/dependencies match the real code. One minor drift: the AuditStore entry says `runInTransaction` is "for runner.ts to wrap multi-row writes into a single transaction," implying runner already uses it — in fact runner **does not call it** (same as B3); runId/threadId not being validated is neither mentioned. Since this branch isn't committed yet and rework will change the code regardless, I'd suggest **Cypher correct this line + bump last-verified when re-syncing the KB after rework**, no need to fix it separately right now.
+- 触及已索引模块:**是**(escalation.ts/audit-store.ts/runner.ts 新增 + gates/graph/types 改动)。
+- 跟 `CHARTS/knowledge/aeloop.md` 交叉核对:**基本准确**,接口/路径/依赖跟真实代码对得上。一处小漂移:AuditStore 条目说 `runInTransaction` 是"给 runner.ts 把多行写入包进一个事务用的",暗示 runner 已经在用了——实际上 runner **没有调用它**(跟 B3 一样);runId/threadId 没被校验这件事也没提到。因为这个分支还没 commit,返工反正会改代码,建议**返工后 Cypher 顺手改这一行 + 重新同步的时候顺便 bump last-verified**,现在不用单独修。
 
-## 8. Items pending Commander's ruling
+## 8. 待指挥官裁决的事项
 
-- D2: the threshold-priority chain explicitly deferred to future A5 — confirm this deferral, or require A4b to at least add a piece of evidence connecting the config.yaml→run threshold flow (echoing §8.5)?
-- D1: step_ref collisions across processes — accept as a known limitation + open a tracking issue, or fix it this round by rebuilding the counter from the DB?
-- M1: whether diff_ref inlining stays (already decided per §9.2#2), or lands a hash/path while we're already touching audit persistence?
+- D2:threshold 优先级链明确延后给未来的 A5——确认这个延后,还是要求 A4b 至少加一条证据把 config.yaml→run threshold 这条流连起来(呼应 §8.5)?
+- D1:跨进程的 step_ref 冲突——接受为已知局限 + 开一个追踪 issue,还是这一轮就靠从 DB 重建计数器修掉?
+- M1:diff_ref 内联要不要保留(§9.2#2 已经定了),还是趁现在动审计持久化顺手改成 hash/路径?
 
-## Conclusion
+## 结论
 
-**FAIL.** Rework priorities: B1 (add the hard-branch re-escalation test, the hardest one), B2 (resumeRun binding validation), B3 (runInTransaction). Once fixed, back to Zorro for re-review + needs another round of Codex second-signing. To be merged in once the Commander rules on D1/D2/M1.
+**FAIL。** 返工优先级:B1(加硬分支再次升级测试,最难的一个)、B2(resumeRun 绑定校验)、B3(runInTransaction)。修完回 Zorro 重审 + 还需要再来一轮 Codex 二签。等指挥官裁决 D1/D2/M1 之后再合并。
 
 ---
 
-# A4b Loop — Zorro Round 2 review (after rework)
+# A4b Loop — Zorro Round 2 复审(返工之后)
 
 ---ATTESTATION (R2)---
 {
@@ -138,74 +138,74 @@ Mutation ① is this round's hardest piece of FAIL evidence: DESIGN §4 explicit
 }
 ---END ATTESTATION (R2)---
 
-## Review verdict: FAIL (narrower than R1 — the architecture and the core fix direction for all three R1 blockers are correct and locked; new problems are in boundary correctness + coverage completeness)
+## 复审结论:FAIL(比 R1 窄——三个 R1 阻断级的架构和核心修法方向都是对的、也锁住了;新问题在边界正确性 + 覆盖完整性)
 
-Both models independently judged FAIL. **I hand-verified all three R1 blocker core fixes with 4/4 mutations, all genuinely locked down** (table below), the KB re-sync is accurate, and verify-knowledge is green. But Codex R2 dug one layer deeper and found: D1's on-disk reconstruction misses "zero-claim rounds" (a real adapter can legitimately return `claims:[]`), threshold configs >2 are untested (the `Math.min(threshold,2)` mutation survives, verified by hand), review/gate transactions have no regression lock, plus two hardening items — B2 uniqueness and decidedBy guard timing.
+两个模型都独立判定 FAIL。**我手动逐个核对了 R1 三个阻断级的核心修法,4/4 变异,全部真正锁住**(见下表),知识库重新同步是准确的,verify-knowledge 是绿的。但 Codex R2 又往下挖了一层,发现:D1 的落盘重建漏掉了"零 claim 轮次"(一个真实 adapter 可以合法地返回 `claims:[]`),大于 2 的 threshold 配置没有测试覆盖(`Math.min(threshold,2)` 的变异能存活,手动验证过),review/gate 事务没有回归锁,再加两个加固项——B2 的唯一性和 decidedBy 守卫的时机。
 
-## Re-running mutations on the four R1 rework items (each verified by hand, not taking Cypher's self-report on faith)
+## 对四个 R1 返工项重新跑变异(逐个手动验证,不是听 Cypher 自报的)
 
-| Item | Mutation | Result | Verdict |
+| 项目 | 变异 | 结果 | 结论 |
 |---|---|---|---|
-| B1 | `gates.ts` `>=`→`===` | count=3 vs threshold=2 test **turns red** (1 failed) | ✅ genuinely locked |
-| B2 | Remove the `RunThreadMismatchError` guard (`if(false&&…)`) | The mismatch test **turns red** | ✅ genuinely locked |
-| B3 | Strip the `runInTransaction` wrapping off the draft branch | The rollback test **turns red** (half a row survives) | ✅ genuinely locked |
-| D1 | Change resume to trust only the passed-in `stepCounters` (drop the DB rebuild) | The collision test **turns red** (round2 collapses back to draft#1) | ✅ genuinely locked |
+| B1 | `gates.ts` 的 `>=`→`===` | count=3 vs threshold=2 的测试**变红**(1 个失败) | ✅ 真正锁住 |
+| B2 | 去掉 `RunThreadMismatchError` 这道守卫(`if(false&&…)`) | 不匹配测试**变红** | ✅ 真正锁住 |
+| B3 | 把 draft 分支的 `runInTransaction` 包装剥掉 | 回滚测试**变红**(半行存活下来) | ✅ 真正锁住 |
+| D1 | 把续跑改成只信任传入的 `stepCounters`(丢掉 DB 重建) | 冲突测试**变红**(round2 塌缩回 draft#1) | ✅ 真正锁住 |
 
-After reverting all four mutations, shasum re-verified byte-identical for each; full suite re-greened at 281/281. The R1 fixes themselves are solid; this round's FAIL is not a regression, it's the next layer of rigor that Codex dug up.
+四个变异全部还原之后,shasum 重新核对逐字节一致,全套测试重新变绿 281/281。R1 的修法本身是扎实的;这一轮的 FAIL 不是回归,是 Codex 挖出的下一层严谨度要求。
 
-## R2 new findings (independently rated, not copying Codex's severity)
+## R2 新发现(各自独立评级,不照抄 Codex 的严重度)
 
-### 🔴 Should be fixed before merge (real defect / central-invariant coverage)
+### 🔴 应该在合并前修(真实缺陷 / 核心不变量覆盖)
 
-- **R2-1 (= Codex blocker, verified by hand): threshold configs >2 are untested, the `Math.min(rejectThreshold,2)` mutation survives.** gates.ts:150 / graph.test.ts. Tests only use threshold 1/2/5, but the threshold-5 scenario only ever drives count to 1. `rejectCount >= Math.min(threshold,2)` is correct for 1/2 and wrong for threshold=5, where it escalates 3 rounds early at count=2 — **I hand-ran this mutation and all 23 threshold tests survived green.** DESIGN §4's escalation "cannot be bypassed" is only locked for threshold≤2; there is no evidence for correct configuration behavior when threshold is a real variable (≥3). **Fix: add threshold=5, reject twice in a row, assert it's still g2 (not escalation).**
-- **R2-2 (= Codex blocker, verified via code+schema): D1's on-disk reconstruction misses "zero-claim rounds".** runner.ts:192. `nextStepRef` auto-increments on every draft/review execution, but `listStepRefsByRun` can only see step_refs from **rows that were actually written**; `CoderOutput.claims`/`TesterOutput.claims` is `z.array(...)` with **no `.min(1)`** (checked by hand, schema.ts:58) — a real model can legally return `claims:[]`, so that round writes no step_ref at all → on a cross-process/`{}` resume, `rebuildStepCounters` can't count it → the next execution of the same node starts from `#1` again, colliding with what's already on disk. This is exactly the audit collision D1 was supposed to eliminate, just under a different trigger condition (zero claims). Codex also pointed out the `effectiveStepCounters = dbStepCounters` mutation (dropping the caller-supplied side of the merge) also survives all green. **Fix: make every node execution reconstructable (either an independently persisted counter, or write a step marker on every execution), don't tie the step_ref numbering source to "whether this round has any claims"; or the Commander rules to keep D1 as a documented limitation + tracking issue.**
+- **R2-1(=Codex 阻断级,手动验证过):大于 2 的 threshold 配置没有测试覆盖,`Math.min(rejectThreshold,2)` 的变异能存活。** gates.ts:150 / graph.test.ts。测试只用了 threshold 1/2/5,但 threshold=5 的场景只把 count 打到过 1。`rejectCount >= Math.min(threshold,2)` 对 1/2 是对的,对 threshold=5 是错的——在这种情况下会提前 3 轮就在 count=2 时升级——**我手动跑了这个变异,23 个 threshold 测试全部存活变绿。** DESIGN §4 的 escalation"不可绕过"只在 threshold≤2 时被锁住;threshold 是一个真实的变量(≥3)时,没有任何证据证明配置行为是对的。**修法:加一个 threshold=5、连续拒绝两次的测试,断言依然是 g2(不是 escalation)。**
+- **R2-2(=Codex 阻断级,通过代码+schema 验证):D1 的落盘重建漏掉了"零 claim 轮次"。** runner.ts:192。`nextStepRef` 在每次 draft/review 执行时都会自增,但 `listStepRefsByRun` 只能看到**真正写过的行**里的 step_ref;`CoderOutput.claims`/`TesterOutput.claims` 是 `z.array(...)`,**没有 `.min(1)`**(手动核对过,schema.ts:58)——一个真实模型可以合法返回 `claims:[]`,所以那一轮压根不会写任何 step_ref → 跨进程/`{}` 续跑时,`rebuildStepCounters` 数不到它 → 同一个节点的下一次执行又从 `#1` 开始,跟磁盘上已有的冲突。这正是 D1 本该消灭的那种审计冲突,只是触发条件换成了零 claim。Codex 还指出 `effectiveStepCounters = dbStepCounters` 这个变异(丢掉调用方那一侧的合并)也全绿存活。**修法:让每次节点执行都可重建(要么独立持久化一个计数器,要么每次执行都写一个 step marker),不要把 step_ref 编号的来源绑在"这一轮有没有 claim"上;或者指挥官裁决把 D1 留作已记录的局限 + 追踪 issue。**
 
-### 🟡 Should be fixed (coverage completeness + hardening)
+### 🟡 应该修(覆盖完整性 + 加固)
 
-- **R2-3 (Codex blocker, I downgrade to coverage minor): only the draft transaction has a regression lock for B3.** The `runInTransaction` at runner.ts:224 (review)/254 (gate) **is correct code** (verified by hand-reading), but `FakeTesterAdapter` only ever sends 1 claim, and a gate usually has 1 approval — stripping the wrapping off these two spots still leaves tests all green. **Fix: add a multi-claim tester fixture + a multi-approval scenario, and add a mid-failure zero-survivors test for each of review and gate.**
-- **R2-4 (Codex blocker, I downgrade to hardening minor): `langgraph_thread_id` has no uniqueness constraint, the B2 guard could theoretically be bypassed by a duplicate thread_id.** audit-store.ts:285-298. The field the guard reads and the value it compares are both correct (verified by hand, cross-checked against runner.ts:388), but if two `workflow_runs` rows shared the same thread_id, `resumeRun(B.id, A.threadId)` would pass the guard while still advancing A's graph. In practice `threadId` is generated via `randomUUID()` and the collision probability is astronomically low — a duplicate row would have to be inserted manually to reproduce this — **but defense-in-depth should still add a `UNIQUE` index** on `langgraph_thread_id` (which incidentally makes `getRunByThreadId`'s semantics unambiguous too).
-- **R2-5 (Codex blocker, I downgrade to minor): the `decidedBy` guard throws only after the graph has already advanced.** The `decidedBy===undefined` check at runner.ts:243 comes **after** `compiled.stream()` (line 183) — on a real call this advances the checkpoint first and only then throws, leaving a checkpoint that's moved forward while `workflow_runs`/approval never got updated, an inconsistent state. **But the type signature `decidedBy: string` is non-optional, so a typed caller can never reach this path, and startRun's topology also guarantees the first call never completes any gate**, so only runtime JS bypassing the type system can trigger it. **Fix: move the `decidedBy` validation to the start of `resumeRun`, before the graph moves.**
+- **R2-3(Codex 阻断级,我降级为覆盖轻微项):B3 只有 draft 事务有回归锁。** runner.ts:224(review)/254(gate)的 `runInTransaction` **代码本身是对的**(手动读过),但 `FakeTesterAdapter` 每次只发 1 条 claim,一个 gate 通常只有 1 条 approval——把这两处的包装剥掉,测试照样全绿。**修法:加一个多 claim 的 tester fixture + 一个多 approval 场景,给 review 和 gate 各加一个中途失败零幸存者的测试。**
+- **R2-4(Codex 阻断级,我降级为加固轻微项):`langgraph_thread_id` 没有唯一性约束,B2 的守卫理论上可以被重复的 thread_id 绕过。** audit-store.ts:285-298。守卫读的字段和拿来比较的值都是对的(手动验证过,对照 runner.ts:388 交叉核实),但如果两条 `workflow_runs` 行共用了同一个 thread_id,`resumeRun(B.id, A.threadId)` 会通过守卫,同时还是在推进 A 的 graph。实际情况下 `threadId` 是 `randomUUID()` 生成的,碰撞概率低到天文数字——得手动插入一条重复行才能复现——**但纵深防御依然应该加一个 `UNIQUE` 索引**(顺带也让 `getRunByThreadId` 的语义不含糊)。
+- **R2-5(Codex 阻断级,我降级为轻微项):`decidedBy` 守卫在 graph 已经推进之后才抛错。** `decidedBy===undefined` 这个检查在 runner.ts:243,位置在 `compiled.stream()`(第 183 行)**之后**——真实调用时会先推进 checkpoint,然后才抛错,留下一个 checkpoint 已经前进而 `workflow_runs`/approval 从没更新的不一致状态。**但类型签名 `decidedBy: string` 是非 optional 的,所以一个符合类型的调用方永远走不到这条路径,而且 startRun 的拓扑也保证第一次调用永远不会完成任何 gate**,所以只有绕过类型系统的运行时 JS 才能触发它。**修法:把 `decidedBy` 校验挪到 `resumeRun` 的最开头,graph 推进之前。**
 
-### 🟡 Minor (code correct, test/comment missing)
+### 🟡 轻微(代码是对的,测试/注释缺失)
 
-- **R2-6: M2's `decidedAt` pass-through is untested.** Deleting `decidedAt: entry.decidedAt` still leaves tests green (runner's approval query never even selects `decided_at`). **Fix: use a fake timer / a deliberately different timestamp, and assert `approvals.decided_at` is the moment of the gate's decision rather than the moment it was written to the DB.**
-- **R2-7 (hallucination gate): leftover stale comments.** graph.ts:2's file header still says "six nodes…minus the Escalation subtree" (escalation/cancel have since been added); escalation.ts:6 still calls `GateResumeValue` binary (now has three values). M3 only fixed the one in gates.ts, the same class of drift is still there elsewhere. **Fix: sync both of these comments.**
+- **R2-6:M2 的 `decidedAt` 透传没有测试覆盖。** 删掉 `decidedAt: entry.decidedAt` 测试照样全绿(runner 的 approval 查询压根没有 select `decided_at`)。**修法:用一个假计时器/一个刻意不同的时间戳,断言 `approvals.decided_at` 是 gate 决定的那一刻,不是写进 DB 的那一刻。**
+- **R2-7(幻觉门):遗留的陈旧注释。** graph.ts:2 的文件头注释还写着"六个节点……减去 Escalation 子树"(escalation/cancel 早就加上了);escalation.ts:6 还在说 `GateResumeValue` 是二选一(现在是三选一)。M3 只修了 gates.ts 里的那一处,同一类漂移在别处还在。**修法:同步这两处注释。**
 
-## R2 no-regression confirmation (items that PASSed in R1 were not broken by this round's changes)
+## R2 无回归确认(R1 通过的项目没有被这一轮改动破坏)
 
-- No reverse dependency across all four layers: `grep -rln "from.*loop" src/harness src/context src/prompt` empty; audit-store has zero context coupling (both models confirm independently).
-- Graph nodes/gates have zero SQLite I/O; cross-process-resume still genuinely starts two independent node processes (pids asserted different); e2e vertical slice still genuinely connects Context→Prompt→cli-bridge→runner→all three tables.
-- build/lint/test hand-run **281/281 green**; audit transactions are synchronous, not nested inside the checkpointer connection, no deadlocks (Codex confirms independently).
+- 四层之间都没有反向依赖:`grep -rln "from.*loop" src/harness src/context src/prompt` 为空;audit-store 跟 context 零耦合(两个模型独立确认)。
+- graph 节点/gate 零 SQLite I/O;cross-process-resume 依然真的启动了两个独立的 node 进程(断言 pid 不同);e2e 纵切依然真的连通了 Context→Prompt→cli-bridge→runner→三张表。
+- build/lint/test 手动跑 **281/281 全绿**;审计事务是同步的,没有嵌套在 checkpointer 连接内部,没有死锁(Codex 独立确认)。
 
-## R2 bug attribution breakdown
+## R2 bug 归因拆解
 
-| Attribution | Items |
+| 归因 | 项目 |
 |---|---|
-| Boundary conditions | R2-1 (threshold>2 coverage), R2-2 (zero-claim collision) |
-| Integration issues | R2-4 (thread_id uniqueness), R2-5 (guard timing) |
-| Other (coverage/audit fidelity/docs) | R2-3, R2-6, R2-7 |
+| 边界条件 | R2-1(threshold>2 覆盖)、R2-2(零 claim 冲突) |
+| 集成问题 | R2-4(thread_id 唯一性)、R2-5(守卫时机) |
+| 其他(覆盖率/审计精度/文档) | R2-3、R2-6、R2-7 |
 
-## R2 seven gates
+## R2 七道门
 
-- Requirement fit ✗ (threshold as a real variable >2 has no evidence; D1's zero-claim collision) / Impact scope ⚠ / Placeholder ✓ / Dangerous code ✓ / Hallucination check ⚠ (R2-7 stale comments) / Documentation completeness ⚠ (still no standalone impact/test-plan) / Documentation sync N.A.
+- 需求符合度 ✗(threshold 作为一个真实变量 >2 时没有证据;D1 的零 claim 冲突) / 影响范围 ⚠ / 占位符 ✓ / 危险代码 ✓ / 幻觉检查 ⚠(R2-7 陈旧注释) / 文档完整性 ⚠(依然没有独立的 impact/test-plan) / 文档同步 不适用
 
-## R2 knowledge-base cross-check (checking it, not maintaining it)
+## R2 知识库交叉核对(核对它,不是维护它)
 
-- Touches already-indexed modules: yes (runner/gates/audit-store/errors). Re-sync **accurate**: what I flagged in R1 as "runInTransaction unused" implies it's now been explicitly corrected to "after the B3 rework there is genuinely a caller...previously grep had zero hits"; the new `listStepRefsByRun`/`RunThreadMismatchError`/`decidedAt?` are all recorded; `verify-knowledge aeloop` hand-run green, no path/signature drift, no new dangling references. **No need for Cypher to change the KB again** (but after the next round fixes R2, that zero-claim limitation sentence still needs syncing).
+- 触及已索引模块:是(runner/gates/audit-store/errors)。重新同步**准确**:我在 R1 标的"runInTransaction 未使用",现在已经明确改成"B3 返工之后 runner 真的有调用方了……之前 grep 是零命中";新增的 `listStepRefsByRun`/`RunThreadMismatchError`/`decidedAt?` 都记录了;`verify-knowledge aeloop` 手动跑绿,没有路径/签名漂移,没有新的悬空引用。**不需要 Cypher 再改一次知识库**(但下一轮修完 R2 之后,那句零 claim 局限的话还需要同步)。
 
-## R2 items pending Commander's ruling
+## R2 待指挥官裁决的事项
 
-- D2 (threshold priority chain deferred to A5) — recorded as already-approved by #18, untouched this round, the runner injection-point comment isn't misleading, confirmed to stand as-is.
-- R2-2 (D1's zero-claim collision) — genuinely fix (make the counter not tied to claim existence), or, per D1's original "pending ruling" nature, accept it as a documented limitation + tracking issue?
-- R2-4 (thread_id unique constraint) — add the `UNIQUE` index this round (recommended, cheap)?
+- D2(threshold 优先级链延后给 A5)——记录为已经被 #18 批准,这一轮没动,runner 注入点的注释没有误导性,确认维持原样。
+- R2-2(D1 的零 claim 冲突)——真的修(让计数器不再依赖 claim 是否存在),还是按 D1 原本"待裁决"的性质,接受为已记录的局限 + 追踪 issue?
+- R2-4(thread_id 唯一约束)——这一轮就加 `UNIQUE` 索引(推荐,便宜)?
 
-## R2 conclusion
+## R2 结论
 
-**FAIL, Round 3 needed.** Narrower than R1: R1's three blockers are genuinely fixed and genuinely locked (4/4 mutations re-verified). R3 rework: R2-1 (threshold>2 test, the hardest one), R2-2 (zero-claim collision, or the Commander rules it a limitation), R2-3 (review/gate transaction regression locks), R2-4 (thread_id UNIQUE), R2-5 (guard moved earlier), R2-6 (M2 test), R2-7 (comments). If runner/gates get touched again for production logic, a third round of Codex second-signing will still be needed. Currently **not committed/pushed**, workspace byte-identical restored (gates 5fbac639 / runner 96769b65), HEAD `c6589b7` untouched.
+**FAIL,需要 Round 3。** 比 R1 窄:R1 的三个阻断级真的修好了、真的锁住了(4/4 变异重新验证)。R3 返工:R2-1(threshold>2 测试,最难的一个)、R2-2(零 claim 冲突,或者指挥官裁决为局限)、R2-3(review/gate 事务回归锁)、R2-4(thread_id UNIQUE)、R2-5(守卫提前)、R2-6(M2 测试)、R2-7(注释)。如果 runner/gates 因为生产逻辑再次被动,还需要第三轮 Codex 二签。目前**未 commit/push**,工作区逐字节恢复原样(gates 5fbac639 / runner 96769b65),HEAD `c6589b7` 未动。
 
 ---
 
-# A4b Loop — Zorro Round 3 review (after the seven R2 rework items)
+# A4b Loop — Zorro Round 3 复审(R2 七个返工项之后)
 
 ---ATTESTATION (R3)---
 {
@@ -228,104 +228,104 @@ After reverting all four mutations, shasum re-verified byte-identical for each; 
 }
 ---END ATTESTATION (R3)---
 
-## Review verdict: FAIL (narrow — R2's seven core fixes are 6.5/7 genuinely locked and verified; two minor items remain: one hallucination-gate same-family sweep miss, one guard-completeness gap)
+## 复审结论:FAIL(窄——R2 的七个核心修法 6.5/7 真正锁住并验证过;还剩两个小项:一个幻觉门同类扫尾漏项,一个守卫完整性缺口)
 
-- Second-signer engine: Codex `gpt-5.6-sol` (read-only), `raw_output_sha256=df9b8894…` non-empty, the hash of the on-disk evidence file `.helix/zorro-raw-output/df9b8894….txt` checked by hand matches (independent review genuinely happened).
-- Independent re-run: `pnpm build` (tsc) / `pnpm lint` (tsc --noEmit) / `pnpm test` = **288/288 green** (33 files, ran myself, not taken on self-report — 7 more than R2's 281, new tests added).
-- Mutation testing: all seven R2 items hand-mutated in production code one by one to verify tests go red/green (table below), workspace restored byte-identical after edits for all 5 files (`shasum -c` all OK), HEAD `c6589b7` untouched.
-- Both models' verdicts: Zorro FAIL / Codex FAIL. The only disagreement is the severity rating of R2-5-null (Codex judges it blocker, I downgrade to minor, rationale below).
+- 二签引擎:Codex `gpt-5.6-sol`(只读),`raw_output_sha256=df9b8894…` 非空,手动核对落盘证据文件 `.helix/zorro-raw-output/df9b8894….txt` 的 hash 匹配(独立复审真的发生过)。
+- 独立重跑:`pnpm build`(tsc)/ `pnpm lint`(tsc --noEmit)/ `pnpm test` = **288/288 全绿**(33 个文件,自己跑的,不是听自报——比 R2 的 281 多 7 个,新增了测试)。
+- 变异测试:R2 七个项目逐个在生产代码里手动变异,验证测试变红/变绿(见下表),5 个文件编辑后逐字节恢复原样(`shasum -c` 全部 OK),HEAD `c6589b7` 未动。
+- 两个模型的结论:Zorro FAIL / Codex FAIL。唯一分歧是 R2-5-null 的严重度评级(Codex 判定阻断级,我降级为轻微,理由见下)。
 
-## Re-running mutations on the seven R2 rework items (each verified by hand, not taking Cypher's self-report on faith)
+## 对 R2 七个返工项重新跑变异(逐个手动验证,不是听 Cypher 自报的)
 
-| Item | Mutation I made | Target test | Result | Verdict |
+| 项目 | 我做的变异 | 目标测试 | 结果 | 结论 |
 |---|---|---|---|---|
-| R2-1 | Inject `Math.min(rejectThreshold, 2)` at `gates.ts:150` | graph.test.ts:420 "threshold=5, rejectCount=2 still g2" | **turns red** (expected g2, got escalation) | ✅ genuinely locked |
-| R2-2 | Removed the two `insertStepMarker` calls in draft+review | runner.test.ts "zero-claim round draft#2/review#2" | **turns red** (collapses back to draft#1, exactly the collision) | ✅ genuinely locked |
-| R2-3 (review) | Unwrapped the review branch's `runInTransaction` | runner.test.ts:650 "review 2-claim mid-failure rolls back the whole group" | **turns red** | ✅ genuinely locked |
-| R2-3 (gate) | Unwrapped the gate branch's `runInTransaction` | runner.test.ts:723 gate rollback test | **all green (does not turn red)** | ✅ confirms Cypher's honest disclosure |
-| R2-4 | Removed the `UNIQUE` on `langgraph_thread_id` | audit-store.test.ts:150 "duplicate thread_id rejected" | **turns red** (no longer throws UNIQUE) | ✅ genuinely locked |
-| R2-5 | Removed the `decidedBy===undefined` guard at the start of `resumeRun` | runner.test.ts:777 guard-moved-earlier test | **turns red** (the error changes to the backstop's "gate node produced a decision" = a later failure, checkpoint already advanced) | ✅ genuinely locked (and the failure mode is indeed confirmed to be a "late failure") |
-| R2-6 | Removed the `decidedAt: entry.decidedAt` pass-through | runner.test.ts:822 decidedAt cross-check | **turns red** | ✅ genuinely locked |
+| R2-1 | 在 `gates.ts:150` 注入 `Math.min(rejectThreshold, 2)` | graph.test.ts:420 "threshold=5,rejectCount=2 依然是 g2" | **变红**(预期 g2,得到 escalation) | ✅ 真正锁住 |
+| R2-2 | 删掉 draft+review 里两处 `insertStepMarker` 调用 | runner.test.ts "零 claim 轮次 draft#2/review#2" | **变红**(塌缩回 draft#1,正好是那种冲突) | ✅ 真正锁住 |
+| R2-3(review) | 解开 review 分支的 `runInTransaction` | runner.test.ts:650 "review 两条 claim 中途失败整组回滚" | **变红** | ✅ 真正锁住 |
+| R2-3(gate) | 解开 gate 分支的 `runInTransaction` | runner.test.ts:723 gate 回滚测试 | **全绿(不变红)** | ✅ 印证了 Cypher 的如实披露 |
+| R2-4 | 去掉 `langgraph_thread_id` 上的 `UNIQUE` | audit-store.test.ts:150 "重复 thread_id 被拒绝" | **变红**(不再抛 UNIQUE) | ✅ 真正锁住 |
+| R2-5 | 去掉 `resumeRun` 开头的 `decidedBy===undefined` 守卫 | runner.test.ts:777 守卫提前测试 | **变红**(错误变成了兜底的"gate 节点已产生决定"= 一个更晚的失败,checkpoint 已经推进) | ✅ 真正锁住(而且确认失败模式确实是"晚失败") |
+| R2-6 | 去掉 `decidedAt: entry.decidedAt` 的透传 | runner.test.ts:822 decidedAt 交叉核对 | **变红** | ✅ 真正锁住 |
 
-**6/7 mutations genuinely turned red and were killed; the gate-branch mutation staying green confirms the structural claim is true.** No regressions: full suite re-greened at 288/288, build/lint clean, byte-identical restore.
+**6/7 变异真正变红并被杀死;gate 分支的变异保持绿色印证了那条结构性论断是真的。** 没有回归:全套测试重新变绿 288/288,build/lint 干净,逐字节恢复原样。
 
-## R2-3's independent conclusion on the gate path's transaction (the honest disclosure the Commander asked to have verified by name)
+## R2-3 关于 gate 路径事务的独立结论(指挥官点名要求核实的那次如实披露)
 
-**① The structural claim "the gate path's transaction group is always size 1" — true (verified by hand-reading the code + double-confirmed by mutation).** Every real execution of `createGateNode` (gates.ts:64) and `createEscalationNode` (escalation.ts:63) only ever returns `gateLog: [entry]` (a single-element array); each chunk that `compiled.stream(..., {streamMode:"updates"})` carries is the node's **raw return value** (a single element), not the whole `gateLog` after the reducer accumulates it (Codex additionally cross-checked `@langchain/langgraph/dist/pregel/io.js:103-127`, confirming updates emit raw task writes). So `runner.ts:266`'s `entries` is always length=1, and the transaction group is always size 1. After I unwrapped the gate transaction, all 14 runner tests stayed green — a black-box test genuinely cannot tell a size-1 transaction apart from a bare call, which matches exactly what Cypher disclosed.
+**① "gate 路径的事务分组永远是 size 1" 这条结构性论断——为真(手动读代码验证过 + 变异二次确认)。** `createGateNode`(gates.ts:64)和 `createEscalationNode`(escalation.ts:63)的每一次真实执行都只会返回 `gateLog: [entry]`(单元素数组);`compiled.stream(..., {streamMode:"updates"})` 每个 chunk 携带的是节点的**原始返回值**(单个元素),不是 reducer 累积之后的整个 `gateLog`(Codex 另外交叉核对了 `@langchain/langgraph/dist/pregel/io.js:103-127`,确认 updates 发出的是原始的 task writes)。所以 `runner.ts:266` 的 `entries` 永远是 length=1,事务分组永远是 size 1。我解开 gate 事务之后,全部 14 个 runner 测试保持全绿——黑盒测试真的分不出一个 size 1 的事务和一次裸调用的区别,这跟 Cypher 披露的一模一样。
 
-**② This disclosure is honest and correct, and doesn't constitute a FAIL.** A single-row SQLite INSERT is itself atomic, so the gate path's `runInTransaction` is currently a behavioral no-op — it's **not** over-engineering that needs removing, it's cheap forward-looking defense (the `for (const entry of entries)` loop already leaves the structure in place for a future gate that might emit multiple entries in one chunk); leaving it in is harmless. **Independent addition (neither Cypher nor Codex actively called this out)**: this transaction does **not** provide cross-row atomicity — the approval insert (runner.ts:285) and `updateRunProgress` (runner.ts:332, after the loop, outside the transaction) are not in the same transaction, so this cross-row inconsistency ("approval lands in the DB but workflow_runs never refreshes") was never within this transaction's protection scope to begin with (and this is the system's existing failure mode for **any** mid-stream write failure — the gate-txn test at runner.test.ts:723 has already locked "workflow_runs is never falsely advanced"). Cypher choosing an honest disclosure over fabricating a test that "looks like it proves something but actually can't" is behavior that should be rewarded, not penalized.
+**② 这次披露是如实且正确的,不构成 FAIL。** 一次单行 SQLite INSERT 本身就是原子的,所以 gate 路径的 `runInTransaction` 目前是一个行为上的空操作——它**不是**需要移除的过度工程,是一份便宜的前瞻性防御(那个 `for (const entry of entries)` 循环已经把结构留在那,给未来某个可能在一个 chunk 里发出多条 entry 的 gate 用);留着它是无害的。**独立补充一点(Cypher 和 Codex 都没主动提到)**:这个事务**不**提供跨行的原子性——approval 的插入(runner.ts:285)和 `updateRunProgress`(runner.ts:332,在循环之后,事务之外)不在同一个事务里,所以这种跨行不一致("approval 落进 DB 但 workflow_runs 从没刷新")本来就不在这个事务的保护范围之内(而且这是系统对**任何**中途写入失败的既有失效模式——runner.test.ts:723 那个 gate 事务测试已经锁住了"workflow_runs 从不被虚假推进")。Cypher 选择如实披露而不是编造一个"看着能证明什么、实际证明不了"的测试,这种行为应该被奖励,不该被扣分。
 
-## R3 new findings (two minor items remaining → need R4)
+## R3 新发现(还剩两个小项 → 需要 R4)
 
-### 🔴/🟡 R3-1 (hallucination gate, Codex judges minor, I treat as a **gate-blocking item**): R2-7's same-family staleness wasn't fully swept — `errors.ts` was missed.
+### 🔴/🟡 R3-1(幻觉门,Codex 判定轻微,我当成**阻断门的项目**处理):R2-7 的同类陈旧内容没扫干净——`errors.ts` 被漏掉了
 
-- `escalation.ts`/`graph.ts`'s two spots **have been corrected** (verified by hand: graph.ts's header now says "eight nodes…A4b completes it," escalation.ts's header now says three-value disjoint domain). **But the same family of staleness is still present in `errors.ts`**:
-  - errors.ts:9-18's class comment is still written in A4a's tense: "A4a builds neither the Escalation node…until A4b builds the Escalation subtree" — A4b has already built the Escalation node, and G2 now genuinely has a "active-escalation→Esc" edge (routeAfterG2 recognizes escalate); this "until A4b builds" phrasing implies the error is temporary, when in fact G2's `rejected` is **permanently** unhandled (PRD §2 non-goal), the error never goes away.
-  - errors.ts:26-27's **actual thrown-out error message** reads `"...which A4a has no routing target for (A4b will add one — see …§2/§9.2)"` — in an A4b context this is **factually wrong**: A4b did not add a route for G2's `rejected`, it deliberately kept the throw. A developer hitting this during A4b would be misled by "A4b will add one." This is **already-shipped runtime text**, not just a comment.
-- **Why this blocks the gate**: this is exactly what gate #2 (the sweep-check) exists to prevent — "fixing the spot pointed out without sweeping the same root cause elsewhere." R2 pointed out two spots (graph/escalation); Cypher fixed those two but didn't sweep the same family's third spot. The hallucination gate (#5, specifically watching for comment-vs-code contradictions) shouldn't wave this through while a just-flagged same-family remnant is still sitting there.
-  - **Fix**: rewrite errors.ts's class comment + throw message to reflect A4b reality — the Escalation subtree has been built; G2's `rejected` is a **deliberately permanent** fail-loud guard, not a "placeholder A4b will fill in" temporary state.
-- **Sweep-check corroboration (required by gate #2, ran by hand)**: `grep -rniE "will add|until A4b|A4a (builds|has no)|minus the escalation" src/loop/*.ts` → hits errors.ts:13/18/26/27 (genuinely stale, R4-1), graph.ts:8 ("used to say…" — a corrected historical comment, accurate), types.ts:147 (`A4a has no code that reads this…that's A4b's threshold escalation` — **an accurate historical+current-state attribution, not a false statement**: A4b's threshold escalation genuinely does read it, leave it as-is). Confirms **errors.ts is the one genuine leftover in this family**; after fixing errors.ts, this same grep is still expected to hit graph.ts:8 / types.ts:147 (both accurate), no need to chase those further.
+- `escalation.ts`/`graph.ts` 那两处**已经改好了**(手动验证过:graph.ts 的文件头现在写的是"八个节点……A4b 补齐",escalation.ts 的文件头现在写的是三选一的决定域)。**但同一类陈旧内容在 `errors.ts` 里还在**:
+  - errors.ts:9-18 的类注释还是用 A4a 的时态写的:"A4a 既没有搭 Escalation 节点……直到 A4b 搭出 Escalation 子树"——A4b 早就搭出了 Escalation 节点,G2 现在真的有一条"主动升级→Esc"的边(routeAfterG2 识别 escalate);这句"直到 A4b 搭出"的措辞暗示这个 error 是临时的,但实际上 G2 的 `rejected` 是**永久**不处理的(PRD §2 的非目标),这个 error 不会消失。
+  - errors.ts:26-27 **实际抛出的错误信息**是 `"...which A4a has no routing target for(A4b will add one — see …§2/§9.2)"`——在 A4b 的语境下这句话**事实上是错的**:A4b 没有给 G2 的 `rejected` 加路由,是故意保持不处理。开发者在 A4b 阶段撞到这个,会被"A4b will add one"误导。这是**已经上线的运行时文本**,不只是注释。
+- **为什么这会阻断门**:这正是门 #2(扫尾检查)存在的目的——"只修指出的那一点,不扫同一个根因在别处的残留"。R2 指出了两处(graph/escalation);Cypher 修了那两处,但没有扫同一个家族的第三处。幻觉门(#5,专门盯注释和代码互相矛盾)不应该在一个刚被点名的同类残留还在的情况下放行。
+  - **修法**:重写 errors.ts 的类注释 + 抛出信息,反映 A4b 的现实——Escalation 子树已经搭好了;G2 的 `rejected` 是一道**故意永久**的失败即报错守卫,不是"A4b 会填补的占位符"。
+  - **扫尾核实(门 #2 要求,手动跑过)**:`grep -rniE "will add|until A4b|A4a (builds|has no)|minus the escalation" src/loop/*.ts` → 命中 errors.ts:13/18/26/27(确实陈旧,R4-1),graph.ts:8("以前是这么写的……"——一处已经修正的历史注释,准确),types.ts:147(`A4a has no code that reads this…that's A4b's threshold escalation`——**一个准确的历史+现状归因,不是虚假陈述**:A4b 的阈值升级确实读了它,保持原样)。确认**errors.ts 是这个家族里唯一真正的残留**;修完 errors.ts 之后,同样的 grep 依然预期命中 graph.ts:8 / types.ts:147(两处都准确),不需要再追。
 
-### 🟡 R3-2 (guard completeness, Codex judges blocker, I **downgrade to minor**): the `decidedBy` runtime guard only blocks `undefined`, not `null`.
+### 🟡 R3-2(守卫完整性,Codex 判定阻断级,我**降级为轻微**):`decidedBy` 运行时守卫只挡 `undefined`,不挡 `null`
 
-- **Fact confirmed (verified by hand)**: both the early guard (runner.ts:431) and the backstop (runner.ts:274) check `decidedBy === undefined`. A caller bypassing the TS type system passing `null`: `null !== undefined` → both guards let it through → the graph advances at runner.ts:456 → `null` reaches insertApproval → hits the `decided_by TEXT NOT NULL` constraint (audit-store.ts:390) and throws SqliteError. The checkpoint has already advanced, the audit was never written, workflow_runs never refreshed — exactly the "late failure/inconsistency" R2-5 was supposed to eliminate, just with the trigger value swapped from `undefined` to `null`. The guard's self-described purpose is "guard against a caller bypassing the type system" (runner.ts:432 comment), yet it only blocks one of the illegal values, narrower than its stated responsibility.
-- **Why I downgrade this instead of copying Codex's blocker rating**: ① real-world reachability is near zero — it requires simultaneously "bypassing TS" and "specifically passing null"; ② **there's no silent contamination**: `decided_by NOT NULL` guarantees it will always **fail loudly**, it will never write a corrupted row; ③ this failure class of "checkpoint advances but workflow_runs never refreshes" is already the system's existing behavior for **any** mid-stream write failure (the gate-txn test at runner.test.ts:723 has already accepted and locked "workflow_runs is never falsely advanced," and a resume with the correct type afterward can continue) — this isn't new corrosion unique to null; ④ back in R2, Zorro itself already rated the entire R2-5 family as a minor hardening item.
-- **Since R4-1 already forces a rework round, fix this while we're at it**: relax both guards from `=== undefined` to `typeof decidedBy !== "string"` (or at least `decidedBy == null`), and add a `null` case to the R2-5 test.
+- **事实确认(手动验证过)**:提前守卫(runner.ts:431)和兜底守卫(runner.ts:274)都是检查 `decidedBy === undefined`。一个绕过 TS 类型系统的调用方传 `null`:`null !== undefined` → 两道守卫都放行 → graph 在 runner.ts:456 推进 → `null` 到达 insertApproval → 撞上 `decided_by TEXT NOT NULL` 约束(audit-store.ts:390)抛出 SqliteError。checkpoint 已经推进,审计从没写入,workflow_runs 从没刷新——正是 R2-5 本该消灭的"晚失败/不一致",只是触发值从 `undefined` 换成了 `null`。这道守卫自述的目的是"防范调用方绕过类型系统"(runner.ts:432 的注释),但它只挡住了非法值里的一个,比它自称的职责范围要窄。
+- **为什么我降级,不照抄 Codex 的阻断级评级**:① 实际可达性接近零——需要同时"绕过 TS"和"specifically 传 null";② **不存在悄悄污染**:`decided_by NOT NULL` 保证它永远会**大声失败**,永远不会写出一条损坏的行;③ "checkpoint 推进但 workflow_runs 从没刷新"这种失效类别本来就是系统对**任何**中途写入失败的既有行为(runner.test.ts:723 的 gate 事务测试已经接受并锁住了"workflow_runs 从不被虚假推进",之后用正确类型续跑还能继续)——这不是 null 特有的新腐蚀;④ 早在 R2,Zorro 自己就已经把整个 R2-5 家族评为轻微加固项。
+- **既然 R4-1 反正要强制返工一轮,顺手修一下**:把两道守卫从 `=== undefined` 放宽到 `typeof decidedBy !== "string"`(或至少 `decidedBy == null`),给 R2-5 的测试加一个 `null` 用例。
 
-## R3 no-regression confirmation
+## R3 无回归确认
 
-- No reverse dependency across all four layers: `grep -rln "from.*loop" src/harness src/context src/prompt` **empty**; `audit-store.ts` does not import `@langchain/langgraph` (only mentioned in a comment, line 27).
-- Graph nodes/gates zero SQLite I/O: `grep -rnE "better-sqlite3|Database\(" src/loop/{gates,escalation,graph}.ts src/loop/nodes` **empty**.
-- Placeholders/dangerous code: none — no TODO/stub/fake data posing as real, no drop-database/secrets/injection/exfiltration (both models confirm).
-- The R2-2 potential concern has already been checked and ruled out by hand: while `nextStepRef` in the draft/review branches does auto-increment unconditionally **before** the output guard, the coder/tester nodes (coder.ts:62 / tester.ts:60) always either return an output or throw — there is no path where "a chunk has the node's name but no output" — so there's no new collision case of "the counter advances but the marker never gets written" (Codex independently agrees). Noted as a forward-looking observation: this invariant depends on the node contract; if a future node is changed to be able to return a partial with no output, this needs tightening in step — not a bug this round.
+- 四层之间都没有反向依赖:`grep -rln "from.*loop" src/harness src/context src/prompt` **为空**;`audit-store.ts` 没有 import `@langchain/langgraph`(只在第 27 行的注释里提到过)。
+- graph 节点/gate 零 SQLite I/O:`grep -rnE "better-sqlite3|Database\(" src/loop/{gates,escalation,graph}.ts src/loop/nodes` **为空**。
+- 占位符/危险代码:没有——没有装成真实数据的 TODO/stub/假数据,没有 drop-database/密钥/注入/外泄(两个模型都确认)。
+- R2-2 的一个潜在顾虑已经手动核实并排除:虽然 draft/review 分支里的 `nextStepRef` 在输出守卫**之前**就无条件自增,但 coder/tester 节点(coder.ts:62 / tester.ts:60)总是要么返回一个输出、要么抛错——不存在"一个 chunk 带着节点名但没有输出"这种路径——所以不存在"计数器推进了但标记从没写"这种新的冲突情形(Codex 独立同意)。记一笔前瞻性提醒:这条不变量依赖于节点的契约;如果未来某个节点被改成可以返回一个没有输出的 partial,这里需要同步收紧——这一轮不是 bug。
 
-## R3 bug attribution breakdown
+## R3 bug 归因拆解
 
-| Attribution | Items |
+| 归因 | 项目 |
 |---|---|
-| Other (audit fidelity/docs/hallucination) | R3-1 (errors.ts stale comment+message, hallucination-gate same-family sweep miss) |
-| Integration issue (guard completeness) | R3-2 (decidedBy guard blocks undefined but not null) |
+| 其他(审计精度/文档/幻觉) | R3-1(errors.ts 陈旧注释+信息,幻觉门同类扫尾漏项) |
+| 集成问题(守卫完整性) | R3-2(decidedBy 守卫挡住 undefined 但不挡 null) |
 
-## R3 seven gates
+## R3 七道门
 
-- Requirement fit ✓ (R2-1/R2-2's threshold-as-real-variable >2 + zero-claim collision are both now test-locked; the escalation hard-branch invariant is genuinely locked)
-- Impact scope ✓ (all R2 areas covered; the sweep-check ran by hand and cross-checked the same family, catching one leftover in errors.ts)
-- Placeholder rejection ✓
-- Dangerous code ✓
-- **Hallucination check ✗** (R3-1: errors.ts's comment + runtime message contradict A4b reality, the same family R2-7 didn't fully sweep — this is where this gate is blocked)
-- Documentation completeness ✓ (PRD/impact embedded in PRD + this test-report, all three rounds complete; the R3 section is appended without touching R1/R2)
-- Documentation sync (major-design level) N.A. (project-level aeloop; the base's four authority documents aren't involved)
+- 需求符合度 ✓(R2-1/R2-2 threshold 作为一个真实变量 >2 + 零 claim 冲突现在都被测试锁住了;escalation 硬分支不变量真正锁住)
+- 影响范围 ✓(R2 所有区域都覆盖了;扫尾检查手动跑过并交叉核对了同一类家族,抓到 errors.ts 一处残留)
+- 占位符拒绝 ✓
+- 危险代码 ✓
+- **幻觉检查 ✗**(R3-1:errors.ts 的注释 + 运行时信息跟 A4b 现实矛盾,R2-7 没扫干净的同一个家族——这是这道门被卡住的地方)
+- 文档完整性 ✓(PRD/impact 内嵌在 PRD + 本测试报告里,R1-R3 三轮完整;R3 这一节是追加的,没动 R1/R2)
+- 文档同步(大设计级别) 不适用(项目级 aeloop;基地的四份权威文档不涉及)
 
-## R3 knowledge-base cross-check (checking it, not maintaining it)
+## R3 知识库交叉核对(核对它,不是维护它)
 
-- **Touches already-indexed modules: yes** (runner.ts/audit-store.ts changed again: new `step_markers` table + `insertStepMarker` + `listStepRefsByRun` now unions three tables, `langgraph_thread_id UNIQUE`, decidedBy guard moved earlier).
-- Cross-checked against `CHARTS/knowledge/aeloop.md` (ai-agent repo, last-verified 2026-07-21): **has drifted, needs Cypher to sync** —
-  - line 221: `listStepRefsByRun` is recorded as a union of "**two tables**, `structured_claims`∪`approvals`" → now it's **three tables** (+`step_markers`). **Stale.**
-  - **Missing** the `step_markers` table + `insertStepMarker()` entry (new in R2-2).
-  - **Missing** the `langgraph_thread_id UNIQUE` constraint (new in R2-4).
-  - **Missing** the decidedBy guard being moved to the start of `resumeRun` (R2-5).
-  - The top banner's "281/281 tests green" / "awaiting Zorro R2 review" are both stale now (currently 288, in R3).
-- **Requirement**: Cypher, after landing the R4 rework, needs to re-sync the above 4 items + bump `last-verified`. Maintaining the KB is Cypher's job, I only report drift.
+- **触及已索引模块:是**(runner.ts/audit-store.ts 再次改动:新增 `step_markers` 表 + `insertStepMarker` + `listStepRefsByRun` 现在联合三张表,`langgraph_thread_id UNIQUE`,decidedBy 守卫提前)。
+- 跟 `CHARTS/knowledge/aeloop.md`(ai-agent 仓库,last-verified 2026-07-21)交叉核对:**已经漂移,需要 Cypher 同步**——
+  - 第 221 行:`listStepRefsByRun` 记录的是联合"**两张表**,`structured_claims`∪`approvals`"→ 现在是**三张表**(+`step_markers`)。**陈旧。**
+  - **缺失**了 `step_markers` 表 + `insertStepMarker()` 条目(R2-2 新增)。
+  - **缺失**了 `langgraph_thread_id UNIQUE` 约束(R2-4 新增)。
+  - **缺失**了 decidedBy 守卫被挪到 `resumeRun` 开头这件事(R2-5)。
+  - 顶部 banner 的"281/281 测试全绿"/"等 Zorro R2 复审"都陈旧了(现在是 288,R3 阶段)。
+- **要求**:Cypher 完成 R4 返工之后,需要同步上面 4 项 + bump `last-verified`。维护知识库是 Cypher 的活,我只报告漂移。
 
-## R4 rework list (for Cypher)
+## R4 返工清单(给 Cypher)
 
-- **R4-1 (gate-blocking, hallucination gate)**: rewrite `errors.ts`'s class comment (:9-18) + `UnhandledGateDecisionError`'s throw message (:26-27) to reflect A4b reality — the Escalation subtree is already built; G2's `rejected` is **deliberately permanent** unhandled fail-loud guarding, not a "placeholder A4b will fill in." After the fix, `grep -rniE "will add|until A4b|A4a (builds|has no)"` should only leave hits like "used to say…" (corrected historical comments).
-- **R4-2 (minor hardening, while we're at it)**: relax `resumeRun`'s early guard (runner.ts:431) + `runStreamAndPersist`'s backstop (runner.ts:274) from `=== undefined` to `typeof decidedBy !== "string"` (or `decidedBy == null`); add a `null as unknown as string` case to the R2-5 test, asserting it still throws before the graph advances, checkpoint untouched.
-- **R4-3 (KB sync, not code)**: re-sync `CHARTS/knowledge/aeloop.md`'s 4 drift items + bump last-verified (see "knowledge-base cross-check" above).
-- If R4-2 touches runner again for production logic, a fourth round of Codex second-signing will still be needed (errors.ts plain-text/KB-only changes don't force a re-sign, but if runner gets touched in the same batch, sign it together).
+- **R4-1(阻断门,幻觉门)**:重写 `errors.ts` 的类注释(:9-18)+ `UnhandledGateDecisionError` 的抛出信息(:26-27),反映 A4b 的现实——Escalation 子树已经搭好了;G2 的 `rejected` 是**故意永久**不处理的失败即报错守卫,不是"A4b 会填补的占位符"。修完之后,`grep -rniE "will add|until A4b|A4a (builds|has no)"` 应该只剩下"以前是这么写的……"这种(修正过的历史注释)命中。
+- **R4-2(轻微加固,顺手做)**:把 `resumeRun` 的提前守卫(runner.ts:431)+ `runStreamAndPersist` 的兜底守卫(runner.ts:274)从 `=== undefined` 放宽到 `typeof decidedBy !== "string"`(或 `decidedBy == null`);给 R2-5 的测试加一个 `null as unknown as string` 用例,断言在 graph 推进之前依然抛错,checkpoint 不动。
+- **R4-3(知识库同步,不是代码)**:重新同步 `CHARTS/knowledge/aeloop.md` 的 4 处漂移 + bump last-verified(见上面"知识库交叉核对")。
+- 如果 R4-2 因为生产逻辑再次动到 runner,还需要第四轮 Codex 二签(errors.ts 纯文本/知识库改动不强制重新二签,但如果同一批次里 runner 也被动了,就一起签)。
 
-## R3 items pending Commander's ruling
+## R3 待指挥官裁决的事项
 
-- **R3-2 severity disagreement**: Codex judges blocker (null bypasses the guard, rebuilding an inconsistent state), I judge minor (no silent contamination, requires a double non-standard trigger, this is already the system's existing failure mode for any write failure). Handled as minor for now but still listed in R4 (fix while we're at it). If the Commander agrees with Codex's view and wants to upgrade it to blocker, the rework list doesn't need to change, only the narrative severity.
-- D1/D2/M1 (items left pending from R1/R2) — no new evidence this round, status unchanged from R2.
+- **R3-2 严重度分歧**:Codex 判定阻断级(null 绕过守卫,重建出一个不一致的状态),我判定轻微(不存在悄悄污染,需要双重非标准触发,这本来就是系统对任何写入失败的既有失效模式)。目前按轻微处理,但仍然列进 R4(顺手修)。如果指挥官同意 Codex 的看法、想升级成阻断级,返工清单不需要变,只是叙述的严重度变。
+- D1/D2/M1(R1/R2 遗留待定项)——这一轮没有新证据,状态跟 R2 一致。
 
-## R3 conclusion
+## R3 结论
 
-**FAIL, Round 4 needed (narrow).** I've genuinely locked 6/7 of R2's seven core fixes via mutation + the gate-branch mutation corroborates the honest disclosure; Codex's second-signing independently agrees six of the seven are genuinely closed. Only two minor items remain blocking the gate: **R4-1** (errors.ts's hallucination-gate same-family staleness, blocks the hallucination gate) + **R4-2** (decidedBy guard's null completeness, fix while we're at it) + **R4-3** (KB sync). All are trivial changes, expected to converge in one round. Currently **not committed/pushed**, workspace's 5 files restored byte-identical (`shasum -c` all OK: gates 5fbac639 / runner c84ef31e / audit-store b30bd84a / graph ed767f27 / escalation b51634b3), HEAD `c6589b7` untouched.
+**FAIL,需要 Round 4(窄)。** 我通过变异真正锁住了 R2 七个核心修法里的 6/7 + gate 分支的变异印证了那次如实披露;Codex 的独立二签也独立同意七个里有六个真正闭环了。只剩两个小项挡门:**R4-1**(errors.ts 幻觉门同类陈旧内容,挡幻觉门)+ **R4-2**(decidedBy 守卫的 null 完整性,顺手修)+ **R4-3**(知识库同步)。都是小改动,预计一轮就能收敛。目前**未 commit/push**,工作区 5 个文件逐字节恢复原样(`shasum -c` 全部 OK:gates 5fbac639 / runner c84ef31e / audit-store b30bd84a / graph ed767f27 / escalation b51634b3),HEAD `c6589b7` 未动。
 
 ---
 
-# A4b Loop — Zorro Round 4 review (after the three R3 rework items)
+# A4b Loop — Zorro Round 4 复审(R3 三个返工项之后)
 
 ---ATTESTATION (R4)---
 {
@@ -348,99 +348,99 @@ After reverting all four mutations, shasum re-verified byte-identical for each; 
 }
 ---END ATTESTATION (R4)---
 
-## Review verdict: FAIL (R3's three items R4-1/R4-2/R4-3 are all genuinely closed; but Codex's fourth round of second-signing dug up two **pre-existing audit-consistency blockers that all three previous rounds missed**, one of which I've personally reproduced by hand)
+## 复审结论:FAIL(R3 的三个项 R4-1/R4-2/R4-3 都真正闭环了;但 Codex 第四轮二签挖出了两个**前三轮都漏掉的既有审计一致性阻断级问题**,其中一个我亲手复现过)
 
-- Second-signer engine: Codex `gpt-5.6-sol` (read-only), `raw_output_sha256=8c3bb8d5…` non-empty, the shasum of the on-disk evidence file `aeloop repo .helix/zorro-raw-output/8c3bb8d5….txt` checked by hand == its content-addressed filename (independent review genuinely happened).
-- Independent re-run: `pnpm build` (tsc) / `pnpm lint` (tsc --noEmit) / `pnpm test` = **291/291 green** (34 files, ran myself, not taken on self-report — 3 more than R3's 288, new errors.test.ts 2 cases + a runner null case, 1).
-- Mutation testing: R4-1/R4-2 each hand-mutated in production code to verify tests go red/green (table below), workspace restored byte-identical after edits across errors.ts/runner.ts/gates.ts (errors `c02496fd` / runner `4e23fc8f` / gates `5fbac639`), HEAD `c6589b7` untouched. **Note**: errors.ts is a tracked-modified file, so `git checkout` would restore it to HEAD (the old A4a version) rather than the R4 worktree version — I instead used "Edit forward-mutate→Edit reverse-restore" or snapshot-Read then Write-back, and cross-checked the restored shasums == the R4 baseline afterward.
-- Both models' verdicts: Zorro FAIL / Codex FAIL. **Point of disagreement**: Codex rates both pre-existing issues as blocker; I accept B1 as fact (having personally reproduced it, rated blocker), but on B2 (concurrency) I accept the fact while reserving judgment on "should this hard-block the gate this round vs. be logged as a known limitation for the Commander to rule on" (rationale below, analogous to D1).
+- 二签引擎:Codex `gpt-5.6-sol`(只读),`raw_output_sha256=8c3bb8d5…` 非空,手动核对落盘证据文件 `aeloop repo .helix/zorro-raw-output/8c3bb8d5….txt` 的 shasum == 其内容寻址的文件名(独立复审真的发生过)。
+- 独立重跑:`pnpm build`(tsc)/ `pnpm lint`(tsc --noEmit)/ `pnpm test` = **291/291 全绿**(34 个文件,自己跑的,不是听自报——比 R3 的 288 多 3 个,新增 errors.test.ts 2 个用例 + runner 一个 null 用例,共 1)。
+- 变异测试:R4-1/R4-2 各自在生产代码里手动变异,验证测试变红/变绿(见下表),errors.ts/runner.ts/gates.ts 编辑后逐字节恢复原样(errors `c02496fd` / runner `4e23fc8f` / gates `5fbac639`),HEAD `c6589b7` 未动。**注意**:errors.ts 是一个受 git 跟踪且已改动的文件,所以 `git checkout` 会把它恢复到 HEAD(旧的 A4a 版本)而不是 R4 worktree 版本——我改用"Edit 正向变异→Edit 反向恢复",或者先 Read 快照再 Write 写回,并且之后交叉核对恢复的 shasum == R4 基线。
+- 两个模型的结论:Zorro FAIL / Codex FAIL。**分歧点**:Codex 把两个既有问题都评为阻断级;我接受 B1 是事实(亲手复现过,评为阻断级),但 B2(并发)我接受事实的同时,对"这一轮该不该硬挡门,还是记为已知局限"保留判断(理由见下,类比 D1)。
 
-## Verifying the three R3 rework items (each verified by hand, not taking Cypher's self-report on faith)
+## 核实 R3 三个返工项(逐个手动验证,不是听 Cypher 自报的)
 
-| Item | Mutation I made / verification | Target | Result | Verdict |
+| 项目 | 我做的变异/验证 | 目标 | 结果 | 结论 |
 |---|---|---|---|---|
-| R4-1 | Reverted `errors.ts`'s throw message back to the old stale wording (`A4a has no routing target...A4b will add one`) | `errors.test.ts:25-27` "message doesn't contain the old phrase" | **turns red** (1 failed: matched `/A4b will add/`) | ✅ genuinely locked |
-| R4-1 | Sweep grep `grep -rniE "will add\|until A4b\|A4a (builds\|has no)\|minus the escalation" src/loop/*.ts` | whether the same-family staleness was fully swept | Only left `graph.ts:8` ("used to say…" — corrected history, accurate) + `types.ts:147` (A4a/A4b attribution, accurate); **errors.ts is now completely clean** | ✅ swept clean |
-| R4-1 | Dangling-reference check: the comment cites `gates.ts routeAfterG2` "unchanged by A4b" + the message cites "a4a PRD §2 non-goal #2" | Reference authenticity (hallucination gate) | `gates.ts:159` does contain "unchanged by A4b"; the `a4a PRD`'s second non-goal item is indeed the G2/rejected one — both genuine, no mismatched attribution | ✅ no hallucination |
-| R4-2 | Reverted both guards back to `=== undefined` | `runner.test.ts:820` null case | **turns red**, and the failure mode is indeed a "late failure": the error changes from `/decidedBy is required/` to the DB-layer `NOT NULL constraint failed: approvals.decided_by` (proving null used to genuinely slip through both guards while the graph had already advanced) | ✅ genuinely locked + failure mode confirmed |
-| R4-2 | Same mutation | `runner.test.ts:785` undefined case (the R2-5 scenario) | **still green** (14 passed / 1 failed) | ✅ R2-5 not broken |
-| R4-2 | Hand-read the early guard's position | before the graph advances | The early guard (runner.ts:449) is **before** `getRunById` (456)/`compileLoopGraph` (464)/`compiled.stream()`; both guards are `typeof decidedBy !== "string"` | ✅ position correct |
-| R4-3 | KB semantic cross-check (see "knowledge-base cross-check" below) + `verify-knowledge aeloop` | whether the KB is genuinely in sync | The step_markers fourth table / `insertStepMarker` signature / `langgraph_thread_id UNIQUE` / three-table union / decidedBy guard history / top banner "291 + awaiting R4 review" all match the code; mechanical scan green | ✅ genuinely synced |
+| R4-1 | 把 `errors.ts` 的抛出信息还原成旧的陈旧措辞(`A4a has no routing target...A4b will add one`) | `errors.test.ts:25-27` "信息不包含旧短语" | **变红**(1 个失败:匹配到了 `/A4b will add/`) | ✅ 真正锁住 |
+| R4-1 | 扫尾 grep `grep -rniE "will add\|until A4b\|A4a (builds\|has no)\|minus the escalation" src/loop/*.ts` | 同类陈旧内容有没有扫干净 | 只剩 `graph.ts:8`("以前是这么写的……"——修正过的历史,准确)+ `types.ts:147`(A4a/A4b 归因,准确);**errors.ts 现在彻底干净了** | ✅ 扫干净了 |
+| R4-1 | 悬空引用检查:注释里引用了 `gates.ts routeAfterG2` "A4b 未改动"+ 信息里引用了"a4a PRD §2 非目标 #2" | 引用真实性(幻觉门) | `gates.ts:159` 确实有"A4b 未改动"这句话;`a4a PRD` 的第二个非目标项确实就是那个 G2/rejected 的——两者都是真的,没有张冠李戴 | ✅ 无幻觉 |
+| R4-2 | 把两道守卫都还原成 `=== undefined` | `runner.test.ts:820` null 用例 | **变红**,而且失败模式确实是"晚失败":错误从 `/decidedBy is required/` 变成了 DB 层的 `NOT NULL constraint failed: approvals.decided_by`(证明 null 以前真的会溜过两道守卫,而这时 graph 已经推进了) | ✅ 真正锁住 + 失败模式确认 |
+| R4-2 | 同一个变异 | `runner.test.ts:785` undefined 用例(R2-5 场景) | **依然全绿**(14 通过 / 1 失败) | ✅ R2-5 没被破坏 |
+| R4-2 | 手动读提前守卫的位置 | graph 推进之前 | 提前守卫(runner.ts:449)在 `getRunById`(456)/`compileLoopGraph`(464)/`compiled.stream()` **之前**;两道守卫都是 `typeof decidedBy !== "string"` | ✅ 位置正确 |
+| R4-3 | 知识库语义交叉核对(见下"知识库交叉核对")+ `verify-knowledge aeloop` | 知识库是不是真的同步了 | step_markers 第四张表 / `insertStepMarker` 签名 / `langgraph_thread_id UNIQUE` / 三表联合 / decidedBy 守卫历史 / 顶部 banner"291 + 等 R4 复审" 全部跟代码对得上;机械扫描绿 | ✅ 真正同步了 |
 
-**R3's three items R4-1/R4-2/R4-3 are all genuinely closed** (Codex's independent second-signing agrees: R4-1's comment+message are OK, R4-2's two guards are OK). This round's FAIL is **not** because these three weren't fixed properly — it's that Codex's fourth round of second-signing expanded the review surface from "R4's three items" to the entirety of `errors.ts`/`runner.ts` production logic, and dug up two audit-consistency holes that **have existed since R1 and were missed by all three prior rounds (including the three prior Codex second-signings)** — earlier rounds' resume tests only ever fed "gate-decision-domain-matched" legal values and never ran the same run concurrently, so this could never have been caught.
+**R3 的三个项 R4-1/R4-2/R4-3 都真正闭环了**(Codex 独立二签同意:R4-1 的注释+信息 OK,R4-2 的两道守卫 OK)。这一轮的 FAIL **不是**因为这三个没修好——是 Codex 第四轮二签把审查面从"R4 的三个项"扩大到了整个 `errors.ts`/`runner.ts` 生产逻辑,挖出了两个**从 R1 起就存在、前三轮(包括前三次 Codex 二签)都漏掉的审计一致性漏洞**——之前几轮的续跑测试只喂过"gate 决定域匹配"的合法值,也从来没有并发跑过同一个 run,所以这类问题以前根本抓不到。
 
-## R4 new findings (two pre-existing blockers → need R5)
+## R4 新发现(两个既有阻断级问题 → 需要 R5)
 
-### 🔴 R5-B1 (Codex judges blocker, **I've personally reproduced this, accepted as blocker**): `resumeRun` doesn't validate whether the "currently-paused gate" matches the value domain of `resume.decision` → illegal approval lands in the DB + checkpoint/audit split
+### 🔴 R5-B1(Codex 判定阻断级,**我亲手复现过,接受为阻断级**):`resumeRun` 没有校验"当前暂停的 gate"跟 `resume.decision` 的值域是不是匹配 → 非法 approval 落进 DB + checkpoint/审计分裂
 
-- **Mechanism**: `resumeRun`'s `resume: GateResumeValue | EscalationResumeValue` is an **un-discriminated union**. `{decision:"force_pass"}` is a legal `EscalationResumeValue`, and it's **TS-legal, no cast needed**, to pass it into a run that's currently paused at **G1**.
-- **I personally reproduced this** (temporary vitest probe, deleted right after running, workspace verified pristine afterward): startRun pauses at G1 → `resumeRun(deps, runId, threadId, {decision:"force_pass"}, "human", …)` →
-  - `approvals` gets one **illegal approval row**: `{gate_type:"G1_SEND_TO_TESTER", step_ref:"g1#1", decision:"force_pass", decided_by:"human"}` — recording an Escalation decision value as a G1-gate approval;
-  - `routeAfterG1` subsequently throws `routeAfterG1: unexpected g1Decision "force_pass"`;
-  - **Split state**: checkpoint `next=[]` (the graph has already advanced past G1) vs. `workflow_runs` still `status=running/current_state=g1` (never advanced) — two sources of truth conflicting, plus one approval row that shouldn't exist at all.
-- **Why this is a blocker**: ① this is the **same defect class** as R1's **B2** (runId/threadId mismatch → silently contaminated audit) — a caller supplied an input that should never have been accepted, and the system should have **failed loud before any write** (that's exactly how B2 was fixed: `RunThreadMismatchError`, zero writes); here, instead, an illegal row lands first and only then does it throw; B2 was judged blocker at the time, so by the same yardstick B1 is a blocker too. ② it's **strictly more reachable than the null case R4-2 just hardened against**: null requires `as unknown as string` to force past the type system, B1 **requires no cast at all**. Zorro itself, this very round, hardened against the null case as a worthwhile fix, so there's no reason to let slide a path that needs no cast at all to land an illegal approval. ③ aeloop's differentiating selling point is precisely "an auditable chain" — an illegal approval row + a split state land directly on that selling point.
-- **Fix (for Cypher's R5)**: at the top of `resumeRun`, before touching the graph or writing any row, validate that the decision domain of `resume` matches the gate the run is currently paused at — read the currently-pending node from checkpoint/`getState().next`; if it's a G1/G2/G3 gate, resume must be a `GateResumeValue` (approved/rejected, G2 additionally allows escalate); if it's the escalation gate, only then is `EscalationResumeValue` allowed; on a mismatch, throw a typed error (modeled on `RunThreadMismatchError`, fail loud, zero writes).
+- **机制**:`resumeRun` 的 `resume: GateResumeValue | EscalationResumeValue` 是一个**没有判别标签的联合类型**。`{decision:"force_pass"}` 是一个合法的 `EscalationResumeValue`,而把它传进一个**当前暂停在 G1** 的 run,**TS 层面是合法的,不需要任何类型断言**。
+- **我亲手复现过**(一个临时的 vitest 探针,跑完立刻删掉,之后核实工作区干净):startRun 暂停在 G1 → `resumeRun(deps, runId, threadId, {decision:"force_pass"}, "human", …)` →
+  - `approvals` 多出一行**非法的 approval**:`{gate_type:"G1_SEND_TO_TESTER", step_ref:"g1#1", decision:"force_pass", decided_by:"human"}`——把一个 Escalation 决定值记成了一次 G1-gate approval;
+  - `routeAfterG1` 随即抛出 `routeAfterG1: unexpected g1Decision "force_pass"`;
+  - **分裂状态**:checkpoint `next=[]`(graph 已经越过 G1 推进了)vs. `workflow_runs` 依然是 `status=running/current_state=g1`(从没推进)——两个事实来源互相矛盾,外加一条本不该存在的 approval 行。
+- **为什么这是阻断级**:① 这跟 R1 的 **B2**(runId/threadId 不匹配 → 悄悄污染审计)是**同一类缺陷**——调用方传了一个本不该被接受的输入,系统本该在**任何写入之前就大声失败**(B2 正是这么修的:`RunThreadMismatchError`,零写入);这里却是先落一条非法行,然后才抛错;B2 当时被判定为阻断级,按同一把尺子,B1 也是阻断级。② 这比 R4-2 刚加固过的 null 情形**更容易触达**:null 需要 `as unknown as string` 才能强行绕过类型系统,B1 **完全不需要任何类型断言**。Zorro 自己这一轮才加固了 null 情形(判定值得修),没理由放过一条不需要断言就能落一条非法 approval 的路径。③ aeloop 的差异化卖点正是"一条可审计的链路"——一条非法的 approval 行 + 一个分裂的状态直接砸在这个卖点上。
+- **修法(给 Cypher 的 R5)**:在 `resumeRun` 的最开头,碰 graph 或写任何行之前,先校验 `resume` 的决定域是不是跟这次 run 当前暂停的 gate 匹配——从 checkpoint/`getState().next` 读出当前待处理的节点;如果是 G1/G2/G3 gate,resume 必须是 `GateResumeValue`(approved/rejected,G2 额外允许 escalate);如果是 escalation gate,才允许 `EscalationResumeValue`;不匹配就抛一个带类型的错误(仿照 `RunThreadMismatchError`,大声失败,零写入)。
 
-### 🟡/🔴 R5-B2 (Codex judges blocker, **I accept the fact, defer severity to the Commander**, analogous to D1): concurrent `resumeRun` calls on the same run have no serialization/CAS/version check + the audit tables have no `(run_id, step_ref)` uniqueness constraint
+### 🟡/🔴 R5-B2(Codex 判定阻断级,**我接受事实,把严重度交给指挥官裁决**,类比 D1):同一个 run 的并发 `resumeRun` 调用没有串行化/CAS/版本检查 + 审计表没有 `(run_id, step_ref)` 唯一性约束
 
-- **Codex's reproduction** (a probe against the production SqliteSaver; I have not personally re-run the concurrency case myself, but **I've verified two code-level premises by hand**):
-  - Two concurrent approve calls both succeed → two `G1/g1#1` approval rows + the tester runs twice;
-  - A concurrent approve and reject both succeed → the same `g1#1` records two opposite decisions simultaneously, one call returns G3, the other returns G1, and the checkpoint ultimately ends up on the reject branch.
-- **Code-level corroboration (verified by hand)**: ① `runner.ts`'s `resumeRun` has **no** lock/mutex/CAS/`BEGIN IMMEDIATE`/version check anywhere (verified via grep by hand, only unrelated comments hit); ② neither the `approvals` nor `step_markers` table has **anything beyond an `id` primary key — no `UNIQUE(run_id, step_ref)`** (verified by hand-reading the DDL, audit-store.ts:381/401) — a duplicate step_ref is not stopped at the schema level at all. Both premises hold, so Codex's concurrency race is plausible in the code.
-- **Why I defer severity to the Commander (not copying Codex's blocker rating)**: A4b is a **single-operator CLI** loop model; "two calls resuming the same run at the same time" is outside the current acceptance envelope, similar in nature to **D1 (step_ref collisions across processes)** — which Zorro judged "pending Commander's ruling / a known limitation" rather than a hard blocker. But aeloop's external selling point is precisely "productionized cross-process resume," which does invite concurrent scenarios, so I can't just file this away as an acceptable limitation the way I did with D1. **This one is for the Commander to rule on**: hard-block it into R5, or log it as a known limitation + open a tracking issue. **Either way, the defense-in-depth is cheap**: add `UNIQUE(run_id, step_ref)` (at least blocking duplicate approval rows) + serialize resumes on the same run (`BEGIN IMMEDIATE` or an application-level per-run lock + checkpoint version check).
+- **Codex 的复现**(针对生产 SqliteSaver 的一个探针;并发场景我自己没有亲手重跑,但**手动验证了两个代码层面的前提**):
+  - 两次并发的 approve 调用都成功 → 出现两条 `G1/g1#1` approval 行 + tester 跑了两次;
+  - 一次并发的 approve 和 reject 都成功 → 同一个 `g1#1` 同时记了两个相反的决定,一次调用返回 G3,另一次返回 G1,checkpoint 最终落在 reject 分支上。
+- **代码层面的印证(手动验证过)**:① `runner.ts` 的 `resumeRun` **哪里都没有**锁/互斥/CAS/`BEGIN IMMEDIATE`/版本检查(手动 grep 过,只命中不相关的注释);② `approvals` 和 `step_markers` 表都**除了 `id` 主键之外没有别的约束——没有 `UNIQUE(run_id, step_ref)`**(手动读 DDL 验证过,audit-store.ts:381/401)——重复的 step_ref 在 schema 层面完全没被拦住。两个前提都成立,所以 Codex 的并发竞态在代码里是站得住的。
+- **为什么我把严重度交给指挥官裁决(不照抄 Codex 的阻断级评级)**:A4b 是一个**单操作者 CLI** 的 loop 模型;"两次调用同时续跑同一个 run"目前在验收范围之外,性质上跟 **D1(跨进程的 step_ref 冲突)**类似——Zorro 当时判的是"待指挥官裁决/一个已知局限",不是硬阻断。但 aeloop 对外的卖点正是"生产化的跨进程续跑",这确实会引来并发场景,所以我没法像对 D1 那样直接把它归为可接受的局限。**这个交给指挥官裁决**:硬挡进 R5,还是记为已知局限 + 开一个追踪 issue。**不管选哪个,纵深防御都很便宜**:加 `UNIQUE(run_id, step_ref)`(至少挡住重复的 approval 行)+ 给同一个 run 的续跑加串行化(`BEGIN IMMEDIATE` 或应用层的按 run 加锁 + checkpoint 版本检查)。
 
-## R4 minor (doesn't block the gate, logged)
+## R4 轻微项(不挡门,记一笔)
 
-- **M-R4a (Codex judges minor, I accept it)**: `errors.test.ts:9-16`'s comment claims the old wording was "accurate in A4a's own increment" — Codex points out that the A4a PRD **already** specified `rejected` throws, and what A4b adds is the independent `escalate` value, not "adding a route for rejected" — so this "the old wording was accurate in A4a" sentence is itself a bit imprecise; also that test only does `not.toMatch` on three old phrases and never positively pins the full message text. **The production message itself is correct** (I've verified this), this is a minor test-comment/coverage issue, doesn't block the hallucination gate. Suggest Cypher tighten the comment wording while at it + optionally add a positive assertion pinning the core semantics (e.g. the message contains "permanent"/"no routing target").
+- **M-R4a(Codex 判定轻微,我接受)**:`errors.test.ts:9-16` 的注释声称旧措辞"在 A4a 自己的增量里是准确的"——Codex 指出 A4a PRD **早就**规定了 `rejected` 会抛错,A4b 加的是独立的 `escalate` 值,不是"给 rejected 加一条路由"——所以这句"旧措辞在 A4a 里是准确的"本身有点不精确;而且那个测试只对三个旧短语做了 `not.toMatch`,从没正面锁定完整信息文本。**生产信息本身是对的**(我验证过),这是一个测试注释/覆盖率的小问题,不挡幻觉门。建议 Cypher 顺手把注释措辞收紧一点 + 可以加一条正面断言锁定核心语义(比如信息里包含"permanent"/"no routing target")。
 
-## R4 no-regression confirmation (items that PASSed in R1/R2/R3 were not broken by this round's changes)
+## R4 无回归确认(R1/R2/R3 通过的项目没有被这一轮改动破坏)
 
-- Codex independently re-checked: B2 (run/thread pairing + thread UNIQUE, runner.ts:456 / audit-store.ts:361), B3 (draft/review/gate grouped transactions, runner.ts:214), D1 (on-disk counter rebuild + caller taking the max, runner.ts:144/223), R2-2 (zero-claim step marker) **all show no regression**.
-- Placeholders/dangerous code: Codex + I both judge the same — no TODO/stub/fake data posing as production in `src/loop`, no drop-database/secrets/network-exfiltration/SQL-injection; dynamic `UPDATE` column names come from a hardcoded set, values are all parameterized.
-- 291/291 hand-run green, build/lint clean, three files byte-identical restored, HEAD untouched.
+- Codex 独立重新核对:B2(run/thread 配对 + thread UNIQUE,runner.ts:456 / audit-store.ts:361)、B3(draft/review/gate 分组事务,runner.ts:214)、D1(落盘计数器重建 + 调用方取最大值,runner.ts:144/223)、R2-2(零 claim step marker)**都没有回归**。
+- 占位符/危险代码:Codex 和我判断一致——`src/loop` 里没有装成生产代码的 TODO/stub/假数据,没有 drop-database/密钥/网络外泄/SQL 注入;动态 `UPDATE` 的列名来自一个写死的集合,值都是参数化的。
+- 291/291 手动跑绿,build/lint 干净,三个文件逐字节恢复原样,HEAD 未动。
 
-## R4 bug attribution breakdown
+## R4 bug 归因拆解
 
-| Attribution | Items |
+| 归因 | 项目 |
 |---|---|
-| Integration issue (missing input-domain validation) | R5-B1 (gate/decision-domain not validated → illegal approval + split state) |
-| Concurrency/race condition | R5-B2 (concurrent resume has no serialization + audit tables lack a step_ref uniqueness constraint) |
-| Other (test comments/coverage) | M-R4a (errors.test.ts comment wording + no positive full-text pin) |
+| 集成问题(缺少输入域校验) | R5-B1(gate/决定域没被校验 → 非法 approval + 分裂状态) |
+| 并发/竞态条件 | R5-B2(并发续跑没有串行化 + 审计表缺少 step_ref 唯一性约束) |
+| 其他(测试注释/覆盖率) | M-R4a(errors.test.ts 注释措辞 + 没有正面锁定全文) |
 
-## R4 seven gates
+## R4 七道门
 
-- Requirement fit ✓ (R3's three items R4-1/R4-2/R4-3 all genuinely closed; escalation hard-branch/threshold-as-real-variable/three audit tables all still locked)
-- **Impact scope ✗** (`resumeRun`'s **input-domain validation surface** is incomplete: gate↔decision-domain cross-validation is missing → an illegal approval can land in the DB, B1; the concurrent-resume surface is undefended, B2 — neither of these surfaces was raised by impact analysis in any of the three prior rounds)
-- Placeholder rejection ✓
-- Dangerous code ✓
-- Hallucination check ✓ (R4-1's comment+message match A4b reality, references are genuine; M-R4a is only a test-comment wording minor, the production text is correct, doesn't block this gate)
-- Documentation completeness ✓ (PRD/impact embedded in PRD + this test-report, R1-R4 complete; the R4 section is appended without touching R1/R2/R3)
-- Documentation sync (major-design level) N.A. (project-level aeloop; the base's four authority documents aren't involved)
+- 需求符合度 ✓(R3 的三个项 R4-1/R4-2/R4-3 都真正闭环;escalation 硬分支/threshold 作为真实变量/三张审计表都还锁着)
+- **影响范围 ✗**(`resumeRun` 的**输入域校验面**不完整:缺少 gate↔决定域的交叉校验 → 一条非法 approval 可以落进 DB,B1;并发续跑面没有防御,B2——前三轮的影响分析都没提出过这两个面)
+- 占位符拒绝 ✓
+- 危险代码 ✓
+- 幻觉检查 ✓(R4-1 的注释+信息跟 A4b 现实对得上,引用都是真的;M-R4a 只是测试注释措辞轻微,生产文本是对的,不挡这道门)
+- 文档完整性 ✓(PRD/impact 内嵌在 PRD + 本测试报告里,R1-R4 完整;R4 这一节是追加的,没动 R1/R2/R3)
+- 文档同步(大设计级别) 不适用(项目级 aeloop;基地的四份权威文档不涉及)
 
-## R4 knowledge-base cross-check (checking it, not maintaining it)
+## R4 知识库交叉核对(核对它,不是维护它)
 
-- **Touches already-indexed modules: yes** (errors.ts/runner.ts production logic changed again this round).
-- Cross-checked against `CHARTS/knowledge/aeloop.md` (ai-agent repo, last-verified 2026-07-21): **already synced by Cypher in R4, and I've cross-checked each item by hand as accurate** —
-  - The R4-2 guard history: line 234 records "moved earlier in R2-5 + relaxed in R4-2 to `typeof decidedBy !== "string"`, the self-verification mutation's failure point changes from 'decidedBy is required' to NOT NULL" — matches runner.ts's code ✓
-  - The fourth table step_markers + `insertStepMarker({runId,stepRef,node,actor,claimCount})`: line 217/222 — matches audit-store.ts's DDL (the step_markers CREATE TABLE) + signature ✓
-  - `langgraph_thread_id TEXT NOT NULL UNIQUE`: line 217/361 — matches ✓
-  - `listStepRefsByRun`'s three-table union (structured_claims∪approvals∪step_markers): line 221 — matches `[...claimRows,...approvalRows,...markerRows]` (audit-store.ts:562) ✓
-  - Top banner: 291/291 + "awaiting Zorro R4 review" + R4-1/R4-2 description — already synced ✓
-  - `verify-knowledge aeloop`'s mechanical scan is **green** (no path/signature drift).
-- **KB needs no further changes.** ⚠️ But if R5 fixes B1 (+possibly B2) as above, `runner.ts`/`errors.ts`/`audit-store.ts` will get touched again (a new typed error / a new UNIQUE constraint), **and Cypher will need to re-sync the corresponding KB entries + bump last-verified after the R5 rework.**
+- **触及已索引模块:是**(errors.ts/runner.ts 的生产逻辑这一轮又改了)。
+- 跟 `CHARTS/knowledge/aeloop.md`(ai-agent 仓库,last-verified 2026-07-21)交叉核对:**Cypher 在 R4 已经同步过了,我逐项手动核对准确**——
+  - R4-2 的守卫历史:第 234 行记录"R2-5 提前 + R4-2 放宽到 `typeof decidedBy !== "string"`,自我验证变异的失败点从 'decidedBy is required' 变成 NOT NULL"——跟 runner.ts 的代码对得上 ✓
+  - 第四张表 step_markers + `insertStepMarker({runId,stepRef,node,actor,claimCount})`:第 217/222 行——跟 audit-store.ts 的 DDL(step_markers 的 CREATE TABLE)+ 签名对得上 ✓
+  - `langgraph_thread_id TEXT NOT NULL UNIQUE`:第 217/361 行——对得上 ✓
+  - `listStepRefsByRun` 的三表联合(structured_claims∪approvals∪step_markers):第 221 行——跟 `[...claimRows,...approvalRows,...markerRows]`(audit-store.ts:562)对得上 ✓
+  - 顶部 banner:291/291 + "等 Zorro R4 复审" + R4-1/R4-2 描述——已经同步 ✓
+  - `verify-knowledge aeloop` 的机械扫描是**绿的**(没有路径/签名漂移)。
+- **知识库不需要再改。** ⚠️ 但如果 R5 按上面的方式修了 B1(+可能修 B2),`runner.ts`/`errors.ts`/`audit-store.ts` 会再次被动(一个新的带类型的 error / 一个新的 UNIQUE 约束),**R5 返工之后 Cypher 需要重新同步对应的知识库条目 + bump last-verified。**
 
-## R4 items pending Commander's ruling
+## R4 待指挥官裁决的事项
 
-- **R5-B2's severity**: the concurrent-resume race condition — hard-block it into R5 to fix this round, or log it as a known limitation (analogous to D1) + open a tracking issue, deferring it to A5 (CLI/multi-operator) whenever it's actually needed? (Either way, recommend at least adding `UNIQUE(run_id, step_ref)` as a cheap piece of defense-in-depth.)
-- D1/D2/M1 (items left pending from R1/R2) — no new evidence this round, status unchanged.
+- **R5-B2 的严重度**:并发续跑的竞态条件——这一轮硬挡进 R5 修掉,还是记为已知局限(类比 D1)+ 开一个追踪 issue,等真到 A5(CLI/多操作者)才需要的时候再处理?(不管选哪个,建议至少加 `UNIQUE(run_id, step_ref)` 作为一份便宜的纵深防御。)
+- D1/D2/M1(R1/R2 遗留待定项)——这一轮没有新证据,状态不变。
 
-## R4 conclusion
+## R4 结论
 
-**FAIL, Round 5 needed.** **Clear message to the Commander: A4b cannot enter the commit/merge pipeline this round.** I've personally verified the three items R3 assigned (R4-1 errors.ts wording, R4-2 decidedBy guard hardening, R4-3 KB sync) as all genuinely closed, 291/291 green, no regressions — **these three, Cypher got right.** But this round isn't the "closing round" that can wrap things up: Codex's fourth round of second-signing expanded the review surface to the entirety of `errors.ts`/`runner.ts` and dug up two pre-existing audit-consistency blockers that lay dormant since R1 and were missed by all three prior rounds (including three prior Codex second-signings) — **R5-B1** (gate/decision-domain not validated → illegal approval lands in the DB + checkpoint/audit split, **I've personally reproduced this, no cast needed to trigger it**, the same defect class as B2, accepted as blocker) + **R5-B2** (concurrent resume has no serialization + the audit tables lack a step_ref uniqueness constraint, fact confirmed, severity deferred to the Commander, analogous to D1). Both hit directly on aeloop's selling point (an auditable chain), and B1 especially must not be merged while still broken. R5 rework: **B1 is mandatory** (validate that the decision domain matches the currently-paused gate at the top of resumeRun, fail loud, zero writes) + **B2 pending Commander's ruling** (hard-fix it or log it as a limitation, recommend at least adding `UNIQUE(run_id, step_ref)`) + M-R4a (while we're at it). Production logic will get touched again in runner/errors/audit-store, **R5 will still need a fifth round of Codex second-signing + a KB re-sync.** Currently **not committed/pushed**, workspace's three files byte-identical restored (errors `c02496fd` / runner `4e23fc8f` / gates `5fbac639`), HEAD `c6589b7` untouched.
+**FAIL,需要 Round 5。** **给指挥官的明确信息:A4b 这一轮不能进 commit/merge 流水线。** 我亲手验证了 R3 分配的三个项(R4-1 errors.ts 措辞、R4-2 decidedBy 守卫加固、R4-3 知识库同步)都真正闭环了,291/291 全绿,没有回归——**这三个,Cypher 做对了。** 但这一轮不是能收尾的那一轮:Codex 第四轮二签把审查面扩大到了整个 `errors.ts`/`runner.ts`,挖出了两个从 R1 就潜伏、前三轮(包括三次 Codex 二签)都漏掉的既有审计一致性阻断级问题——**R5-B1**(gate/决定域没被校验 → 非法 approval 落进 DB + checkpoint/审计分裂,**我亲手复现过,不需要类型断言就能触发**,跟 B2 是同一类缺陷,接受为阻断级)+ **R5-B2**(并发续跑没有串行化 + 审计表缺少 step_ref 唯一性约束,事实已确认,严重度交给指挥官裁决,类比 D1)。两个都直接砸在 aeloop 的卖点上(一条可审计的链路),B1 尤其不能带着这个问题合并。R5 返工:**B1 是必修项**(在 resumeRun 开头校验决定域是否匹配当前暂停的 gate,大声失败,零写入)+ **B2 待指挥官裁决**(硬修或记为局限,建议至少加 `UNIQUE(run_id, step_ref)`)+ M-R4a(顺手做)。runner/errors(+可能 audit-store,如果 B2 被硬修)的生产逻辑还会再被动,**R5 还需要第五轮 Codex 二签 + 一次知识库重新同步。** 目前**未 commit/push**,工作区三个文件逐字节恢复原样(errors `c02496fd` / runner `4e23fc8f` / gates `5fbac639`),HEAD `c6589b7` 未动。
 
 ---
 
-# A4b Loop — Zorro Round 5 review (after the two R4 rework items — expected closing round)
+# A4b Loop — Zorro Round 5 复审(R4 两个返工项之后——预期的收尾轮)
 
 ---ATTESTATION (R5)---
 {
@@ -463,117 +463,117 @@ After reverting all four mutations, shasum re-verified byte-identical for each; 
 }
 ---END ATTESTATION (R5)---
 
-## Review verdict: FAIL (**not closing** — both R4 rework items are in the right direction and genuinely lock the scenarios each was designed for, but R5-B1's fix is **not precise enough in granularity**, only plugging half of the failure class it was meant to eliminate: both models independently agree the same failure class still has **3 no-cast-needed paths** that can slip through)
+## 复审结论:FAIL(**没收尾**——R4 的两个返工项方向都对、也确实锁住了各自设计要解决的场景,但 R5-B1 的修法**颗粒度不够精细**,只堵住了它本该消灭的失效类别的一半:两个模型独立同意,同一个失效类别还有 **3 条不需要类型断言的路径**能溜过去)
 
-- Second-signer engine: Codex `gpt-5.6-sol` (read-only), `raw_output_sha256=ac548af6…` non-empty, the on-disk evidence file `aeloop repo .helix/zorro-raw-output/ac548af6….txt`'s `shasum -a 256` checked by hand == its content-addressed filename (independent review genuinely happened).
-- Independent re-run: `pnpm build` (tsc) / `pnpm lint` (tsc --noEmit) / `pnpm test` = **296/296 green** (34 files, ran myself, not taken on self-report — matches Cypher's self-reported 296/296).
-- Mutation testing: the R5-B1 guard + R5-B2's two UNIQUE constraints each hand-mutated in production code to verify tests go red/green (table below); separately, using **temporary probes** (deleted right after running, workspace verified pristine afterward), I personally reproduced the 3 penetration paths left over in R5-B1 + Codex's mid-stream split state for B2. Workspace's 5 files all restored shasum byte-identical (runner `5c61ed2c` / gates `5fbac639` / audit-store `5ef19e01` / errors `8b15e1b0` / escalation `b51634b3`), HEAD `c6589b7` untouched.
-- Both models' verdicts: Zorro FAIL / Codex FAIL. **Independently agree**: R5-B1's decision-domain guard mapping is imprecise, and the same failure class's 3 no-cast-needed paths are still fully present; each also separately points out a checkpoint/workflow_runs split caused by a normal mid-stream failure (B2).
+- 二签引擎:Codex `gpt-5.6-sol`(只读),`raw_output_sha256=ac548af6…` 非空,手动核对落盘证据文件 `aeloop repo .helix/zorro-raw-output/ac548af6….txt` 的 `shasum -a 256` == 其内容寻址的文件名(独立复审真的发生过)。
+- 独立重跑:`pnpm build`(tsc)/ `pnpm lint`(tsc --noEmit)/ `pnpm test` = **296/296 全绿**(34 个文件,自己跑的,不是听自报——跟 Cypher 自报的 296/296 对得上)。
+- 变异测试:R5-B1 的守卫 + R5-B2 的两个 UNIQUE 约束各自在生产代码里手动变异,验证测试变红/变绿(见下表);另外用**临时探针**(跑完立刻删掉,之后核实工作区干净)亲手复现了 R5-B1 遗留的 3 条渗透路径 + Codex 说的 B2 中途分裂状态。工作区 5 个文件全部 shasum 逐字节恢复原样(runner `5c61ed2c` / gates `5fbac639` / audit-store `5ef19e01` / errors `8b15e1b0` / escalation `b51634b3`),HEAD `c6589b7` 未动。
+- 两个模型的结论:Zorro FAIL / Codex FAIL。**独立同意**:R5-B1 的决定域守卫映射不精确,同一个失效类别的 3 条不需要断言的路径依然完全存在;各自也分别指出一个正常中途失败导致的 checkpoint/workflow_runs 分裂(B2)。
 
-## Re-running mutations on the two R4 rework items (each verified by hand, not taking Cypher's self-report on faith)
+## 对两个 R4 返工项重新跑变异(逐个手动验证,不是听 Cypher 自报的)
 
-| Item | Mutation I made | Target test | Result | Verdict |
+| 项目 | 我做的变异 | 目标测试 | 结果 | 结论 |
 |---|---|---|---|---|
-| R5-B1 (designed scenario) | Changed the decision-domain validation `if(...)` at `runner.ts:515` to `if(false && ...)` | `runner.test.ts:467` "force_pass fed to G1 → ResumeDecisionDomainMismatchError, zero approvals, workflow_runs untouched, checkpoint doesn't advance" | **turns red** (the error becomes `routeAfterG1: unexpected g1Decision`, precisely reproducing the failure mode R4 described: "illegal approvals row lands first → only then hits routeAfterG1") | ✅ the guard genuinely locks **the cross-domain scenario it was designed for** |
-| R5-B2 (approvals) | Removed `UNIQUE(run_id, step_ref)` on the `approvals` table in `audit-store.ts` | `audit-store.test.ts:325` "duplicate (run_id, step_ref) approval rejected" | **turns red** (no longer throws UNIQUE constraint failed) | ✅ genuinely locked |
-| R5-B2 (step_markers) | Removed `UNIQUE(run_id, step_ref)` on the `step_markers` table in `audit-store.ts` | `audit-store.test.ts:411` "duplicate (run_id, step_ref) marker rejected" | **turns red** | ✅ genuinely locked |
+| R5-B1(设计场景) | 把 `runner.ts:515` 的决定域校验 `if(...)` 改成 `if(false && ...)` | `runner.test.ts:467` "force_pass 喂给 G1 → ResumeDecisionDomainMismatchError,零 approval,workflow_runs 不动,checkpoint 不推进" | **变红**(错误变成了 `routeAfterG1: unexpected g1Decision`,精确复现了 R4 描述的失效模式:"非法 approvals 行先落地→之后才撞上 routeAfterG1") | ✅ 这道守卫真正锁住了**它设计要解决的跨域场景** |
+| R5-B2(approvals) | 在 `audit-store.ts` 里去掉 `approvals` 表的 `UNIQUE(run_id, step_ref)` | `audit-store.test.ts:325` "重复 (run_id, step_ref) 的 approval 被拒绝" | **变红**(不再抛 UNIQUE constraint failed) | ✅ 真正锁住 |
+| R5-B2(step_markers) | 在 `audit-store.ts` 里去掉 `step_markers` 表的 `UNIQUE(run_id, step_ref)` | `audit-store.test.ts:411` "重复 (run_id, step_ref) 的 marker 被拒绝" | **变红** | ✅ 真正锁住 |
 
-**Both of R4's rework items genuinely lock the scenarios each was designed for** (force_pass cross-domain is caught by the guard, both UNIQUE constraints genuinely take effect). This round's FAIL isn't because either of these two was wrong in direction, it's that R5-B1's guard has a **granularity** gap — a hole in the same family as the failure class it itself was meant to eliminate.
+**R4 的两个返工项都真正锁住了各自设计要解决的场景**(force_pass 跨域被守卫抓到,两个 UNIQUE 约束都真正生效)。这一轮的 FAIL 不是因为方向错了,是 R5-B1 的守卫有一个**颗粒度**缺口——一个跟它本该消灭的失效类别属于同一家族的漏洞。
 
-## R5 new findings (1 mandatory-fix blocker + 1 severity deferred to the Commander)
+## R5 新发现(1 个必修阻断级 + 1 个严重度交给指挥官裁决)
 
-### 🔴 R6-B1 (mandatory-fix blocker, both models independently agree, I've personally reproduced all 3 paths by hand): `resumeDecisionsFor`'s decision-domain mapping is imprecise, 3 no-cast-needed paths still land illegal approvals + split states
+### 🔴 R6-B1(必修阻断级,两个模型独立同意,我亲手逐一复现了全部 3 条路径):`resumeDecisionsFor` 的决定域映射不精确,3 条不需要类型断言的路径依然会落下非法 approval + 分裂状态
 
-- **Mechanism**: `runner.ts:152`'s `resumeDecisionsFor` maps **all three gates g1/g2/g3 uniformly** to `["approved","rejected","escalate"]`, but the three gates' **actual** accepted sets (per `gates.ts`'s `routeAfterG1/G2/G3` switch statements) each differ:
+- **机制**:`runner.ts:152` 的 `resumeDecisionsFor` 把 g1/g2/g3 **三个 gate 统一**映射成 `["approved","rejected","escalate"]`,但按 `gates.ts` 的 `routeAfterG1/G2/G3` switch 语句,三个 gate **实际**接受的集合各不相同:
 
-  | Gate | What the routing function actually accepts | Illegal value the guard **over-admits** | What it hits |
+  | Gate | 路由函数实际接受的值 | 守卫**过度放行**的非法值 | 命中的位置 |
   |---|---|---|---|
-  | G1 | `approved` / `rejected` | `escalate` | `routeAfterG1`'s `default: throw` |
-  | G2 | `approved` / `escalate` | `rejected` | `routeAfterG2`'s `UnhandledGateDecisionError` |
-  | G3 | `approved` / `rejected` | `escalate` | `routeAfterG3`'s `default: throw` |
-  | escalation | `revise` / `force_pass` / `abandon` | none (this gate is precise) | — |
+  | G1 | `approved` / `rejected` | `escalate` | `routeAfterG1` 的 `default: throw` |
+  | G2 | `approved` / `escalate` | `rejected` | `routeAfterG2` 的 `UnhandledGateDecisionError` |
+  | G3 | `approved` / `rejected` | `escalate` | `routeAfterG3` 的 `default: throw` |
+  | escalation | `revise` / `force_pass` / `abandon` | 无(这个 gate 是精确的) | — |
 
-- **All three leaked values are legal `GateResumeValue`s (`{decision:"escalate"}` / `{decision:"rejected"}`), requiring no cast at all** — just as reachable as the `null` case R4-2 just hardened against (which needs `as unknown as string`), and equally reachable as `force_pass` (cross-domain), which R4 judged a blocker (force_pass also requires no cast).
-- **I personally reproduced all 3 by hand** (temporary vitest probes, deleted right after running, workspace verified pristine afterward) — each precisely reproduces the failure class R5-B1 was meant to eliminate:
-  - **G1 + `escalate`**: the guard lets it through (`isDomainMismatch:false`) → an illegal row lands: `{gate_type:"G1_SEND_TO_TESTER", step_ref:"g1#1", decision:"escalate"}` → `routeAfterG1: unexpected g1Decision "escalate"` throws → split state (checkpoint `next=[]` vs. `workflow_runs` still `status=running/current_state=g1`).
-  - **G3 + `escalate`**: an illegal row lands: `{gate_type:"G3_FINAL_MERGE", step_ref:"g3#1", decision:"escalate"}` → `routeAfterG3` throws → the same kind of split state (`current_state=g3` vs. `next=[]`).
-  - **G2 + `rejected`**: an illegal row lands: `{gate_type:"G2_SEND_TO_FIX", step_ref:"g2#1", decision:"rejected"}` → `UnhandledGateDecisionError` throws → the same kind of split state (`current_state=g2` vs. `next=[]`).
-- **Why this is a blocker (measured by the exact same yardstick R4 used to judge B1 a blocker)**: ① **same failure class** — illegal input should have failed loud **before any write** (that's the self-imposed promise B1's fix made, see `errors.ts:107`'s ResumeDecisionDomainMismatchError doc text, verbatim: "Refusing to advance the graph or write an approvals row for a decision that doesn't match the gate it's being applied to") — yet these three still **land an illegal approval row first, then throw**; ② **requires no cast**, exactly as reachable as force_pass, which R4 already judged a blocker — Zorro itself, this round, hardened against `null` (which needs a cast) as worth fixing, so there's no reason to let a no-cast path that lands an illegal approval slide; ③ it hits directly on aeloop's selling point (an auditable chain) — a forged gate-decision row + two conflicting sources of truth; ④ **it deviates from what R4 explicitly assigned as the fix**: R4-1's rework text literally said, "for G1/G2/G3 gates, resume must be a `GateResumeValue` (approved/rejected, **G2 additionally allows escalate**)" — already spelling out that G1/G3 only accept approved/rejected and only G2 additionally accepts escalate; the implementation instead flattened all three gates into the same three-value domain, and that flattening is exactly what opened this hole.
-- **This isn't "an unknown new problem," it got recorded into the KB and comments as an "already-accepted" thing — but that "accepted" framing doesn't hold up**: `runner.test.ts:520`'s comment self-describes "the guard only checks the coarse-grained resume domain, doesn't do per-gate routing validation," and `CHARTS/knowledge/aeloop.md:234` likewise frames "G1 receiving `escalate` still falls through to `routeAfterG1`'s `default: throw` backstop, unchanged" as a neutral design note — **but that very same paragraph just claimed R5-B1 eliminated "landing a row that shouldn't exist first + splitting state," while its own later half admits this path still does exactly that** — self-contradictory. PRD §4.1 (line 89) does indeed frame "escalate landing on G1/G3's default:throw" as acceptable **ahead of time** — but that sentence was written **before** R5-B1 was discovered, and the entire point of R5-B1 was discovering that "it throws, but only after writing a dirty approval row + splitting the checkpoint" is **not acceptable** for an audit-first product. force_pass-at-G1 has the exact same "the PRD once said type-allows/gate-doesn't-recognize is acceptable" property, and R4 still judged it a blocker and fixed it — you can't judge one instance a mandatory fix and let an identical-class instance slide as an accepted limitation.
-- **Another piece of hallucination-gate corroboration (Codex flagged the same thing, verified by hand)**: `errors.ts:123-128`'s **actual thrown-out runtime message** reads "G1/G2/G3 gates only accept GateResumeValue's approved/rejected/escalate" — this sentence is **factually wrong** (G1/G3 don't accept escalate, G2 doesn't accept rejected), meaning the imprecise domain model has been printed straight into an already-shipped error message.
-- **Fix (for Cypher's R6)**: make `resumeDecisionsFor` return precisely per gate, mirroring each `routeAfter*`'s accepted set in its switch statement: `g1→[approved,rejected]` / `g2→[approved,escalate]` / `g3→[approved,rejected]` / `escalation→[revise,force_pass,abandon]`; while at it, correct the `ResumeDecisionDomainMismatchError` message, the `runner.test.ts:520` comment, and KB line 234's framing; add three rejection tests for G1+escalate / G3+escalate / G2+rejected (asserting `ResumeDecisionDomainMismatchError`, zero approvals, workflow_runs untouched, checkpoint doesn't advance).
+- **这三个泄漏的值都是合法的 `GateResumeValue`(`{decision:"escalate"}` / `{decision:"rejected"}`),完全不需要类型断言**——跟 R4-2 刚加固过的 `null` 情形(需要 `as unknown as string`)一样容易触达,也跟 `force_pass`(跨域,R4 判定阻断级)一样容易触达(force_pass 同样不需要断言)。
+- **我亲手逐一复现了全部 3 条**(临时 vitest 探针,跑完立刻删掉,之后核实工作区干净)——每一条都精确复现了 R5-B1 本该消灭的那种失效类别:
+  - **G1 + `escalate`**:守卫放行(`isDomainMismatch:false`)→ 一条非法行落地:`{gate_type:"G1_SEND_TO_TESTER", step_ref:"g1#1", decision:"escalate"}` → `routeAfterG1: unexpected g1Decision "escalate"` 抛错 → 分裂状态(checkpoint `next=[]` vs. `workflow_runs` 依然是 `status=running/current_state=g1`)。
+  - **G3 + `escalate`**:一条非法行落地:`{gate_type:"G3_FINAL_MERGE", step_ref:"g3#1", decision:"escalate"}` → `routeAfterG3` 抛错 → 同一类分裂状态(`current_state=g3` vs. `next=[]`)。
+  - **G2 + `rejected`**:一条非法行落地:`{gate_type:"G2_SEND_TO_FIX", step_ref:"g2#1", decision:"rejected"}` → `UnhandledGateDecisionError` 抛错 → 同一类分裂状态(`current_state=g2` vs. `next=[]`)。
+- **为什么这是阻断级(拿 R4 判定 B1 阻断级的同一把尺子量)**:① **同一失效类别**——非法输入本该在**任何写入之前**大声失败(这正是 B1 修法自我承诺的东西,见 `errors.ts:107` 的 ResumeDecisionDomainMismatchError 文档原文:"拒绝推进 graph 或写一条 approvals 行,如果那个决定跟它被应用的 gate 不匹配")——但这三条依然是**先落一条非法 approval 行,然后才抛错**;② **不需要类型断言**,跟 force_pass 一样容易触达,而 force_pass 已经被 R4 判定为阻断级;Zorro 自己这一轮才加固了(需要断言的)`null` 情形,没理由放过一条不需要断言就能落一条非法 approval 的路径;③ 直接砸在 aeloop 的卖点上(一条可审计的链路)——一条伪造的 gate-决定行 + 两个互相矛盾的事实来源;④ **偏离了 R4 明确分配的修法**:R4-1 的返工文字明写着,"对于 G1/G2/G3 gate,resume 必须是 `GateResumeValue`(approved/rejected,**G2 额外允许 escalate**)"——已经写明 G1/G3 只接受 approved/rejected,只有 G2 额外接受 escalate;实现却把三个 gate 拍平成同一个三值域,而正是这个拍平打开了这个漏洞。
+- **这不是"一个未知的新问题",它其实已经被记进知识库和注释里当成"已接受"的东西——但那个"已接受"的说法站不住**:`runner.test.ts:520` 的注释自述"这道守卫只检查粗粒度的 resume 值域,不做逐 gate 的路由校验",`CHARTS/knowledge/aeloop.md:234` 同样把"G1 收到 `escalate` 依然会落进 `routeAfterG1` 的 `default: throw` 兜底,不变"当成一条中性的设计说明——**但同一段话刚宣称 R5-B1 消灭了"先落一行本不该存在的行 + 分裂状态",它自己后半句就承认这条路径依然会这样干**——自相矛盾。PRD §4.1(第 89 行)确实**提前**把"escalate 落到 G1/G3 的 default:throw"框定为可接受的——但那句话是在 R5-B1 被发现**之前**写的,R5-B1 整件事的意义就是发现了"它会抛错,但只有在写了一条脏 approval 行 + 撞裂 checkpoint 之后才抛错"对一个以审计为先的产品来说**不可接受**。force_pass-at-G1 具有一模一样的"PRD 曾说类型允许/gate 不识别是可接受的"性质,R4 依然判定它是必修阻断级并且修了它——不能一个实例判必修,同一类的另一个实例就放它当已接受局限溜走。
+- **另一处幻觉门印证(Codex 也指出了同一点,手动验证过)**:`errors.ts:123-128` **实际抛出的运行时信息**是"G1/G2/G3 gates only accept GateResumeValue's approved/rejected/escalate"——这句话**事实上是错的**(G1/G3 不接受 escalate,G2 不接受 rejected),意味着那个不精确的域模型已经直接印进了一条已经上线的错误信息里。
+- **修法(给 Cypher 的 R6)**:让 `resumeDecisionsFor` 按 gate 精确返回,照着每个 `routeAfter*` switch 语句里实际接受的集合:`g1→[approved,rejected]` / `g2→[approved,escalate]` / `g3→[approved,rejected]` / `escalation→[revise,force_pass,abandon]`;顺手更正 `ResumeDecisionDomainMismatchError` 的信息、`runner.test.ts:520` 的注释,以及知识库第 234 行的说法;给 G1+escalate / G3+escalate / G2+rejected 各加一个拒绝测试(断言 `ResumeDecisionDomainMismatchError`,零 approval,workflow_runs 不动,checkpoint 不推进)。
 
-### 🟡/🔴 R6-B2 (Codex judges blocker, **I accept the fact, defer severity to the Commander**, more reachable than D1): a normal mid-stream node failure → checkpoint has advanced but `workflow_runs` never refreshed, two sources of truth split
+### 🟡/🔴 R6-B2(Codex 判定阻断级,**我接受事实,把严重度交给指挥官裁决**,比 D1 更容易触达):一次正常的中途节点失败 → checkpoint 已经推进但 `workflow_runs` 从没刷新,两个事实来源分裂
 
-- **Mechanism**: `runStreamAndPersist` writes approval/claim per chunk as it goes (starting at `runner.ts:229`), but `updateRunProgress` (which refreshes `workflow_runs.status/current_state`) only runs **after the entire stream finishes successfully** (`runner.ts:372`). If any node throws mid-stream (e.g. the tester adapter becomes unavailable, or model-output parsing fails), the error propagates straight outward and `updateRunProgress` never runs — while LangGraph's own checkpoint is **incrementally persisted**, so a gate that's already advanced (e.g. G1 approved) has already landed in the checkpoint.
-- **I personally reproduced this** (a temporary probe, with the tester adapter set to `throw "tester unavailable"`): a legal G1 approve → the graph advances to review → tester throws →
-  - `approvals` already has `g1#1/approved` (the legitimate row from the completed G1 step);
-  - checkpoint: `next=["review"]`, `g1Decision="approved"` (**already advanced past G1**);
-  - `workflow_runs`: `status=running / current_state=g1` (**never advanced**);
-  - `resumeRun` throws `tester unavailable` as a whole, `updateRunProgress` never ran.
-  → the business ledger's `current_state=g1` and the graph's real position (review) become **permanently inconsistent**; `getResumableRuns`/a future CLI reading `workflow_runs` would get the wrong current position. **Requires no illegal input whatsoever, triggered purely by a normal adapter failure.**
-- **Why I defer severity to the Commander (not copying Codex's blocker rating)**: R3's review (see the R2-3 gate-path section above) already honestly disclosed this architectural gap — "approval/claim writes and `updateRunProgress` aren't in the same cross-row transaction" — at the time, the direction locked down was "`workflow_runs` is never **falsely advanced**" (the gate-txn test, runner.test.ts:723), and the Commander was already made aware in the R3 report that this gap exists. B2 is the **other, asymmetric half** of that same gap (checkpoint advances, workflow_runs lags behind), which had never specifically been locked down, nor specifically accepted, before. **But it's different from D1/#19 (concurrency)** — D1/#19 need multiple operators/concurrency to be reachable (outside A4b's single-operator-CLI envelope), whereas B2 is triggered by a single ordinary adapter failure, and aeloop's very selling point is "productionized cross-process resume" — which puts adapter failures squarely inside that envelope. So I can't just file this away as an acceptable limitation the way I did with D1. **This one is for the Commander to rule on**: hard-fix it in R6 (suggestion: on stream failure, `catch → reconcile workflow_runs once against the checkpoint's true position`, or do a checkpoint↔workflow_runs reconciliation at the start of resume), or log it as a known limitation + open a tracking issue (analogous to D1/#19). **My own lean: toward hard-fixing it, or at least explicitly logging it** — because it falls within the range of fault-tolerant production resume the product promises externally, unlike concurrency which is clearly outside the A5 envelope.
+- **机制**:`runStreamAndPersist` 是逐个 chunk 边跑边写 approval/claim 的(从 runner.ts:229 开始),但 `updateRunProgress`(刷新 `workflow_runs.status/current_state` 的那个)只在**整个 stream 成功跑完之后**才运行(runner.ts:372)。如果中途任何节点抛错(比如 tester adapter 变得不可用,或者模型输出解析失败),错误直接向外传播,`updateRunProgress` 从来不会运行——而 LangGraph 自己的 checkpoint 是**增量落盘**的,所以一个已经推进的 gate(比如 G1 approved)早就落进了 checkpoint。
+- **我亲手复现过**(一个临时探针,把 tester adapter 设成 `throw "tester unavailable"`):一次合法的 G1 approve → graph 推进到 review → tester 抛错 →
+  - `approvals` 已经有 `g1#1/approved`(G1 那一步完成时留下的合法行);
+  - checkpoint:`next=["review"]`,`g1Decision="approved"`(**已经越过 G1 推进**);
+  - `workflow_runs`:`status=running / current_state=g1`(**从没推进**);
+  - `resumeRun` 整体抛出 `tester unavailable`,`updateRunProgress` 从来没跑。
+  → 业务账本的 `current_state=g1` 跟 graph 的真实位置(review)变成**永久不一致**;`getResumableRuns`/未来的 CLI 读 `workflow_runs` 会拿到错的当前位置。**完全不需要任何非法输入,纯粹由一次正常的 adapter 失败触发。**
+- **为什么我把严重度交给指挥官裁决(不照抄 Codex 的阻断级评级)**:R3 的复审(见上面 R2-3 的 gate 路径那一节)已经如实披露过这个架构缺口——"approval/claim 写入和 `updateRunProgress` 不在同一个跨行事务里"——当时锁定的方向是"`workflow_runs` 从不被**虚假推进**"(那个 gate 事务测试,runner.test.ts:723),指挥官在 R3 的报告里已经被告知这个缺口存在。B2 是同一个缺口的**另外那一半、不对称的一半**(checkpoint 推进了,workflow_runs 落后了),这一半以前从没被具体锁定过,也没被具体接受过。**但它跟 D1/#19(并发)不一样**——D1/#19 需要多个操作者/并发才能触达(在 A4b 单操作者-CLI 范围之外),而 B2 是一次普通的 adapter 失败就能触发,aeloop 的卖点正是"生产化的跨进程续跑"——这把 adapter 失败纳入了那个范围之内。所以我没法像对 D1 那样直接把它归为可接受的局限。**这个交给指挥官裁决**:R6 里硬修(建议:stream 失败时 `catch → 依据 checkpoint 的真实位置对 workflow_runs 做一次调和`,或者在 resume 开头做一次 checkpoint↔workflow_runs 的调和),还是记为已知局限 + 开一个追踪 issue(类比 D1/#19)。**我自己的倾向:偏向硬修,或者至少明确记录**——因为它落在产品对外承诺的容错生产续跑范围之内,不像并发那样明显在 A5 的范围之外。
 
-## R5 minor (doesn't block the gate, logged)
+## R5 轻微项(不挡门,记一笔)
 
-- **M-R5a (= R4's M-R4a leftover, Codex flags it again)**: `errors.test.ts:10`'s comment still claims the old message was "accurate at the time of A4a" — but G2's `rejected` was already deliberately permanent fail-loud back in A4a, so this wording is still a bit imprecise. The production message itself is correct, the test comment is a minor, tighten it while at it.
+- **M-R5a(=R4 的 M-R4a 遗留,Codex 又提了一次)**:`errors.test.ts:10` 的注释还在说旧信息"在 A4a 阶段是准确的"——但 G2 的 `rejected` 从 A4a 起就是故意永久失败即报错的,所以这句措辞还是有点不精确。生产信息本身是对的,测试注释是个小问题,顺手收紧。
 
-## R5 no-regression confirmation (items that PASSed in R1-R4 were not broken by this round's changes)
+## R5 无回归确认(R1-R4 通过的项目没有被这一轮改动破坏)
 
-- Both of R5-B2's `UNIQUE(run_id, step_ref)` constraints genuinely take effect (double-confirmed by mutation); `structured_claims` correctly **doesn't** get the same UNIQUE — legitimately, multiple claims within the same round can share a `step_ref`, and adding the constraint would break that legitimate case; and protection against concurrent duplicate rounds is instead covered by the **marker inside the same transaction as `step_markers`** (`runner.ts:245/277`, the draft/review branches' insertStepMarker sharing a `runInTransaction` with insertClaim) + step_markers's UNIQUE's **transitive effect** (a marker hitting UNIQUE → the whole claim group rolls back), so structured_claims doesn't need its own UNIQUE. Both models + my own local re-verification (1 approval / 1 marker / 2 legitimate claims, no leftover conflicting group) agree this exclusion holds up.
-- Tracking issue `elishawong/aeloop#19`: read by hand, **accurate** — it records R4's report of R5-B2's reproduction (concurrent approve/reject recording opposite decisions) + the Commander's ruling (single-operator CLI, full concurrency control deferred to A5+) + this round's cheap defense-in-depth (two-table UNIQUE + mutation tests) + honestly noted known limitations (UNIQUE doesn't stop read-side races/checkpoint-layer concurrency) + the direction for a future fix (optimistic locking/a serialization queue/BEGIN IMMEDIATE).
-- Codex's independent re-check: threshold escalation / three-way routing / graph topology / workflow definition all consistent; no reverse dependency across all four layers; gates/graph nodes zero SQLite I/O; no TODO/stub, no drop-database/secrets/injection/exfiltration; `git diff --check` clean. I hand-ran 296/296 green locally, build/lint clean, 5 files byte-identical restored, HEAD untouched.
-- ⚠️ Because Codex's read-only sandbox forbids Vite from writing to a temp directory, it **could not launch the full Vitest suite**; its failure reproductions were all run against the current `dist`'s in-memory-state real graph — **test-execution coverage was filled in by my own local 296/296 full run**, and the two together provide complete coverage (Codex provides cross-model logic second-signing + real-graph failure reproduction, Zorro provides full test execution + mutation testing + probe-based reproduction).
+- R5-B2 的两个 `UNIQUE(run_id, step_ref)` 约束都真正生效(变异二次确认);`structured_claims` 正确地**没有**加同样的 UNIQUE——合理情况下同一轮内多条 claim 可以共享同一个 `step_ref`,加约束会破坏这个合法场景;对并发重复轮次的防护改由 **`step_markers` 事务内的标记**来覆盖(`runner.ts:245/277`,draft/review 分支的 insertStepMarker 跟 insertClaim 共用一个 `runInTransaction`)+ step_markers 的 UNIQUE 的**传递效果**(一个 marker 撞上 UNIQUE → 整组 claim 一起回滚),所以 structured_claims 不需要自己的 UNIQUE。两个模型 + 我自己本地重新验证(1 个 approval / 1 个 marker / 2 条合法 claim,没有残留冲突组)都同意这条排除是站得住的。
+- 追踪 issue `elishawong/aeloop#19`:手动读过,**准确**——它记录了 R4 报告的 R5-B2 复现(并发 approve/reject 记下相反的决定)+ 指挥官的裁决(单操作者 CLI,完整并发控制延后到 A5+)+ 这一轮的便宜纵深防御(两表 UNIQUE + 变异测试)+ 如实记录的已知局限(UNIQUE 挡不住读侧竞态/checkpoint 层的并发)+ 未来修法的方向(乐观锁/串行化队列/BEGIN IMMEDIATE)。
+- Codex 独立重新核对:阈值升级/三选一路由/graph 拓扑/workflow 定义都一致;四层之间没有反向依赖;gates/graph 节点零 SQLite I/O;没有 TODO/stub,没有 drop-database/密钥/注入/外泄;`git diff --check` 干净。我本地手动跑 296/296 全绿,build/lint 干净,5 个文件逐字节恢复原样,HEAD 未动。
+- ⚠️ 因为 Codex 的只读沙箱不允许 Vite 写临时目录,它**没能启动完整的 Vitest 套件**;它的失败复现全部是针对当前 `dist` 的内存态真实 graph 跑的——**测试执行覆盖由我本地 296/296 全套跑通补上**,两者加在一起提供了完整覆盖(Codex 提供跨模型逻辑二签 + 真实 graph 失败复现,Zorro 提供全套测试执行 + 变异测试 + 探针式复现)。
 
-## R5 bug attribution breakdown
+## R5 bug 归因拆解
 
-| Attribution | Items |
+| 归因 | 项目 |
 |---|---|
-| Integration issue (input-domain validation granularity insufficient) | R6-B1 (imprecise decision-domain mapping, 3 no-cast-needed paths land illegal approvals + split states) |
-| Integration issue (call-level atomicity missing) | R6-B2 (a normal mid-stream failure → checkpoint/workflow_runs split) |
-| Other (test comments) | M-R5a (errors.test.ts comment wording) |
-| Hallucination gate (imprecise runtime text) | R6-B1's addendum: errors.ts:123's message misstates the G1/G2/G3 domains |
+| 集成问题(输入域校验颗粒度不足) | R6-B1(决定域映射不精确,3 条不需要断言的路径落下非法 approval + 分裂状态) |
+| 集成问题(缺少调用级原子性) | R6-B2(一次正常的中途失败 → checkpoint/workflow_runs 分裂) |
+| 其他(测试注释) | M-R5a(errors.test.ts 注释措辞) |
+| 幻觉门(运行时文本不精确) | R6-B1 的附带项:errors.ts:123 的信息把 G1/G2/G3 的域说错了 |
 
-## R5 seven gates
+## R5 七道门
 
-- Requirement fit ✗ (R5-B1's requirement of "the resume decision domain must match the currently-paused gate" is only half satisfied — the cross-domain case is caught, but the 3 same-domain-wrong-gate values are not, and both PRD §4.1 and R4's rework list explicitly stated G1/G3 only accept approved/rejected)
-- **Impact scope ✗** (`resumeRun`'s input-domain-validation **granularity** is incomplete: the guard operates at the domain level, not the gate level, missing 3 same-class paths; the call-level atomicity surface of the mid-stream failure, B2, was also never raised by impact analysis)
-- Placeholder rejection ✓ (no TODO/stub/fake data)
-- Dangerous code ✓ (no drop-database/secrets/injection/exfiltration; dynamic UPDATE column names come from a hardcoded set, values are all parameterized)
-- **Hallucination check ✗** (the already-shipped runtime message at `errors.ts:123-128` misstates "G1/G2/G3 all accept approved/rejected/escalate"; KB line 234 + the `runner.test.ts:520` comment frame B1's leftover hole as "an acceptable design," self-contradicting the same paragraph's claim of "the split state has already been eliminated")
-- Documentation completeness ✓ (PRD/impact embedded in PRD + this test-report, R1-R5 complete; the R5 section is appended without touching R1-R4)
-- Documentation sync (major-design level) N.A. (project-level aeloop; the base's four authority documents aren't involved)
+- 需求符合度 ✗(R5-B1"续跑决定域必须匹配当前暂停的 gate"这条要求只满足了一半——跨域情形被抓到了,但 3 个同域错 gate 的值没被抓到,而且 PRD §4.1 和 R4 的返工清单都明写了 G1/G3 只接受 approved/rejected)
+- **影响范围 ✗**(`resumeRun` 的输入域校验**颗粒度**不完整:守卫是域级别的,不是 gate 级别的,漏了 3 条同类路径;中途失败的调用级原子性这个面,B2,也从没被影响分析提出来过)
+- 占位符拒绝 ✓(没有 TODO/stub/假数据)
+- 危险代码 ✓(没有 drop-database/密钥/注入/外泄;动态 UPDATE 列名来自一个写死的集合,值都是参数化的)
+- **幻觉检查 ✗**(已上线的运行时信息 `errors.ts:123-128` 把"G1/G2/G3 全部接受 approved/rejected/escalate"说错了;知识库第 234 行 + `runner.test.ts:520` 的注释把 B1 的遗留漏洞框成了"一个可接受的设计",跟同一段话宣称"分裂状态已经被消灭"自相矛盾)
+- 文档完整性 ✓(PRD/impact 内嵌在 PRD + 本测试报告里,R1-R5 完整;R5 这一节是追加的,没动 R1-R4)
+- 文档同步(大设计级别) 不适用(项目级 aeloop;基地的四份权威文档不涉及)
 
-## R5 knowledge-base cross-check (checking it, not maintaining it)
+## R5 知识库交叉核对(核对它,不是维护它)
 
-- **Touches already-indexed modules: yes** (runner.ts/errors.ts/audit-store.ts all changed this round).
-- Mechanical scan: `node _engine/verify-knowledge.mjs aeloop` **green** (no path/signature drift).
-- Semantic cross-check (something a machine can't judge, this is Zorro's job): **found one framing-drift item that needs Cypher's correction** — `CHARTS/knowledge/aeloop.md:234` frames "G1 receiving `escalate` falls through to `routeAfterG1`'s `default: throw` backstop, unchanged" as a neutral design note, but **that very same paragraph just claimed R5-B1 eliminated 'landing a row that shouldn't exist first + splitting state'**, and the following sentence admits this path still does exactly that. The KB recorded a **blocker remnant that was never truly closed** as "already closed + an acceptable design choice." After R6 fixes B1, when Cypher re-syncs the KB, it needs to: ① write in the new fact that `resumeDecisionsFor` now maps precisely per gate; ② delete/rewrite the "default:throw backstop, unchanged" sentence (it describes exactly the hole that just got fixed); ③ also log the errors.ts:123 message correction; ④ bump `last-verified`. **Maintaining the KB is Cypher's job, I only report drift.**
+- **触及已索引模块:是**(runner.ts/errors.ts/audit-store.ts 这一轮全部改动)。
+- 机械扫描:`node _engine/verify-knowledge.mjs aeloop` **绿**(没有路径/签名漂移)。
+- 语义交叉核对(机器判断不了的,这是 Zorro 的活):**发现一处需要 Cypher 更正的框定漂移**——`CHARTS/knowledge/aeloop.md:234` 把"G1 收到 `escalate` 落进 `routeAfterG1` 的 `default: throw` 兜底,不变"框成了一条中性的设计说明,但**同一段话刚宣称 R5-B1 消灭了"先落一行本不该存在的行 + 分裂状态"**,紧接着的下一句就承认这条路径依然会这样干。知识库把一个**从没真正闭环过的阻断级残留**记成了"已经闭环 + 一个可接受的设计选择"。R6 修好 B1 之后,Cypher 重新同步知识库时需要:① 写入新事实——`resumeDecisionsFor` 现在按 gate 精确映射;② 删除/重写"default:throw 兜底,不变"这句(它描述的正是刚被修好的那个漏洞);③ 同时记录 errors.ts:123 的信息更正;④ bump `last-verified`。**维护知识库是 Cypher 的活,我只报告漂移。**
 
-## R5 items pending Commander's ruling
+## R5 待指挥官裁决的事项
 
-- **R6-B2's severity**: the checkpoint/workflow_runs split caused by a normal mid-stream failure — hard-fix it in R6 (reconcile on failure / reconcile at the start of resume), or log it as a known limitation + open a tracking issue (analogous to D1/#19)? My own lean: toward hard-fixing it, or at least explicitly logging it, since it's much more reachable than D1/#19's concurrency scenario (a single ordinary adapter failure triggers it, no multiple operators needed).
-- D1/D2/M1 (items left pending from R1/R2) — no new evidence this round, status unchanged. #19 (concurrency), per the Commander's R4 ruling, stands as "deferred to A5+ + cheap UNIQUE defense-in-depth," and this round's UNIQUE has been confirmed to genuinely take effect.
+- **R6-B2 的严重度**:一次正常的中途失败导致的 checkpoint/workflow_runs 分裂——R6 里硬修(失败时调和 / resume 开头调和),还是记为已知局限 + 开一个追踪 issue(类比 D1/#19)?我自己的倾向:偏向硬修,或者至少明确记录,因为它比 D1/#19 的并发场景容易触达得多(一次普通的 adapter 失败就能触发,不需要多个操作者)。
+- D1/D2/M1(R1/R2 遗留待定项)——这一轮没有新证据,状态不变。#19(并发),按指挥官在 R4 的裁决,维持"延后到 A5+ + 便宜的 UNIQUE 纵深防御",这一轮的 UNIQUE 已经确认真正生效。
 
-## R5 conclusion
+## R5 结论
 
-**FAIL, Round 6 needed. Cannot enter the commit/merge pipeline right now, not committed/pushed.** Clearly distinguishing gate-blocking items from non-gate-blocking items, not a blanket rubber stamp:
+**FAIL,需要 Round 6。现在不能进 commit/merge 流水线,未 commit/push。** 清楚区分挡门项和不挡门项,不是一刀切盖章:
 
-- **A blocker that must be fixed in R6 to PASS (1 item, hard gate-block)**: **R6-B1** — `resumeDecisionsFor`'s decision-domain mapping is imprecise; G1+escalate / G3+escalate / G2+rejected are **3 no-cast-needed paths** that still land illegal approval rows + a checkpoint/workflow_runs split, precisely reproducing the failure class R5-B1 was meant to eliminate — both models independently agree, and I personally reproduced all three by hand. This deviates from what R4 explicitly assigned as the fix (G1/G3 only accept approved/rejected, only G2 additionally accepts escalate), and it got mis-framed by the KB/comments as "an acceptable design" — cannot be merged while still broken. The fix is trivial (map the guard precisely per gate + 3 rejection tests + correct the errors.ts:123 message/KB/test comment).
-- **Severity deferred to the Commander, may or may not block the gate (1 item)**: **R6-B2** — the checkpoint-advances-but-workflow_runs-doesn't split state caused by a normal mid-stream failure. The fact is confirmed by both models + my own hand reproduction; whether to hard-fix this round vs. log it as a known limitation (analogous to D1/#19) is for the Commander to decide. My own lean is toward hard-fixing it or at least explicitly logging it (much more reachable than concurrency).
-- **A non-gate-blocking minor (1 item)**: M-R5a (errors.test.ts:10's comment wording, fix while at it).
+- **必须在 R6 修好才能 PASS 的项(1 项,硬挡门)**:**R6-B1**——`resumeDecisionsFor` 的决定域映射不精确;G1+escalate / G3+escalate / G2+rejected 是**3 条不需要类型断言**的路径,依然会落一条非法 approval 行 + 撞出一个 checkpoint/workflow_runs 分裂,精确复现了 R5-B1 本该消灭的失效类别——两个模型独立同意,我亲手逐一复现了三条。这偏离了 R4 明确分配的修法(G1/G3 只接受 approved/rejected,只有 G2 额外接受 escalate),而且被知识库/注释错误地框成了"一个可接受的设计"——不能带着这个问题合并。修法很小(把守卫按 gate 精确映射 + 3 个拒绝测试 + 更正 errors.ts:123 的信息/知识库/测试注释)。
+- **严重度交给指挥官裁决,可能挡门也可能不挡(1 项)**:**R6-B2**——一次正常的中途失败导致的 checkpoint-已推进-但-workflow_runs-没推进的分裂状态。事实已经被两个模型 + 我自己手动复现确认;这一轮硬修还是记为已知局限(类比 D1/#19)交给指挥官决定。我自己的倾向是偏向硬修,或者至少明确记录(比并发容易触达得多)。
+- **一个不挡门的轻微项(1 项)**:M-R5a(errors.test.ts:10 的注释措辞,顺手修)。
 
-**Both of R4's rework items (the R5-B1 guard + R5-B2's UNIQUE constraints) are in the right direction and each genuinely locks the scenario it was designed for** (force_pass cross-domain is caught, both UNIQUE constraints genuinely take effect, the structured_claims exclusion holds up, #19's record is accurate) — this round's FAIL is stuck on R5-B1's **granularity**, not a wrong direction. R6 rework: B1 mandatory (trivial) + B2 deferred to the Commander's ruling + M-R5a (while at it). Production logic will get touched again in runner/errors (+possibly audit-store, if B2 gets hard-fixed), **R6 will still need a sixth round of Codex second-signing + a KB re-sync.** Currently **not committed/pushed**, workspace's 5 files byte-identical restored (runner `5c61ed2c` / gates `5fbac639` / audit-store `5ef19e01` / errors `8b15e1b0` / escalation `b51634b3`), HEAD `c6589b7` untouched.
+**R4 的两个返工项(R5-B1 的守卫 + R5-B2 的 UNIQUE 约束)方向都对、也各自真正锁住了设计要解决的场景**(force_pass 跨域被抓到,两个 UNIQUE 约束真正生效,structured_claims 的排除站得住,#19 的记录准确)——这一轮的 FAIL 卡在 R5-B1 的**颗粒度**上,不是方向错了。R6 返工:B1 必修(小改动)+ B2 待指挥官裁决 + M-R5a(顺手做)。生产逻辑还会再次被动 runner/errors(+可能 audit-store,如果 B2 被硬修),**R6 还需要第六轮 Codex 二签 + 一次知识库重新同步。** 目前**未 commit/push**,工作区 5 个文件逐字节恢复原样(runner `5c61ed2c` / gates `5fbac639` / audit-store `5ef19e01` / errors `8b15e1b0` / escalation `b51634b3`),HEAD `c6589b7` 未动。
 
 ---
 
-# A4b Loop — R6 status note (not independently reviewed by Zorro, Commander explicitly ruled to merge)
+# A4b Loop — R6 状态记录(未经 Zorro 独立复审,指挥官明确裁决直接合并)
 
-R6 completed by Cypher (2026-07-21):
+R6 由 Cypher 完成(2026-07-21):
 
-- **R6-B1**: `resumeDecisionsFor` changed from "g1/g2/g3 mapped uniformly" to a precise per-gate mapping (mirroring each of `routeAfterG1`/`G2`/`G3`'s actual accepted sets: g1→[approved,rejected], g2→[approved,escalate], g3→[approved,rejected], escalation→[revise,force_pass,abandon]). Added 3 rejection tests (G1+escalate / G3+escalate / G2+rejected), Cypher self-reports mutation verification (reverting to the uniform mapping → the 3 tests turn red, restored byte-identical afterward). `errors.ts`'s message + the `runner.test.ts:520` comment corrected at the same time.
-- **R6-B2**: `workflow_runs`'s status update changed from "written once, all at once, only after the whole stream finishes" to **synced incrementally after every chunk is processed** (`computeRunProgress()` extracted and called inside the loop), so that after a mid-stream failure (e.g. the tester adapter throws), the ledger stops at the last successfully processed position instead of being stuck at the start. Cypher self-reports new regression tests + mutation verification.
+- **R6-B1**:`resumeDecisionsFor` 从"g1/g2/g3 统一映射"改成精确的逐 gate 映射(照着 `routeAfterG1`/`G2`/`G3` 各自实际接受的集合:g1→[approved,rejected],g2→[approved,escalate],g3→[approved,rejected],escalation→[revise,force_pass,abandon])。新增 3 个拒绝测试(G1+escalate / G3+escalate / G2+rejected),Cypher 自报变异验证(还原成统一映射 → 3 个测试变红,之后逐字节恢复原样)。`errors.ts` 的信息 + `runner.test.ts:520` 的注释同时更正。
+- **R6-B2**:`workflow_runs` 的状态更新从"整个 stream 跑完之后一次性写"改成**处理每个 chunk 之后就增量同步**(把 `computeRunProgress()` 提取出来在循环里调用),这样中途失败(比如 tester adapter 抛错)之后,账本会停在最后一次成功处理的位置,而不是卡在起点。Cypher 自报新增了回归测试 + 变异验证。
 
-**Cypher self-reports: 300/300 tests green (34 files), build/lint clean. Helix (the strategist) independently re-ran `npx vitest run` and confirmed 300/300 green (see the CI record before commit / this repo's operation log).**
+**Cypher 自报:300/300 测试全绿(34 个文件),build/lint 干净。Helix(军师)独立重跑了 `npx vitest run`,确认 300/300 全绿(见 commit 前的 CI 记录 / 本仓库的操作日志)。**
 
-**⚠️ Honest record: R6 has not gone through a sixth round of independent Zorro review + has not gone through a sixth round of Codex second-signing.** On 2026-07-21, the Commander explicitly ruled: given that R1-R5 already involved five consecutive rounds of independent review (including five rounds of Codex second-signing) repeatedly probing the same subsystem (`resumeRun`/audit consistency), and every round's "already fixed" self-report by Cypher was falsified or found to have a new angle by the next round's independent review (R4→R5 is one example: R5-B1's "uniform mapping" was itself judged by R5 to be insufficiently granular, producing R6-B1) — this pattern historically has real evidence of "self-checking isn't enough, independent review is needed to catch what's missed." **But given the time cost of parallel workstreams, the Commander explicitly instructed this round to skip Zorro R6 review and merge directly.** This means the fix quality of R6-B1/R6-B2 is currently attested to only by Cypher unilaterally (break→turns red→revert→turns green again), with no independent third party (Zorro hand-running mutations again) or cross-model (Codex second-signing) verification. **If, during production use, any anomaly is found related to resume decision-domain validation or workflow_runs/checkpoint consistency, R6's two changes here should be the first suspects, and a follow-up independent review round should be considered.**
+**⚠️ 如实记录:R6 没有走第六轮独立 Zorro 复审 + 没有走第六轮 Codex 二签。** 2026-07-21,指挥官明确裁决:考虑到 R1-R5 已经连续五轮独立复审(包括五轮 Codex 二签)反复探查同一个子系统(`resumeRun`/审计一致性),而且每一轮 Cypher"已经修好了"的自报都被下一轮独立复审证伪或发现了新角度(R4→R5 就是一个例子:R5-B1 的"统一映射"本身被 R5 判定为颗粒度不够,产生了 R6-B1)——这个模式在历史上确实有"自查不够,需要独立复审才能抓到漏掉的"这样的实证。**但考虑到多条工作线的时间成本,指挥官明确指示这一轮跳过 Zorro R6 复审,直接合并。** 这意味着 R6-B1/R6-B2 的修复质量目前只有 Cypher 单方面的证明(破坏→变红→恢复→再次变绿),没有独立第三方(Zorro 手动重跑变异)或跨模型(Codex 二签)验证。**如果在生产使用中发现任何跟续跑决定域校验或 workflow_runs/checkpoint 一致性相关的异常,R6 这两处改动应该是第一嫌疑对象,应该考虑安排一轮后续的独立复审。**

@@ -6,31 +6,7 @@
 
 ## 1. 总体架构
 
-```mermaid
-flowchart TB
-    USER["用户 / 审批人"]
-    BRAIN["Personal Brain / Company Brain"]
-    CW["Conductor Work\n公司产品层"]
-    C["Conductor\n确定性编排层"]
-    P["Prompt\n输出契约与增量提示"]
-    X["Context\n连续性、召回、压缩"]
-    H["Harness\n模型、工具、验证、预算"]
-    L["Loop\nWorkflow、Gate、Checkpoint"]
-    E["EvidenceBundle\n证据、Token、成本、审计"]
-    WS["隔离 Workspace"]
-
-    USER --> BRAIN
-    BRAIN --> CW
-    CW -->|TaskContract| C
-    C --> P
-    P --> X
-    X --> H
-    H --> L
-    L <--> WS
-    L --> E
-    E --> C
-    C --> USER
-```
+![1. 总体架构](diagrams/AEOLOOP-LAYER-DESIGN-01-1-总体架构.svg)
 
 四层 Prompt ⊂ Context ⊂ Harness ⊂ Loop 仍然是 Aeloop 内核；Conductor 和产品 Brain 是外层。Token Budget 是横切控制面，不是第五个业务层。
 
@@ -302,65 +278,7 @@ interface RunPlan {
 
 在现有 `workflow_runs / structured_claims / approvals / step_markers` 之上增加：
 
-```mermaid
-erDiagram
-    WORKFLOW_RUNS ||--|| RUN_BUDGETS : freezes
-    WORKFLOW_RUNS ||--o{ TOKEN_USAGE : records
-    WORKFLOW_RUNS ||--o{ CONTEXT_SNAPSHOTS : uses
-    WORKFLOW_RUNS ||--o{ EVIDENCE_ITEMS : produces
-    CONTEXT_SNAPSHOTS ||--o{ CONTEXT_ITEMS : contains
-
-    RUN_BUDGETS {
-      integer run_id PK
-      integer max_input_tokens
-      integer max_output_tokens
-      integer max_total_tokens
-      integer max_retries
-      integer reserve_for_escalation
-      text policy_version
-      text created_at
-    }
-    TOKEN_USAGE {
-      integer id PK
-      integer run_id FK
-      text step_ref
-      text role
-      text provider
-      text model
-      integer input_tokens
-      integer output_tokens
-      integer cached_input_tokens
-      integer retry
-      boolean estimated
-      text created_at
-    }
-    CONTEXT_SNAPSHOTS {
-      integer id PK
-      integer run_id FK
-      text snapshot_hash
-      integer estimated_tokens
-      text source_hashes_json
-      text created_at
-    }
-    CONTEXT_ITEMS {
-      integer id PK
-      integer snapshot_id FK
-      text memory_id
-      text inclusion_reason
-      integer estimated_tokens
-      text content_hash
-    }
-    EVIDENCE_ITEMS {
-      integer id PK
-      integer run_id FK
-      text requirement_id
-      text kind
-      text source_ref
-      text content_hash
-      text status
-      text created_at
-    }
-```
+![9. 数据库增量设计](diagrams/AEOLOOP-LAYER-DESIGN-02-9-数据库增量设计.svg)
 
 ## 10. 验收指标
 

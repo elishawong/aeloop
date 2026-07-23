@@ -1,32 +1,32 @@
-# PRD — aeloop Open-Sourcing: Repo-Wide Chinese→English Translation + Internal Governance File Stripping
+# PRD — aeloop 开源化:全仓中译英 + 内部治理文件剥离
 
-> Skeleton source: `docs/feature/a4b-loop/PRD.md` (structure/phrasing style copied verbatim, adapted for the "translation + cleanup" nature of this task — this PRD is not new feature development, so batches are split by directory/file type, not by code module).
-> Anti-hallucination: `[?]` = unverified by me / needs Commander confirmation; no invented interfaces/versions/word counts. Every number in this PRD (file counts, Chinese character counts, brand-name occurrence counts) comes from actually running `rg`/`wc` against the real files in this worktree, not copied from the issue's original (possibly stale) numbers; wherever there is a discrepancy with issue #17's original text, §1 lists the difference item by item — it does not quietly go with the old numbers.
+> 骨架来源:`docs/feature/a4b-loop/PRD.md`(结构/措辞风格逐字沿用,针对本任务"翻译 + 清理"的性质做了调整——这份 PRD 不是新功能开发,所以批次按目录/文件类型拆分,不按代码模块拆分)。
+> 防幻觉:`[?]` = 我未验证 / 需指挥官确认;不编造接口/版本/字数。这份 PRD 里的每一个数字(文件数、中文字符数、品牌名出现次数)都来自对这个 worktree 里真实文件实际跑 `rg`/`wc` 得出的结果,不是照抄 issue 原文里(可能已过期)的数字;凡是和 issue #17 原文有出入的地方,§1 逐条列出差异——不悄悄沿用旧数字。
 
-- **Project**: aeloop (`elishawong/aeloop`, private repo, about to be open-sourced)
-- **Branch**: `feature/issue-17-opensource` (an independent worktree has already been cut from the latest `origin/main` `0343111`: `/Users/elishawong/code/github/elishawong/aeloop-worktrees/issue-17-opensource`)
-- **Priority**: P1
-- **Status**: Awaiting Commander confirmation (**PRD only — no file has actually been translated/deleted yet**)
-- **Last updated**: 2026-07-21
-- **Related issue**: [elishawong/aeloop#17](https://github.com/elishawong/aeloop/issues/17) (scope authority, settled by the Commander on 2026-07-21)
-- **Prerequisite**: A4b (#13) has already been merged into main (PR#20, commit `0343111`) — the dependency is cleared, work can start.
-- **Design authority**: aeloop#17's original text (sole source of scope/acceptance criteria) + this PRD's §1 real-repo-state verification
-
----
-
-## 0. What This PRD Is / Isn't
-
-- **Is**: Turns #17's already-settled scope into an executable, batch-split task list, and re-verifies #17's original numbers/file list against the real repo state, recording any differences.
-- **Isn't**: Does not re-brainstorm scope (#17 has already been settled with the Commander); does not do any actual translation/deletion at this step (see instruction item 4).
-- This task is by nature "mechanical translation + cleanup + a small amount of editorial judgment," not feature development, so batches are split by **directory/file type**, not by code module — this keeps each batch's change surface narrow, makes `git diff` easy to review, and lets `pnpm test` be run frequently to verify zero logic drift.
+- **项目**:aeloop(`elishawong/aeloop`,私有仓库,即将开源)
+- **分支**:`feature/issue-17-opensource`(已经从最新的 `origin/main` `0343111` 切出一个独立 worktree:`/Users/elishawong/code/github/elishawong/aeloop-worktrees/issue-17-opensource`)
+- **优先级**:P1
+- **状态**:等指挥官确认(**只有 PRD——还没有任何文件被真正翻译/删除**)
+- **最后更新**:2026-07-21
+- **关联 issue**:[elishawong/aeloop#17](https://github.com/elishawong/aeloop/issues/17)(范围权威,2026-07-21 指挥官已定盘)
+- **前置条件**:A4b(#13)已经合并进 main(PR#20,commit `0343111`)——依赖已清除,可以开工。
+- **设计权威**:aeloop#17 原文(范围/验收标准的唯一来源)+ 这份 PRD §1 对真实仓库现状的核实
 
 ---
 
-## 1. Real Repo State Verification (Against #17's Original Text, Recording Differences)
+## 0. 这份 PRD 是什么 / 不是什么
 
-### 1.1 Verification Method
+- **是什么**:把 #17 已经定盘的范围,变成一份可执行、按批次拆分的任务清单,并对照真实仓库现状重新核实 #17 原文里的数字/文件清单,记录任何差异。
+- **不是什么**:不重新头脑风暴范围(#17 已经和指挥官定盘);这一步不做任何真正的翻译/删除(见指令第 4 条)。
+- 这项任务本质上是"机械翻译 + 清理 + 少量编辑判断",不是功能开发,所以批次按**目录/文件类型**拆分,不按代码模块拆分——这样能让每个批次的改动面窄、`git diff` 好审、`pnpm test` 能频繁跑起来验证零逻辑漂移。
 
-In this worktree (`origin/main` HEAD `0343111`, including `audit-store.ts`/`runner.ts`/`escalation.ts` and other files added after the A4b merge), the following commands were actually run, `ripgrep 15.1.0`:
+---
+
+## 1. 真实仓库现状核实(对照 #17 原文,记录差异)
+
+### 1.1 核实方法
+
+在这个 worktree 里(`origin/main` HEAD `0343111`,包含 A4b 合并之后新增的 `audit-store.ts`/`runner.ts`/`escalation.ts` 等文件),实际跑了以下命令,`ripgrep 15.1.0`:
 
 ```
 rg -Pl '[\p{Han}]' <path>     # find files containing Chinese characters
@@ -34,192 +34,193 @@ rg -o -P '[\p{Han}]' <path> | wc -l   # count total Chinese characters (not "wor
 rg -io 'helix|verity|cypher|zorro' <path> | wc -l   # brand-name occurrence count (case-insensitive, substring match)
 ```
 
-### 1.2 Results Table
+### 1.2 结果表
 
-| Item | #17's original description | Measured result | Difference |
+| 项目 | #17 原文描述 | 实测结果 | 差异 |
 |---|---|---|---|
-| Number of files in src/ containing Chinese comments | "~40 files" | **43 files** (including comments in the body of 6 `.e2e.test.ts`/`.test.ts` test files, 2 `.mjs` fixtures) | Roughly matches, slightly higher; #17's "~40" was an estimate, measured is 43, within a reasonable margin |
-| Total Chinese character count in src/ | "~860 characters" | **874 Chinese characters** | Roughly matches (the new Chinese comments brought in by A4b merge's changes to `audit-store.ts`/`runner.ts`/`escalation.ts`/`gates.ts` add up to a very small net increase compared to the old estimate #17 was written against, indicating that during A4a→A4b most newly-added code's comments were already English, with only a handful of spots still embedding Chinese — see §1.3) |
-| Total Chinese character count in docs/feature/* | "~47K characters" | **62,712 Chinese characters** | **Noticeably higher, exceeding by about 33%**. Reason: #17's number was estimated **before** the A4b merge; A4b added two complete documents, `docs/feature/a4b-loop/PRD.md` + `test-report.md` (the full record of A4b's build + two rounds of Zorro review), which is not a small volume. Batch B's workload is planned against the measured number, not #17's old number. |
-| docs/{ROADMAP,PROGRESS,BACKLOG,README}.md | No word count given separately | **1,846 Chinese characters combined** | No comparison baseline, recorded as supplementary |
-| docs/DESIGN.md | No word count given separately (part of Batch G's added scope) | **3,181 Chinese characters** | No comparison baseline, recorded as supplementary |
-| CLAUDE.md (to be deleted) | No word count given | 847 Chinese characters, a plain `git rm` suffices, no translation workload involved | — |
-| CHANGELOG.md (to be rewritten) | No word count given | 807 Chinese characters, this is a **full rewrite**, not a translation — workload isn't measured by character count | — |
-| `pnpm test` baseline | No specific number mentioned (CHANGELOG's A4b entry says "276 tests green") | **Measured: 34 test files, 300 tests, all green** (`pnpm test`/`pnpm lint`/`pnpm build` are all currently clean) | CHANGELOG's "276" is the number as of the moment the A4b build finished, and differs from the current HEAD (doesn't affect this PRD — the baseline record just uses the measured 300, not CHANGELOG's old number) |
-| Repo-wide brand-name (`helix\|verity\|cypher\|zorro`) occurrence count | No total given (only describes "removing the aliases") | **466 total** (excluding node_modules/dist), broken down: docs/feature/* 242, src/ 126 (of which Zorro 118, Verity 7, Helix 1), docs/DESIGN.md 40, CLAUDE.md 7 (deleted entirely along with Batch D), the rest (CHANGELOG.md/README.md/docs/ROADMAP.md etc.) 51 | **This is the item with the biggest discrepancy from #17's original framing**, see §1.4 for details — #17's description of "removing brand names" focuses on the profile-alias layer, but the actual measured largest source of brand names isn't the profile at all — it's the large number of "Zorro Round-N review references" scattered through code comments/docs |
+| src/ 中含中文注释的文件数 | "约 40 个文件" | **43 个文件**(含 6 个 `.e2e.test.ts`/`.test.ts` 测试文件正文里的注释、2 个 `.mjs` fixture) | 大致相符,略高;#17 的"约 40"是估算,实测 43,在合理误差内 |
+| src/ 总中文字符数 | "约 860 字" | **874 个中文字符** | 大致相符(A4b 合并对 `audit-store.ts`/`runner.ts`/`escalation.ts`/`gates.ts` 的改动带来的新中文注释,相比 #17 写作时依据的旧估算净增很少,说明 A4a→A4b 期间大部分新增代码的注释已经是英文,只有零星几处还嵌着中文——见 §1.3) |
+| docs/feature/* 总中文字符数 | "约 4.7 万字" | **62,712 个中文字符** | **明显偏高,超出约 33%**。原因:#17 的数字是在 A4b 合并**之前**估算的;A4b 新增了两份完整文档,`docs/feature/a4b-loop/PRD.md` + `test-report.md`(A4b 构建 + 两轮 Zorro 复审的完整记录),体量不小。批次 B 的工作量按实测数字规划,不按 #17 的旧数字。 |
+| docs/{ROADMAP,PROGRESS,BACKLOG,README}.md | 没有单独给出字数 | **合计 1,846 个中文字符** | 无比较基线,记录作补充 |
+| docs/DESIGN.md | 没有单独给出字数(属于批次 G 新增的范围) | **3,181 个中文字符** | 无比较基线,记录作补充 |
+| CLAUDE.md(待删除) | 没有给出字数 | 847 个中文字符,直接 `git rm` 即可,不涉及翻译工作量 | — |
+| CHANGELOG.md(待重写) | 没有给出字数 | 807 个中文字符,这是一次**完全重写**,不是翻译——工作量不按字符数衡量 | — |
+| `pnpm test` 基线 | 没提具体数字(CHANGELOG 的 A4b 条目写"276 个测试全绿") | **实测:34 个测试文件,300 个测试,全绿**(`pnpm test`/`pnpm lint`/`pnpm build` 目前都是干净的) | CHANGELOG 的"276"是 A4b build 收尾那一刻的数字,和当前 HEAD 不同(不影响这份 PRD——基线记录直接用实测的 300,不用 CHANGELOG 的旧数字) |
+| 全仓品牌名(`helix\|verity\|cypher\|zorro`)出现次数 | 没给总数(只描述"去掉别名") | **共 466 次**(不含 node_modules/dist),拆分:docs/feature/* 242、src/ 126(其中 Zorro 118、Verity 7、Helix 1)、docs/DESIGN.md 40、CLAUDE.md 7(随批次 D 整体删除)、其余(CHANGELOG.md/README.md/docs/ROADMAP.md 等)51 | **这是和 #17 原文框定差异最大的一项**,细节见 §1.4——#17 对"去掉品牌名"的描述聚焦在 profile 别名这一层,但实测最大的品牌名来源根本不在 profile 上——而是散落在代码注释/文档里大量的"Zorro 第 N 轮复审引用" |
 
-### 1.3 The Nature of the Chinese Remaining in src/ (Not "Forgotten Translation," but Embedded Quotation)
+### 1.3 src/ 里残留中文的性质(不是"翻译漏了",而是嵌入式引用)
 
-`CLAUDE.md` §4 (about to be deleted, but reflects an existing convention) already stipulates "code comments in English; documents facing the Commander may be in Chinese." Verification found that the 874 Chinese characters in src/ are **not large blocks of Chinese comments**, but are concentrated in two categories:
+`CLAUDE.md` §4(即将删除,但反映了一条既有惯例)已经规定"代码注释用英文;面向指挥官的文档可以用中文"。核实发现 src/ 里那 874 个中文字符**不是大段中文注释**,而是集中在两类:
 
-1. **Verbatim quotations of Chinese original sentences from `docs/DESIGN.md`** — e.g. both `src/prompt/personas.ts:9` and `src/prompt/schema-registry.ts` verbatim-quote a Chinese sentence from DESIGN §1.7 ("persona/schema looked up dynamically by role name from the registry, instead of a hardcoded {coder,tester} Record like Verity did"), used to explain "which exact sentence of the design doc this line of code corresponds to."
-2. **Scattered leftover Chinese phrases** interspersed within otherwise-English doc-comments (e.g. `context/config.ts`/`harness/errors.ts`, etc.).
+1. **逐字引用 `docs/DESIGN.md` 的中文原句**——比如 `src/prompt/personas.ts:9` 和 `src/prompt/schema-registry.ts` 都逐字引用了 DESIGN §1.7 的一句中文("persona/schema 按角色名从 registry 动态查找,而不是像 Verity 那样写死一个 {coder,tester} Record"),用来说明"这行代码对应设计文档的哪一句"。
+2. **散落在其它英文文档注释里的零星中文短语**(比如 `context/config.ts`/`harness/errors.ts` 等)。
 
-**Batch-ordering impact**: For category 1 (verbatim quotes of DESIGN.md), if src/ is translated first (Batch A) and DESIGN.md afterward (Batch G), the two translations could end up inconsistent, creating a new problem where "what the code comment says doesn't match the English design doc." **Recommendation: Batch G (DESIGN.md's English version) should finish before, or at minimum in the same batch as, Batch A for those cross-referenced spots' terminology alignment** — see §3's Batch A task notes for specifics.
+**批次顺序上的影响**:对于第一类(逐字引用 DESIGN.md),如果 src/ 先翻(批次 A)、DESIGN.md 后翻(批次 G),两边的翻译可能不一致,产生一个新问题——"代码注释说的和英文版设计文档对不上"。**建议:批次 G(DESIGN.md 的英文版)应该在批次 A 之前完成,或者至少和批次 A 同一批完成这些互相引用之处的术语对齐**——具体见 §3 批次 A 的任务说明。
 
-### 1.4 The Real Nature of the Brand-Name (Helix/Verity/Cypher/Zorro) Residue (#17's Original Framing Needs One More Layer of Editorial Rule Here)
+### 1.4 品牌名(Helix/Verity/Cypher/Zorro)残留的真实性质(#17 原文框定在这里还需要多一层编辑规则)
 
-#17's original item 6 frames "removing brand names" as "profiles are already generically named; Helix/Verity are just brand aliases, so simply removing the aliases is enough." Measured findings:
+#17 原文第 6 项把"去掉品牌名"框定为"profile 已经用通用名了;Helix/Verity 只是品牌别名,所以直接去掉别名就够了"。实测发现:
 
-- **The profile config files themselves are already clean** — `profiles/subscription/config.yaml` and `profiles/subscription/personas/{coder,tester}.md` contain **zero** occurrences of "Helix"/"Verity" (the CHANGELOG record shows profiles were already renamed from `helix`/`verity` to `subscription`/`apikey` during the A3 phase). `profiles/apikey/` is already excluded by `.gitignore` and isn't in the public repo. **The specific action #17 item 6 describes — "profile alias cleanup" — has effectively already been done; the profile files themselves don't need to be touched again.**
-- **The real bulk of the brand-name residue is "review references" in code comments and "product comparisons" in design docs**, not profile naming:
-  - **`Zorro` (118 occurrences in src/)**: Almost all of them are **review-provenance references** shaped like `// Zorro Round-1 D1 rework (docs/feature/a4b-loop/test-report.md): ...` — when explaining "why this piece of code is written this way," they point to exactly which review round found the issue; this is genuine engineering traceability documentation, not product marketing. Concentrated in `src/loop/runner.ts` (18), `src/loop/audit-store.ts` (11), `src/harness/adapters/{claude,codex}-cli-adapter.ts` (9 combined), and other files.
-  - **`Verity` (7 occurrences in src/ + 40 in docs/DESIGN.md)**: Refers to a sister internal project (a "proven-out" predecessor implementation that aeloop's design draws on), e.g. "Verity's M2/M3 shipped layers that each tested green in isolation but were never actually wired together" — this kind of reference **explains the backstory of a design decision** (why aeloop needs to fill a gap somewhere that Verity didn't cover), which is likewise genuine documentation value, not a marketing term.
-  - **`Helix` (1 occurrence in src/)**: One spot, `src/loop/audit-store.ts:26`, "Portability (Helix 2026-07-21 dispatch note, ai-agent#127)."
-  - **`Cypher`**: 0 hits in src/ (only appears in docs/feature/*'s historical records and the already-to-be-deleted CLAUDE.md).
-- **Additional finding: cross-repo issue references** (`ai-agent#NNN`) — 9 occurrences repo-wide (src/ 1, docs/DESIGN.md 2, CHANGELOG.md 1, docs/feature/* 5), pointing to issues in the private repo `elishawong/ai-agent`; a public reader clicking them will hit a 404. This kind of reference is the same category of "internal-workflow leakage" as the brand names — #17's acceptance criterion's `rg -i 'helix|verity|cypher|zorro'` scan by itself doesn't catch `ai-agent#`, but it's the same nature, so it's recommended to handle it together (folded into Batch F, see §3 for details).
-- `docs/ROADMAP.md`/`docs/DESIGN.md` also contain **same-repo issue references** like `issue #2`/`issue #13` (pointing to aeloop's own repo, not ai-agent) — after open-sourcing, these links are themselves resolvable (assuming the issues are also public), **not a leak, no action needed**, left in place.
+- **profile 配置文件本身已经很干净**——`profiles/subscription/config.yaml` 和 `profiles/subscription/personas/{coder,tester}.md` 里出现 "Helix"/"Verity" 的次数是**零**(CHANGELOG 的记录显示,profile 在 A3 阶段就已经从 `helix`/`verity` 改名成了 `subscription`/`apikey`)。`profiles/apikey/` 已经被 `.gitignore` 排除,不在公开仓库里。**#17 第 6 项描述的那个具体动作——"profile 别名清理"——实际上已经做完了;profile 文件本身不需要再动。**
+- **品牌名残留的真正大头是代码注释里的"复审引用"和设计文档里的"产品对比"**,不是 profile 命名:
+  - **`Zorro`(src/ 里 118 次)**:几乎全部是**复审溯源引用**,形如 `// Zorro Round-1 D1 rework (docs/feature/a4b-loop/test-report.md): ...`——在解释"这段代码为什么这么写"时,精确指向是哪一轮复审发现的问题;这是真实的工程可追溯性文档,不是产品营销。集中在 `src/loop/runner.ts`(18)、`src/loop/audit-store.ts`(11)、`src/harness/adapters/{claude,codex}-cli-adapter.ts`(合计 9)等文件里。
+  - **`Verity`(src/ 里 7 次 + docs/DESIGN.md 里 40 次)**:指的是一个内部姊妹项目(一个 aeloop 设计所借鉴的"已验证过"的前身实现),例如"Verity 上线的 M2/M3 层各自单测全绿,但从来没有真正接起来跑通过"——这类引用**解释了一个设计决策的来龙去脉**(为什么 aeloop 需要补上 Verity 没覆盖到的某个缺口),同样是真实的文档价值,不是营销词。
+  - **`Helix`(src/ 里 1 次)**:一处,`src/loop/audit-store.ts:26`,"Portability(Helix 2026-07-21 dispatch note, ai-agent#127)"。
+  - **`Cypher`**:src/ 里 0 命中(只出现在 docs/feature/* 的历史记录和即将删除的 CLAUDE.md 里)。
+- **额外发现:跨仓 issue 引用**(`ai-agent#NNN`)——全仓 9 次(src/ 1、docs/DESIGN.md 2、CHANGELOG.md 1、docs/feature/* 5),指向私有仓库 `elishawong/ai-agent` 里的 issue;公开读者点进去会碰到 404。这类引用和品牌名属于同一类"内部工作流泄漏"——#17 验收标准里的 `rg -i 'helix|verity|cypher|zorro'` 扫描本身抓不到 `ai-agent#`,但性质相同,所以建议一并处理(并入批次 F,细节见 §3)。
+- `docs/ROADMAP.md`/`docs/DESIGN.md` 里还有 `issue #2`/`issue #13` 这类**同仓 issue 引用**(指向 aeloop 自己的仓库,不是 ai-agent)——开源之后这些链接本身是可解析的(假设那些 issue 也是公开的),**不算泄漏,不需要处理**,原样保留。
 
-**Conclusion**: #17's acceptance criterion "`rg -i 'helix|verity|cypher|zorro'` zero hits (or list, item by item, the rationale for any deliberately-kept spots)" — faced with 466 hits, of which 242 live inside historical documents (docs/feature/*) that are being "kept as-is" — involves an editorial judgment call that needs Commander confirmation. See §4's naming-replacement rules.
-
----
-
-## 2. Overall Acceptance Criteria (Copied Verbatim from #17's Original Text, Nothing Omitted)
-
-- [ ] `rg -Pl '[\p{Han}]'` zero hits across the whole repo (excluding `node_modules/`, `dist/`, `pnpm-lock.yaml`; whitelisting `*.zh-CN.md`).
-- [ ] `rg -i 'helix|verity|cypher|zorro'` zero hits across the whole repo (excluding `node_modules/`, `dist/`), **or** hits remain only within the historical-record documents under `docs/feature/**` — this PRD's §4 proposes treating this category as a **single written blanket exemption** (not enumerating all 242 lines individually), requiring the Commander to sign off on this reading before Batch F (see §4/§7 open items).
-- [ ] All four files `README.md` / `README.zh-CN.md` / `docs/DESIGN.md` / `docs/DESIGN.zh-CN.md` present and content-aligned (English is the source of truth).
-- [ ] `pnpm test` all green — the measured baseline is **34 test files, 300 tests**; at the end of every batch during execution it must still be this number (the test count itself shouldn't change — translation/file deletion doesn't change test content).
-- [ ] No `CLAUDE.md` / `.claude/` internal-skill residue.
-- [ ] `git diff` review: aside from comments/docs/deleted governance files, **no logic-code changes** (`pnpm build`/`pnpm lint` must also stay clean — both are currently clean at baseline).
+**结论**:#17 的验收标准"`rg -i 'helix|verity|cypher|zorro'` 零命中(或者,逐条列出任何刻意保留之处的理由)"——面对 466 次命中、其中 242 次活在被"原样保留"的历史文档(docs/feature/*)里——涉及一个需要指挥官确认的编辑判断。见 §4 的命名替换规则。
 
 ---
 
-## 3. Batch Split
+## 2. 总体验收标准(逐字照抄 #17 原文,一条不漏)
 
-> Every batch is independently verifiable and independently submittable for review; for the dependency-based recommended execution order see §6 — the batch numbering order does not imply the execution order.
+- [ ] `rg -Pl '[\p{Han}]'` 全仓零命中(排除 `node_modules/`、`dist/`、`pnpm-lock.yaml`;白名单 `*.zh-CN.md`)。
+- [ ] `rg -i 'helix|verity|cypher|zorro'` 全仓零命中(排除 `node_modules/`、`dist/`),**或者**命中只留在 `docs/feature/**` 下的历史记录文档里——这份 PRD 的 §4 提议把这一类当成**一份书面的整体豁免**处理(不逐条列出全部 242 行),需要指挥官在批次 F 之前对这个理解签字确认(见 §4/§7 待定事项)。
+- [ ] `README.md` / `README.zh-CN.md` / `docs/DESIGN.md` / `docs/DESIGN.zh-CN.md` 四份文件都存在且内容对齐(英文为准)。
+- [ ] `pnpm test` 全绿——实测基线是**34 个测试文件,300 个测试**;执行过程中每个批次结束时都必须还是这个数字(测试数量本身不该变——翻译/删文件不改变测试内容)。
+- [ ] 没有 `CLAUDE.md` / `.claude/` 内部 skill 残留。
+- [ ] `git diff` 审阅:除了注释/文档/被删除的治理文件之外,**没有逻辑代码改动**(`pnpm build`/`pnpm lint` 也必须保持干净——两者目前基线都是干净的)。
 
-### Batch A — Translate src/'s Inline Chinese Comments to English (Zero Logic Change)
+---
 
-- **Scope**: 43 `src/` files containing Chinese characters (including `.ts`/`.test.ts`/`.e2e.test.ts`/`.mjs`), further split by directory into 4 independently-submittable sub-batches:
-  - A1 `context/` (6 files: `config.ts`/`errors.ts`/`injector.ts`/`staleness.ts`/`store.ts` + `context-prompt.e2e.test.ts`)
-  - A2 `harness/` (13 files: `errors.ts`/`provider-router.ts`/`schema-validator.ts`/`tool-exec-verifier.ts`/`types.ts`/`adapters/{claude-cli,codex-cli,litellm}-adapter.ts` + their corresponding `__tests__/*` + 2 `.mjs` fixtures + `harness-cli.e2e.test.ts`/`harness.e2e.test.ts`)
-  - A3 `loop/` (14 files: `audit-store.ts`/`errors.ts`/`gates.ts`/`graph.ts`/`nodes/{coder,tester}.ts`/`runner.ts`/`types.ts`/`workflow-def.ts` + their corresponding `__tests__/*` + 2 `.mjs` fixtures + `loop.e2e.test.ts`)
-  - A4 `prompt/` + `profile/` (6 files: `composer.ts`/`personas.ts`/`schema-registry.ts`/`schema.ts`/`loader.ts` + their corresponding tests)
-- **How to change**: Locate Chinese character by character, translate in place to English, **do not change a single line of logic code, do not change the runtime semantics of any string literal** (if a Chinese string is actually a value compared/asserted at runtime rather than a comment, it must be individually confirmed before touching it — no such case is expected to exist, but every file's diff must be reviewed after editing to confirm all changes land inside comments/JSDoc).
-- **Special handling**: The two spots in A4 (`prompt/personas.ts`, `prompt/schema-registry.ts`) that verbatim-quote the Chinese original sentence from `docs/DESIGN.md` §1.7 should, when translated, use **the same translation Batch G's DESIGN.md English version uses for the same sentence**, to keep the code comment and the design doc's terminology consistent (see §6 for the dependency).
-- **Acceptance**:
-  - `rg -Pl '[\p{Han}]' src/` zero hits.
-  - `pnpm test` still 34/300 all green (run once per sub-batch).
-  - `pnpm lint` (`tsc --noEmit`) clean.
-  - Manually walk through `git diff`, confirming every hunk only touches explanatory text inside comments/JSDoc/string constants, not executable logic.
-- **Risk**: If JSDoc contains special syntax parsed by TypeDoc/other tools (no sign of this in this repo, but watch for it while translating), make sure the translation doesn't break Markdown code-fence delimiters.
+## 3. 批次拆分
 
-### Batch B — Translate docs/feature/*'s Internal Documents Entirely to English (Kept As-Is)
+> 每个批次都可独立验证、独立提交审查;按依赖关系推荐的执行顺序见 §6——批次编号顺序不代表执行顺序。
 
-- **Scope**: 5 feature directories, 10 `.md` files, measured at 62,712 Chinese characters total (**about 33% higher than #17's original ~47K estimate**; workload is planned against this number):
+### 批次 A —— 把 src/ 里内嵌的中文注释翻成英文(零逻辑改动)
+
+- **范围**:43 个含中文字符的 `src/` 文件(含 `.ts`/`.test.ts`/`.e2e.test.ts`/`.mjs`),按目录进一步拆成 4 个可独立提交的子批次:
+  - A1 `context/`(6 个文件:`config.ts`/`errors.ts`/`injector.ts`/`staleness.ts`/`store.ts` + `context-prompt.e2e.test.ts`)
+  - A2 `harness/`(13 个文件:`errors.ts`/`provider-router.ts`/`schema-validator.ts`/`tool-exec-verifier.ts`/`types.ts`/`adapters/{claude-cli,codex-cli,litellm}-adapter.ts` + 对应的 `__tests__/*` + 2 个 `.mjs` fixture + `harness-cli.e2e.test.ts`/`harness.e2e.test.ts`)
+  - A3 `loop/`(14 个文件:`audit-store.ts`/`errors.ts`/`gates.ts`/`graph.ts`/`nodes/{coder,tester}.ts`/`runner.ts`/`types.ts`/`workflow-def.ts` + 对应的 `__tests__/*` + 2 个 `.mjs` fixture + `loop.e2e.test.ts`)
+  - A4 `prompt/` + `profile/`(6 个文件:`composer.ts`/`personas.ts`/`schema-registry.ts`/`schema.ts`/`loader.ts` + 对应测试)
+- **怎么改**:逐字定位中文,原地翻成英文,**不改一行逻辑代码,不改任何字符串字面量的运行时语义**(如果一段中文字符串实际上是运行时会被比较/断言的值,而不是注释,动手前必须单独确认——预期不会存在这种情况,但每个文件改完后都要审一遍 diff,确认所有改动都落在注释/JSDoc 里)。
+- **特殊处理**:A4 里那两处(`prompt/personas.ts`、`prompt/schema-registry.ts`)逐字引用 `docs/DESIGN.md` §1.7 中文原句的地方,翻译时要用**和批次 G 的 DESIGN.md 英文版对同一句话相同的翻译**,保持代码注释和设计文档的术语一致(依赖关系见 §6)。
+- **验收**:
+  - `rg -Pl '[\p{Han}]' src/` 零命中。
+  - `pnpm test` 依然 34/300 全绿(每个子批次跑一次)。
+  - `pnpm lint`(`tsc --noEmit`)干净。
+  - 人工过一遍 `git diff`,确认每个 hunk 只碰注释/JSDoc/字符串常量里的说明性文字,不碰可执行逻辑。
+- **风险**:如果 JSDoc 里有被 TypeDoc/其它工具解析的特殊语法(这个仓库目前没有迹象,但翻译时留意),确保翻译不会破坏 Markdown 代码围栏分隔符。
+
+### 批次 B —— 把 docs/feature/* 的内部文档整体翻成英文(内容原样保留)
+
+- **范围**:5 个 feature 目录,10 个 `.md` 文件,实测总计 62,712 个中文字符(**比 #17 原文约 4.7 万的估算高约 33%**;工作量按这个数字规划):
   - `a0-a1-engine-scaffold-context-prompt/{PRD.md, progress.md}`
   - `a2-harness-provider-router-litellm-adapter/{PRD.md, test-report.md}`
   - `a3-cli-bridge/{PRD.md, spike-findings.md}`
-  - `a4a-loop/{PRD.md, spike-findings.md, test-report.md}` (there's also an `a4a-loop/spike/` subdirectory — needs confirming whether it contains text content while verifying; per the task instructions it's not in scope for translation this round, just watch not to miss it)
+  - `a4a-loop/{PRD.md, spike-findings.md, test-report.md}`(还有一个 `a4a-loop/spike/` 子目录——核实时要确认里面是否含文本内容;按任务指令,这个子目录本轮不在翻译范围内,只是留意别漏掉)
   - `a4b-loop/{PRD.md, test-report.md}`
-- **How to change**: Content/structure/technical judgments are **kept as-is**, only a language translation — including the large number of `Zorro Round-N`/`Helix`/`Verity`/`ai-agent#NNN` references within them — **no brand-name replacement is done for these references in this batch**, rationale in §4 (these files are historical records, not user-facing product documentation).
-- **Suggested execution mode**: The 5 feature directories are mutually independent — 5 agents can be fanned out to translate in parallel (#17's "execution mode" section already recommends this), one sub-batch per directory, independently accepted.
-- **Acceptance**:
-  - `rg -Pl '[\p{Han}]' docs/feature/` zero hits.
-  - Spot check: randomly pick 2-3 technical-detail paragraphs (e.g. a specific bug description found by a Zorro review in A4b test-report.md), verify the translation hasn't lost/distorted the original meaning (Zorro's anti-hallucination gate standard: a review must trace back to the source text — "looks correctly translated" doesn't count).
-  - Doesn't touch code, `pnpm test` doesn't need re-running (but per §6's recommendation, run it once uniformly at the end of the whole batch to confirm no code references were accidentally deleted).
+- **怎么改**:内容/结构/技术判断**原样保留**,只做语言翻译——包括其中大量的 `Zorro Round-N`/`Helix`/`Verity`/`ai-agent#NNN` 引用——**这一批不对这些引用做品牌名替换**,理由见 §4(这些文件是历史记录,不是面向用户的产品文档)。
+- **建议执行方式**:5 个 feature 目录互相独立——可以扇出 5 个 agent 并行翻(#17 的"执行方式"一节已经建议这么做),每个目录一个子批次,独立验收。
+- **验收**:
+  - `rg -Pl '[\p{Han}]' docs/feature/` 零命中。
+  - 抽查:随机挑 2-3 段技术细节段落(比如 A4b test-report.md 里某次 Zorro 复审发现的具体 bug 描述),核实翻译没有丢失/扭曲原意(Zorro 的防幻觉门标准:复审必须能追溯回源文本——"看起来翻得对"不算数)。
+  - 不碰代码,`pnpm test` 不需要重跑(但按 §6 的建议,整个批次结束时统一跑一次,确认没有不小心删掉代码引用)。
 
-### Batch C — Translate docs/{ROADMAP,PROGRESS,BACKLOG,README}.md to English
+### 批次 C —— 把 docs/{ROADMAP,PROGRESS,BACKLOG,README}.md 翻成英文
 
-- **Scope**: `docs/ROADMAP.md` (607 words), `docs/PROGRESS.md` (167 words), `docs/BACKLOG.md` (66 words), `docs/README.md` (198 words), 1,846 Chinese characters combined.
-- **How to change**: Translate to English, **at the same time** handling the brand names/cross-repo references appearing in these files (see §4's replacement rules) — this batch isn't part of the "kept as-is" historical record, these are actively-maintained living documents, so brand-name cleanup applies.
-- **Acceptance**: `rg -Pl '[\p{Han}]' docs/ROADMAP.md docs/PROGRESS.md docs/BACKLOG.md docs/README.md` zero hits; `rg -i 'helix|verity|cypher|zorro'` zero hits on the same four files.
+- **范围**:`docs/ROADMAP.md`(607 字)、`docs/PROGRESS.md`(167 字)、`docs/BACKLOG.md`(66 字)、`docs/README.md`(198 字),合计 1,846 个中文字符。
+- **怎么改**:翻成英文,**同时**处理这几份文件里出现的品牌名/跨仓引用(见 §4 的替换规则)——这一批不属于"原样保留"的历史记录,是持续维护的活文档,所以品牌名清理适用。
+- **验收**:`rg -Pl '[\p{Han}]' docs/ROADMAP.md docs/PROGRESS.md docs/BACKLOG.md docs/README.md` 零命中;这四个文件上 `rg -i 'helix|verity|cypher|zorro'` 零命中。
 
-### Batch D — Governance File Stripping
+### 批次 D —— 治理文件剥离
 
-- **Scope**:
-  - Delete `CLAUDE.md` (847 Chinese characters, plain `git rm`, no translation)
-  - Delete `.claude/skills/` (two files, `aigit/SKILL.md` and `run/SKILL.md`, `git rm -r`)
-  - `CHANGELOG.md`: retire the existing 807-Chinese-character version, **rewrite** (not translate) into a generic open-source changelog — Keep a Changelog style, strip all Helix/Cypher/Zorro/`issue #NN`/`ai-agent#NNN` references, keep only the "what was done" layer that's externally meaningful (at the granularity of e.g. "A4b: threshold escalation + audit persistence + cross-process checkpoint resume shipped, 300 tests passing," with no internal review-round detail)
-  - Add `CONTRIBUTING.md` (replacing the part of `CLAUDE.md` useful to contributors: the tech-stack table, directory structure, test/build commands, PR expectations — **not including** internal-workflow descriptions such as the "strategist/Cypher/Zorro" role division, `/aigit`/`/spec` internal-skill references, or `ai-agent` cross-repo references)
-- **Acceptance**:
-  - `test -f CLAUDE.md` should fail (file doesn't exist).
-  - `find .claude -type f` should be empty / the `.claude` directory doesn't exist.
-  - `CONTRIBUTING.md` exists and contains no brand names/internal-workflow descriptions.
-  - After `CHANGELOG.md`'s rewrite, `rg -i 'helix|verity|cypher|zorro|ai-agent#|issue #'` (internal issue-number references in the public repo are likewise cleaned up) zero hits.
+- **范围**:
+  - 删除 `CLAUDE.md`(847 个中文字符,直接 `git rm`,不翻译)
+  - 删除 `.claude/skills/`(两个文件,`aigit/SKILL.md` 和 `run/SKILL.md`,`git rm -r`)
+  - `CHANGELOG.md`:退役现有的 807 字中文版本,**重写**(不是翻译)成一份通用的开源 changelog——Keep a Changelog 风格,剥掉所有 Helix/Cypher/Zorro/`issue #NN`/`ai-agent#NNN` 引用,只保留对外有意义的"做了什么"这一层(粒度比如"A4b:阈值升级 + 审计持久化 + 跨进程 checkpoint 续跑上线,300 个测试通过",不含内部复审轮次细节)
+  - 新增 `CONTRIBUTING.md`(替代 `CLAUDE.md` 里对贡献者有用的部分:技术栈表、目录结构、测试/构建命令、PR 期望——**不包括**"军师/Cypher/Zorro"这类内部工作流角色分工描述、`/aigit`/`/spec` 内部 skill 引用、或 `ai-agent` 跨仓引用)
+- **验收**:
+  - `test -f CLAUDE.md` 应该失败(文件不存在)。
+  - `find .claude -type f` 应该为空 / `.claude` 目录不存在。
+  - `CONTRIBUTING.md` 存在且不含品牌名/内部工作流描述。
+  - `CHANGELOG.md` 重写之后,`rg -i 'helix|verity|cypher|zorro|ai-agent#|issue #'`(公开仓库里的内部 issue 号引用同样清理掉)零命中。
 
-### Batch E — Translate .gitignore's Comments to English
+### 批次 E —— 把 .gitignore 的注释翻成英文
 
-- **Scope**: `.gitignore` (359 bytes, 5 Chinese comment blocks: `# runtime state...`, `# pipeline runtime state...`, `# company overlay never enters this repo...`, `# environment`, `# misc`).
-- **How to change**: Translate the comments to English, **keep the rules themselves unchanged** (exclusion rules like `profiles/apikey/`, `.helix/`, `*.db` etc. are kept as-is, only the explanatory comments are translated).
-- **Acceptance**: `rg -Pl '[\p{Han}]' .gitignore` zero hits; confirm via `git status` that the exclusion rules' effective scope hasn't changed (spot-check a few known paths with `git check-ignore`, e.g. `profiles/apikey/foo`, `.helix/bar` should still be ignored).
+- **范围**:`.gitignore`(359 字节,5 个中文注释块:`# runtime state...`、`# pipeline runtime state...`、`# company overlay never enters this repo...`、`# environment`、`# misc`)。
+- **怎么改**:把注释翻成英文,**规则本身保持不变**(`profiles/apikey/`、`.helix/`、`*.db` 等排除规则原样保留,只翻译说明性注释)。
+- **验收**:`rg -Pl '[\p{Han}]' .gitignore` 零命中;用 `git status` 确认排除规则的生效范围没有变(用 `git check-ignore` 抽查几个已知路径,比如 `profiles/apikey/foo`、`.helix/bar` 应该依然被忽略)。
 
-### Batch F — Remove Brand Names (Repo-Wide Scan + Replace, Covering All Prior Batches' Output)
+### 批次 F —— 去掉品牌名(全仓扫描 + 替换,覆盖前面所有批次的产物)
 
-- **Scope**: All files produced by Batches A/C/D/E/G + `docs/DESIGN.md` (40 occurrences) + any corner missed by Batches A-E, **explicitly excluding `docs/feature/**`** (Batch B's historical record, rationale in §4).
-- **How to change**: Handle each category per §4's replacement-rules table — this is not a simple string-replace of "Helix" → "something" — each category of reference needs different handling (review-provenance references vs. product-comparison references vs. profile descriptions vs. cross-repo issue links).
-- **Acceptance**:
-  - `rg -i 'helix|verity|cypher|zorro' --glob '!docs/feature'` (excluding node_modules/dist) zero hits.
-  - `rg 'ai-agent#'` zero hits (repo-wide, including docs/feature — this one is an exception: cross-repo dead links are recommended to be cleaned up or turned into plain-text descriptions even inside historical documents, leaving no clickable-but-404 reference; if the Commander decides docs/feature should be left completely untouched, this item narrows to "zero hits outside docs/feature only" — see §7 open items for the two possible readings).
-  - Run `pnpm test` once uniformly at the end to confirm 34/300 all green (if brand-name replacement accidentally hits a string literal, tests will blow up first).
+- **范围**:批次 A/C/D/E/G 产出的全部文件 + `docs/DESIGN.md`(40 次)+ 批次 A-E 漏掉的任何角落,**明确排除 `docs/feature/**`**(批次 B 的历史记录,理由见 §4)。
+- **怎么改**:按 §4 的替换规则表逐类处理——这不是简单的"Helix"→"某某"字符串替换——每一类引用需要不同的处理方式(复审溯源引用 vs. 产品对比引用 vs. profile 描述 vs. 跨仓 issue 链接)。
+- **验收**:
+  - `rg -i 'helix|verity|cypher|zorro' --glob '!docs/feature'`(排除 node_modules/dist)零命中。
+  - `rg 'ai-agent#'` 零命中(全仓,包括 docs/feature——这一项是例外:即便在历史文档里,也建议清理掉跨仓死链接或改写成纯文本描述,不留可点击但 404 的引用;如果指挥官决定 docs/feature 应该完全不动,这一项就收窄成"只在 docs/feature 之外零命中"——两种理解见 §7 待定事项)。
+  - 最后统一跑一次 `pnpm test`,确认 34/300 全绿(如果品牌名替换不小心命中了某个字符串字面量,测试会先炸)。
 
-### Batch G — Maintain README + DESIGN's Chinese/English Dual Versions
+### 批次 G —— 维护 README + DESIGN 的中英双版本
 
-- **Scope**:
-  - `README.md` (English, currently already in English but its content is **out of date** — it says "Status: Pre-spec... project scaffold only," while in reality A0-A4b are all complete and 300 tests are green; Batch G needs a **substantive content update**, not simply "it's already English so it doesn't need touching") + add `README.zh-CN.md` (Chinese version, content-aligned)
-  - `docs/DESIGN.md` (3,181 Chinese characters, translate to English + brand-name cleanup, English is the source of truth) + add `docs/DESIGN.zh-CN.md` (Chinese version, content-aligned, likewise passed through the brand-name cleanup rules once)
-- **How to change**:
-  - README.md first gets a content correction (reflecting the real current state, removing the dead link to `CLAUDE.md`, pointing instead to `CONTRIBUTING.md`), then the zh-CN mirror is produced.
-  - When translating DESIGN.md to English, apply §4's replacement rules at the same time (this is the currently-maintained design authority document, not a historical record — brand-name cleanup applies); once the English version is finalized, produce the zh-CN mirror, with the two versions content-aligned (not independently drafted in a way that lets them drift).
-- **Acceptance**:
-  - All four files present: `test -f README.md README.zh-CN.md docs/DESIGN.md docs/DESIGN.zh-CN.md`.
-  - `rg -Pl '[\p{Han}]' README.md docs/DESIGN.md` zero hits (the English versions must be clean; `*.zh-CN.md` is whitelisted, Chinese is allowed).
-  - `rg -i 'helix|verity|cypher|zorro'` zero hits across the four files.
-  - Manual spot check: compare the Chinese and English versions' content for the same section paragraph by paragraph, confirming nothing's missing/no independently-drifted content (mechanical checks like heading count, code-block count can help, e.g. `grep -c '^#' README.md README.zh-CN.md` should be equal).
-  - README.md no longer links to the deleted `CLAUDE.md`.
+- **范围**:
+  - `README.md`(英文,目前已经是英文,但内容**过期**——写的是"Status: Pre-spec... project scaffold only",而实际上 A0-A4b 全部完成、300 个测试全绿。批次 G 需要一次**实质性的内容更新**,不能只是"反正已经是英文了不用动")+ 新增 `README.zh-CN.md`(中文版,内容对齐)
+  - `docs/DESIGN.md`(3,181 个中文字符,翻成英文 + 品牌名清理,英文为准)+ 新增 `docs/DESIGN.zh-CN.md`(中文版,内容对齐,同样过一遍品牌名清理规则)
+- **怎么改**:
+  - README.md 先做一次内容修正(反映真实的当前状态,去掉指向 `CLAUDE.md` 的死链接,改指向 `CONTRIBUTING.md`),然后再产出 zh-CN 镜像版。
+  - 翻译 DESIGN.md 成英文时同时应用 §4 的替换规则(这是当前持续维护的设计权威文档,不是历史记录——品牌名清理适用);英文版定稿后再产出 zh-CN 镜像版,两个版本内容对齐(不允许各自独立起草导致漂移)。
+- **验收**:
+  - 四个文件都存在:`test -f README.md README.zh-CN.md docs/DESIGN.md docs/DESIGN.zh-CN.md`。
+  - `rg -Pl '[\p{Han}]' README.md docs/DESIGN.md` 零命中(英文版必须干净;`*.zh-CN.md` 在白名单里,允许中文)。
+  - 这四个文件上 `rg -i 'helix|verity|cypher|zorro'` 零命中。
+  - 人工抽查:逐段对比中英文版本同一节的内容,确认没有遗漏/没有各自独立漂移的内容(标题数、代码块数这类机械检查能帮上忙,比如 `grep -c '^#' README.md README.zh-CN.md` 应该相等)。
+  - README.md 不再链接到已删除的 `CLAUDE.md`。
 
 ---
 
-## 4. Brand-Name Replacement Rules Table (Batch F's Execution Basis)
+## 4. 品牌名替换规则表(批次 F 的执行依据)
 
-| Reference type | Where it appears | Handling rule | Example |
+| 引用类型 | 出现位置 | 处理规则 | 示例 |
 |---|---|---|---|
-| **`Zorro Round-N ...` review-provenance references** | src/ code comments (118 occurrences), docs/DESIGN.md (some) | Remove the persona name, keep the round number + the original doc reference path, change to the neutral phrasing `Review Round-N` | `Zorro Round-1 D1 rework (docs/feature/a4b-loop/test-report.md)` → `Review Round-1 D1 rework (docs/feature/a4b-loop/test-report.md)` |
-| **`Verity` sister-project comparison references** | src/ (7 occurrences), docs/DESIGN.md (40 occurrences, including Helix) | Replace with a neutral descriptive phrase, don't name the specific internal project; keep phrasing consistent within the same file | `Verity's M2/M3 shipped layers that...` → `a prior internal implementation's M2/M3 layers that...`; `avoid a hardcoded Record like Verity did` → `avoid a hardcoded Record like an earlier internal implementation did` |
-| **`Helix` dispatch-note reference** | src/loop/audit-store.ts:26 (1 occurrence) | Remove the persona name and the cross-repo reference, keep only the technical rationale itself | `(Helix 2026-07-21 dispatch note, ai-agent#127)` → rewritten per context into a pure technical footnote, with no internal-organization reference left |
-| **`ai-agent#NNN` cross-repo dead links** | 9 occurrences (src/ 1, DESIGN.md 2, CHANGELOG.md 1, docs/feature/* 5) | Within Batches A/C/D/G's scope (i.e. outside docs/feature/*), remove entirely or rewrite into a non-clickable plain-text note; the docs/feature/* scope is left for §7's open item to decide | — |
-| **profile brand-alias descriptions** | README.md, docs/DESIGN.md (phrasing like "Helix (running the subscription profile)") | Remove the persona name, keep only the profile name + a neutral description; adopt #17's original wording directly | `Helix (running the subscription profile)` → `personal subscription profile`; `Verity (running the apikey profile)` → `company API / LiteLLM profile` |
-| **All brand names inside `docs/feature/**` (242 occurrences)** | Batch B's scope | **Not replaced — kept as-is and translated** — this is a real historical record of build/review activity, its content includes "who found what issue in which review round"; replacing it with pseudonyms or deleting it would distort the historical record and lose traceability (when a reader wants to dig into the backstory of a particular technical decision, these documents are the sole primary record). Corresponds to #17's acceptance criterion "or list, item by item, the rationale for any deliberately-kept spots" — **this PRD proposes satisfying that clause via "a blanket exemption for `docs/feature/**` + this table row as the written rationale,"** rather than enumerating all 242 lines individually. This is an editorial judgment call that needs the Commander to sign off on before Batch F executes (§7). |
-| **Same-repo issue references (`issue #2`/`issue #13`)** | docs/ROADMAP.md, docs/DESIGN.md | Kept as-is — points to aeloop's own repo, resolves normally after open-sourcing, not counted as internal-workflow leakage | — |
+| **`Zorro Round-N ...` 复审溯源引用** | src/ 代码注释(118 次)、docs/DESIGN.md(部分) | 去掉人格代号,保留轮次编号 + 原始文档引用路径,改成中性措辞 `Review Round-N` | `Zorro Round-1 D1 rework (docs/feature/a4b-loop/test-report.md)` → `Review Round-1 D1 rework (docs/feature/a4b-loop/test-report.md)` |
+| **`Verity` 姊妹项目对比引用** | src/(7 次)、docs/DESIGN.md(40 次,含 Helix) | 换成中性描述性短语,不点名具体的内部项目;同一文件内措辞保持一致 | `Verity's M2/M3 shipped layers that...` → `a prior internal implementation's M2/M3 layers that...`;`avoid a hardcoded Record like Verity did` → `avoid a hardcoded Record like an earlier internal implementation did` |
+| **`Helix` dispatch-note 引用** | src/loop/audit-store.ts:26(1 次) | 去掉人格代号和跨仓引用,只保留技术理由本身 | `(Helix 2026-07-21 dispatch note, ai-agent#127)` → 按上下文改写成一条纯技术脚注,不留内部组织引用 |
+| **`ai-agent#NNN` 跨仓死链接** | 9 次(src/ 1、DESIGN.md 2、CHANGELOG.md 1、docs/feature/* 5) | 在批次 A/C/D/G 的范围内(即 docs/feature/* 之外)整体去掉或改写成不可点击的纯文本说明;docs/feature/* 范围留给 §7 的待定事项决定 | — |
+| **profile 品牌别名描述** | README.md、docs/DESIGN.md("Helix(running the subscription profile)"这类措辞) | 去掉人格代号,只保留 profile 名 + 中性描述;直接采用 #17 原文措辞 | `Helix (running the subscription profile)` → `personal subscription profile`;`Verity (running the apikey profile)` → `company API / LiteLLM profile` |
+| **`docs/feature/**` 内部的全部品牌名(242 次)** | 批次 B 的范围 | **不替换——原样保留并翻译**——这是构建/复审活动的真实历史记录,内容包括"谁在哪一轮复审里发现了什么问题";用化名替换或删除会扭曲历史记录、丢失可追溯性(当读者想深挖某个技术决策的来龙去脉时,这些文档是唯一的一手记录)。对应 #17 验收标准里的"或者,逐条列出任何刻意保留之处的理由"——**这份 PRD 提议用"对 `docs/feature/**` 整体豁免 + 这一行表格作为书面理由"来满足这条**,而不是逐条列出全部 242 行。这是一个需要指挥官在批次 F 执行前签字确认的编辑判断(§7)。 |
+| **同仓 issue 引用(`issue #2`/`issue #13`)** | docs/ROADMAP.md、docs/DESIGN.md | 原样保留——指向 aeloop 自己的仓库,开源后正常可解析,不算内部工作流泄漏 | — |
 
 ---
 
-## 5. Out-of-Scope Findings (Not Within #17's Scope, for the Commander's Reference — This PRD Does Not Fold These into a Mandatory Batch)
+## 5. 范围外发现(不在 #17 范围内,供指挥官参考——这份 PRD 不擅自把这些并入强制批次)
 
-- **`package.json`'s `"private": true` + `"license": "UNLICENSED"`**: literally inconsistent with the "open-sourcing" goal (a private package with no license can't be externally installed/referenced). #17's original text doesn't mention this item; this PRD doesn't unilaterally expand scope to add it as a mandatory batch, but records it honestly: if the Commander wants this handled as part of this round, an open-source license type (MIT/Apache-2.0, etc.) needs to be additionally decided and a top-level `LICENSE` file added — this is a product judgment call for the Commander/the strategist to make, not something a translation task can decide on its behalf.
-- **No top-level `LICENSE` file currently exists** — same as above, a downstream consequence of it.
-
----
-
-## 6. Recommended Execution Order (Dependency Relationships — Doesn't Mean the Build Phase Must Be Strictly Sequential, but Notes Who Depends on Whom)
-
-1. **Batch D (governance file stripping) + Batch E (.gitignore)** — mutually independent, small change surface, can be done first; this also directly removes CLAUDE.md's 7 brand-name occurrences from the "to-process list" (deletion resolves it, no translation needed).
-2. **Batch G's DESIGN.md English finalization** — recommended to complete before Batch A (at minimum, complete the §1.7 sentence verbatim-quoted by `personas.ts`/`schema-registry.ts`), to avoid Batch A and Batch G independently translating two inconsistent English versions (see §1.3).
-3. **Batch A (src/)** — the 4 sub-batches (A1-A4) can run in parallel, A4 depends on the previous step's DESIGN.md §1.7 translation.
-4. **Batch C (docs/ROADMAP etc.) + the rest of Batch G (README content refresh + bilingual mirrors)** — can run in parallel with Batch A, no conflict (different files).
-5. **Batch B (docs/feature/*)** — fully independent, can be run in parallel at any time, the 5 subdirectories are mutually independent, fan-out recommended.
-6. **Batch F (repo-wide brand-name-removal scan)** — placed last, doing one full-repo `rg` scan + final replacement after A/C/D/E/G are all done and the content is already English — this is less likely to miss things than handling it scattered throughout the translation process. **Before Batch F executes, the Commander needs to sign off on §4's table's last row (the blanket exemption for docs/feature/*)**, otherwise Batch F's acceptance criteria are ambiguous (zero hits vs. zero hits excluding docs/feature — the two readings give different acceptance results).
-7. At the end of every step, run `pnpm test && pnpm lint && pnpm build` uniformly, keeping 34/300 all green + both commands clean.
+- **`package.json` 的 `"private": true` + `"license": "UNLICENSED"`**:和"开源化"这个目标字面上矛盾(一个私有、无 license 的包没法被外部安装/引用)。#17 原文没提这一项;这份 PRD 不擅自扩大范围把它加成强制批次,但如实记录:如果指挥官想在这一轮一并处理,需要额外决定一个开源 license 类型(MIT/Apache-2.0 等)并加一个顶层 `LICENSE` 文件——这是指挥官/军师要做的产品判断,不是翻译任务能代为决定的。
+- **目前不存在顶层 `LICENSE` 文件**——同上,是它的一个下游后果。
 
 ---
 
-## 7. Items Awaiting Commander Confirmation (Doesn't Block Reviewing the PRD Itself, but Blocks Batch F / Part of Batch B's Wrap-Up)
+## 6. 建议执行顺序(依赖关系——不代表构建阶段必须严格顺序执行,但标出谁依赖谁)
 
-1. **How to handle the exemption for the 242 brand-name occurrences inside docs/feature/*** (§4's last row): adopt this PRD's proposed "blanket exemption + one written rationale," or require replacing each one individually with neutral phrasing (which would change Batch B's workload and nature, from "pure translation" to "translation + rewriting historical records," with a risk of distortion)?
-2. **How to handle the `ai-agent#NNN` cross-repo references inside docs/feature/*** (5 of the 9 occurrences are in this directory): keep them along with docs/feature's blanket exemption, or remove the clickable-but-404 cross-repo links even inside historical records?
-3. **The `package.json` license/private fields mentioned in §5**: decide this as part of this round, or explicitly exclude it from this issue's scope and leave it for the Commander to decide separately later?
-
-It's recommended that the Commander give a ruling on all three items together after reading through the PRD — no separate meeting is needed for this; if the Commander is inclined to "go with the PRD's proposed default approach," simply saying "approved" is enough, and PRD §4/§6's default plan will be treated as confirmed.
+1. **批次 D(治理文件剥离)+ 批次 E(.gitignore)**——互相独立,改动面小,可以先做;这也直接把 CLAUDE.md 的 7 处品牌名从"待处理清单"里拿掉(删除即解决,不需要翻译)。
+2. **批次 G 的 DESIGN.md 英文定稿**——建议在批次 A 之前完成(至少完成 `personas.ts`/`schema-registry.ts` 逐字引用的那句 §1.7),避免批次 A 和批次 G 各自独立翻出两个不一致的英文版本(见 §1.3)。
+3. **批次 A(src/)**——4 个子批次(A1-A4)可以并行跑,A4 依赖上一步 DESIGN.md §1.7 的翻译。
+4. **批次 C(docs/ROADMAP 等)+ 批次 G 剩余部分(README 内容刷新 + 双语镜像)**——可以和批次 A 并行,不冲突(不同文件)。
+5. **批次 B(docs/feature/*)**——完全独立,可以随时并行跑,5 个子目录互相独立,建议扇出。
+6. **批次 F(全仓品牌名去除扫描)**——放在最后,在 A/C/D/E/G 全部完成、内容已经是英文之后,做一次全仓 `rg` 扫描 + 最终替换——这比散落在翻译过程各处处理更不容易漏掉。**批次 F 执行前,需要指挥官对 §4 表格最后一行(docs/feature/* 的整体豁免)签字确认**,否则批次 F 的验收标准是模糊的(零命中 vs. 排除 docs/feature 后零命中——两种理解给出不同的验收结果)。
+7. 每一步结束时统一跑一次 `pnpm test && pnpm lint && pnpm build`,保持 34/300 全绿 + 两个命令都干净。
 
 ---
 
-## 8. Process-Gap Disclosure: Zorro's Independent Review Was Skipped This Round (Explicitly Waived by the Commander)
+## 7. 待指挥官确认事项(不阻塞审这份 PRD 本身,但阻塞批次 F / 批次 B 部分收尾)
 
-After the Commander approved §1/§4/§7's three default plans on 2026-07-21, the strategist raised that this round's 14+1 batches (D/E/C/B1-B5/G-DESIGN/A1-A5/G-remainder/F) were **all executed by the Cypher-role agent, without having gone through Zorro's independent review** — per the top-priority gate "Cypher finishes → Zorro PASS → the Commander approves → only then can it be committed," this should have been a hard prerequisite step. The strategist gave two options (① go through Zorro's `/verify` first, ② the Commander explicitly waives it, following the A4b R6 precedent), and **the Commander chose ②, explicitly waiving this round's Zorro independent review**.
+1. **docs/feature/* 内 242 处品牌名的豁免怎么处理**(§4 最后一行):采用这份 PRD 提议的"整体豁免 + 一份书面理由",还是要求逐条替换成中性措辞(这会改变批次 B 的工作量和性质,从"纯翻译"变成"翻译 + 改写历史记录",有扭曲的风险)?
+2. **docs/feature/* 内的 `ai-agent#NNN` 跨仓引用怎么处理**(9 次里有 5 次在这个目录):跟着 docs/feature 的整体豁免一起保留,还是即便在历史记录里也要去掉这些可点击但 404 的跨仓链接?
+3. **§5 提到的 `package.json` license/private 字段**:这一轮一并决定,还是明确排除在这个 issue 范围外,留给指挥官以后单独决定?
 
-**Recorded honestly, nothing concealed**:
-- This round's changes are, by nature, mechanical translation + brand-name cleanup + governance-file deletion/rewriting, not new feature code; but a real risk of semantic drift still exists (at least one instance was actually caught: Batch B2 once mistranslated the role title "junshi" (the Chinese source term for "the strategist") into the proper noun "Helix," and self-corrected afterward; Batch F has specifically done a second pass to check for this kind of residue).
-- The entire acceptance process (CJK scan / brand-name scan / `pnpm test`/`lint`/`build`) was executed by Cypher itself + reviewed by Cypher itself — **this does not constitute independent review in the sense of the "producer ≠ reviewer" rule (Iron Rule 4)**.
-- If a translation distortion / brand-name-cleanup collateral damage / CHANGELOG-rewrite factual inaccuracy is discovered somewhere later, this section is the first place to start the suspect investigation.
-- commit/push still requires the Commander's re-confirmation **at that moment**, each time (this Zorro waiver does not incidentally grant default commit authorization — the two are two independent gates).
+建议指挥官读完这份 PRD 之后,一次性对这三项给出裁决——不需要为此单开会;如果指挥官倾向"就按 PRD 提议的默认方案走",直接说"批准"就够了,PRD §4/§6 的默认方案就算确认。
+
+---
+
+## 8. 流程缺口披露:这一轮跳过了 Zorro 独立复审(指挥官明确豁免)
+
+指挥官在 2026-07-21 批准 §1/§4/§7 的三个默认方案之后,军师提出这一轮的 14+1 个批次(D/E/C/B1-B5/G-DESIGN/A1-A5/G-remainder/F)**全部由 Cypher 角色的 agent 执行,没有走 Zorro 独立复审**——按头号门禁"Cypher 做完 → Zorro PASS → 指挥官批 → 才能 commit",这本该是硬性前置步骤。军师给出两个选项(① 先走 Zorro 的 `/verify`,② 指挥官明确豁免,参照 A4b R6 的先例),**指挥官选了②,明确豁免这一轮的 Zorro 独立复审**。
+
+**如实记录,不隐瞒**:
+- 这一轮的改动本质上是机械翻译 + 品牌名清理 + 治理文件删除/重写,不是新功能代码;但语义漂移的真实风险依然存在(至少真实抓到过一次:批次 B2 曾经把角色头衔"军师"("the strategist"的中文源词)误翻成了专有名词"Helix",事后自我纠正;批次 F 专门做了第二遍扫描检查这类残留)。
+- 整个验收流程(CJK 扫描 / 品牌名扫描 / `pnpm test`/`lint`/`build`)是 Cypher 自己执行 + Cypher 自己复核的——**这不构成"生产者≠审查者"规则(铁律 4)意义上的独立复审**。
+- 如果以后在什么地方发现翻译失真 / 品牌名清理误伤 / CHANGELOG 重写事实性不准,这一节是排查嫌疑的第一站。
+- commit/push 依然需要指挥官**当时**每次重新确认(这次 Zorro 豁免不顺带授予默认的 commit 授权——两者是两道独立的门)。
+</content>

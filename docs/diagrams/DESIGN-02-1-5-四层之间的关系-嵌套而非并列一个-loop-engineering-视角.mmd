@@ -1,0 +1,10 @@
+flowchart LR
+    Goal(("目标"))-->Loop
+    subgraph Loop["🔁 Loop:闭环编排 + 把关 + 阈值 + checkpoint"]
+      subgraph Harness["⚙️ Harness:选模型 + 适配 + 校验 + 工具核验"]
+        subgraph Context["🧠 Context:这个模型看到什么(记忆注入/过滤)"]
+          Prompt["📝 Prompt:persona + schema(一次请求的契约)"]
+        end
+      end
+    end
+    Loop-->Out(("写盘 + 审计"))

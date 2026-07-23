@@ -1,0 +1,23 @@
+flowchart TB
+    USER["用户 / 审批人"]
+    BRAIN["Personal Brain / Company Brain"]
+    CW["Conductor Work\n公司产品层"]
+    C["Conductor\n确定性编排层"]
+    P["Prompt\n输出契约与增量提示"]
+    X["Context\n连续性、召回、压缩"]
+    H["Harness\n模型、工具、验证、预算"]
+    L["Loop\nWorkflow、Gate、Checkpoint"]
+    E["EvidenceBundle\n证据、Token、成本、审计"]
+    WS["隔离 Workspace"]
+
+    USER --> BRAIN
+    BRAIN --> CW
+    CW -->|TaskContract| C
+    C --> P
+    P --> X
+    X --> H
+    H --> L
+    L <--> WS
+    L --> E
+    E --> C
+    C --> USER

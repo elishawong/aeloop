@@ -24,7 +24,7 @@ Zorro R4:代码全对,唯二问题都是文档没跟上 B1 修复后的实际行
 - `runner.test.ts` 的 zero-chunk spy 测试加了 `expect(streamSpy).toHaveBeenCalledTimes(1)`,锁死注入点本身:既防"spy 压根没触发导致后面断言全是空对空",也防"除了这次 resumeRun 还有别的地方意外碰了 .stream()"。
 
 ### 🟡 顺手 2 —— `compiled.stream()` "both call sites" 表述收敛
-- `PRD.md`(原 §8 acceptance criteria 那条 grep 断言)和 `spike-node-start.md` 都有一句说 `compiled.stream()` 有"两个调用点"——实际上整个文件只有**一个**共享的 `compiled.stream()` 语法调用点(在 `runStreamAndPersistCore()` 里),`startRun`/`resumeRun` 都是走同一个函数、同一次调用,不是各自独立调两次。两处都订正为"one call site, shared by both entry points"。(和上一轮已经修过的 `emitProgressEvents` "both call sites" 是两码事,那条说的是 emitProgressEvents 曾经有 in-loop + zero-chunk 两个调用点,已在 R2/R3 收敛成一个;这条说的是 `compiled.stream()` 本身从来就只有一个调用点,表述一直是错的,现在才发现。)
+- `PRD.md`(原 §8 acceptance criteria 那条 grep 断言)和 `spike-node-start.md` 都有一句说 `compiled.stream()` 有"两个调用点"——实际上整个文件只有**一个**共享的 `compiled.stream()` 语法调用点(在 `runStreamAndPersistCore()` 里),`startRun`/`resumeRun` 都是走同一个函数、同一次调用,不是各自独立调两次。两处都订正为"只有一个调用点,由两个入口共用"。(和上一轮已经修过的 `emitProgressEvents` "both call sites" 是两码事,那条说的是 emitProgressEvents 曾经有 in-loop + zero-chunk 两个调用点,已在 R2/R3 收敛成一个;这条说的是 `compiled.stream()` 本身从来就只有一个调用点,表述一直是错的,现在才发现。)
 
 ### 本轮自检
 - **纪律**:本轮**只碰了** `runner.ts` 一处注释(逻辑字节零改动,用 diff against 上一轮备份确认过)+ `runner.test.ts` 一条新断言 + 三份文档(`PRD.md`/`spike-node-start.md`/本文件)。

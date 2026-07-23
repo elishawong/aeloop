@@ -1,54 +1,48 @@
-# Conductor Work implementation status
+# Conductor Work 实现状态
 
-This document records the first implementation slice of the architecture
-design. It is intentionally separate from brain prompts and deployment
-profiles so a company checkout can remove personal material without changing
-the Aeloop engine.
+本文档记录架构设计的第一个实现切片。它被刻意和 brain prompt、部署 profile
+分开,好让公司 checkout 能移除个人素材而不动 Aeloop 引擎本身。
 
-## Implemented in `refactor/conductor-foundation`
+## 已在 `refactor/conductor-foundation` 实现
 
-- `src/workflow/`: versioned workflow manifests, plugin contracts, an
-  in-memory registry, and the built-in `coder-tester-loop` adapter.
-- `src/conductor/`: deterministic `TaskContract` validation. The engine does
-  not ask a model to decide whether a contract is structurally safe.
-- `src/conductor/orchestrator.ts`: deterministic brain-to-workflow selection;
-  this is the orchestrator boundary, not another model persona and not a
-  LangGraph node.
-- The built-in workflow validates an optional `TaskContract` and renders its
-  requirements, scope, evidence policy, and forbidden changes into the
-  execution context seen by Coder and Tester. Legacy task-only callers remain
-  supported.
-- `evaluateExecutionPolicy()` provides a pure fail-closed check for observed
-  paths, commands, dependencies, network use, Git writes, and reviewer writes.
-- `brains/personal/` and `brains/company/`: replaceable prompt/manifest
-  templates. They are product-layer assets, not runtime dependencies.
-- `assembleProfileDeps()`: profile-neutral dependency assembly. The existing
-  subscription CLI path remains available as a compatibility wrapper.
+- `src/workflow/`:带版本号的 workflow manifest、插件契约、一个内存 registry,
+  以及内置的 `coder-tester-loop` adapter。
+- `src/conductor/`:确定性的 `TaskContract` 校验。引擎不会去问模型"这个
+  contract 结构上安不安全"。
+- `src/conductor/orchestrator.ts`:确定性的 brain-to-workflow 选择;这是
+  orchestrator 边界,不是另一个模型 persona,也不是 LangGraph 节点。
+- 内置 workflow 会校验一个可选的 `TaskContract`,把它的 requirements、
+  scope、evidence policy 和禁止改动渲染进 Coder 和 Tester 看到的执行上下文。
+  仅传旧式 task 的调用方依然受支持。
+- `evaluateExecutionPolicy()` 提供一个纯函数、fail-closed 的检查,覆盖观测到
+  的路径、命令、依赖、网络使用、Git 写操作和 reviewer 写操作。
+- `brains/personal/` 和 `brains/company/`:可替换的 prompt/manifest 模板。
+  它们是产品层资产,不是运行时依赖。
+- `assembleProfileDeps()`:profile-中立的依赖装配。既有的 subscription CLI
+  路径仍作为兼容包装保留可用。
 
-## Deliberately not implemented yet
+## 刻意暂不实现
 
-- Model-backed brain conversations.
-- A remote plugin marketplace or dynamic code loading.
-- Automatic Git commit, push, pull request, or merge operations.
-- A declarative workflow DSL. TypeScript plugins are the safer first step;
-  declarative workflows can be added after two or three real workflows exist.
+- 模型驱动的 brain 对话。
+- 远程插件市场或动态代码加载。
+- 自动的 Git commit、push、pull request 或 merge 操作。
+- 声明式 workflow DSL。TypeScript 插件是更安全的第一步;等真实跑出两三个
+  workflow 之后再考虑加声明式 workflow。
 
-## Company demo boundary
+## 公司演示边界
 
-The company checkout supplies its own profile directory (for example the
-existing `apikey`/LiteLLM configuration) and company brain assets. The public
-engine only requires the profile to satisfy the existing `config.yaml`
-contract. No company credentials, PRDs, repository content, or memory database
-belongs in this repository.
+公司 checkout 提供自己的 profile 目录(比如现有的 `apikey`/LiteLLM 配置)
+和公司 brain 素材。公开引擎只要求 profile 满足既有的 `config.yaml` 契约。
+本仓库不应包含任何公司凭证、PRD、仓库内容或记忆数据库。
 
-Set `AELOOP_PROFILES_ROOT` to the private profile root when the configuration
-must live outside the public checkout.
+需要把配置放在公开 checkout 之外时,把 `AELOOP_PROFILES_ROOT` 指向私有的
+profile root。
 
-Run the credential-free architecture demo with:
+跑无凭证的架构演示:
 
 ```bash
 pnpm run demo:company
 ```
 
-It validates a company contract and deterministically selects the built-in
-workflow; it intentionally does not call a model or access a repository.
+它会校验一份公司 contract 并确定性地选出内置 workflow;刻意不调用模型,
+也不访问任何仓库。

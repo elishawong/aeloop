@@ -1,0 +1,37 @@
+flowchart TB
+    subgraph L3["Layer3 — Brain 行为层（新建，从现有参考实现移植）"]
+        WAKE["醒来 loop<br/>(读 identity db → 组开场白)"]
+        CONST["宪法约束<br/>(CORE 铁律 + hooks 等价物)"]
+        POST["Postmortem 复盘仪式"]
+        SCHED["调度<br/>(意图分诊 → 派工 or 直接回话)"]
+    end
+
+    subgraph GLUE["胶水（三块要建）"]
+        TRANS["① 意图→TaskContract 翻译器"]
+        OUTER["② 外层醒来/对话/调度 loop"]
+        VEC["③ 向量层（net-new，加在 FTS5 之上）"]
+    end
+
+    subgraph L1["Layer1 — 共享记忆底座（已有，MemoryStore 库）"]
+        MS["MemoryStore(dbPath)<br/>SQLite + FTS5<br/>12 类 memory type<br/>三态确认 confirm/correct/reject"]
+    end
+
+    subgraph L2["Layer2 — aeloop 执行引擎（已有，brain 不进这层，只在边界喊话）"]
+        ORCH["Orchestrator.planRun()<br/>→ RunPlan"]
+        RUNNER["startRun/resumeRun<br/>coder→G1→tester→G2/G3→apply"]
+        HARNESS["Harness<br/>ProviderRouter + AdapterRegistry<br/>LiteLLMAdapter(direct-api)<br/>ClaudeCliAdapter/CodexCliAdapter(cli-bridge)"]
+        EVB["EvidenceBundleBuilder<br/>→ EvidenceBundle"]
+    end
+
+    WAKE --> MS
+    SCHED --> TRANS
+    TRANS -->|"TaskContract"| ORCH
+    ORCH --> RUNNER
+    RUNNER --> HARNESS
+    RUNNER --> EVB
+    EVB -->|"EvidenceBundle"| OUTER
+    OUTER -->|"三态确认门折回"| MS
+    OUTER --> POST
+    CONST -.->|"约束整个 L3"| WAKE
+    CONST -.-> SCHED
+    VEC -.->|"语义检索，叠加在"| MS

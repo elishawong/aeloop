@@ -1,0 +1,19 @@
+flowchart TD
+    Start(["任务开始"])-->Draft["Coder(模型 A):生成/修改 diff"]
+    Draft-->G1{{"G1 送去复审?"}}
+    G1-- 拒绝:反馈退回 Coder -->Draft
+    G1-- 批准 -->Review["Tester(模型 B):复审"]
+    Review-->V{"结论"}
+    V-- 通过 -->G3{{"G3 签字?"}}
+    G3-- 拒绝:新问题 -->Draft
+    G3-- 批准 -->Apply["写盘(不自动 push)"]-->End(["完成"])
+    V-- 拒绝 -->Inc["reject_count+=1"]
+    Inc-->T{"计数>=阈值?(默认 2)"}
+    T-- 否 -->G2{{"G2 批准修复?"}}
+    G2-- 批准 -->Fix["Coder:修复"]-->Review
+    G2-- 主动升级 -->Esc
+    T-- "是(硬分支,不可绕过)" -->Esc["升级给人工"]
+    Esc-->HD{"人工决定"}
+    HD-- 修改代码/重述 -->Draft
+    HD-- 强制通过 -->G3
+    HD-- 放弃 -->Cancel(["已取消"])

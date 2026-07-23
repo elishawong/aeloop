@@ -2,12 +2,12 @@
 
 脑（Brain）是产品层的需求编译与交互层，不属于 Aeloop 执行内核。它负责把 PRD、对话和公司规则整理成 `TaskContract`，再把人工决定传给 Aeloop。
 
-The engine only consumes the versioned contracts exported by a brain. Brain prompts may evolve independently and must never contain credentials, customer data, or repository secrets.
+引擎只消费 brain 导出的、带版本号的 contract。Brain 的 prompt 可以独立演进，但绝不能包含凭证、客户数据或仓库机密。
 
-Included templates:
+内置模板：
 
-- `personal/`: a flexible personal brain profile for Helix-like use.
-- `company/`: a conservative company brain profile for Verity-like use.
+- `personal/`：偏灵活的个人 brain profile，供 Helix 一类的用法使用。
+- `company/`：偏保守的公司 brain profile，供 Verity 一类的用法使用。
 
-These files are safe defaults and are not a substitute for deployment-specific policy or secret management.
+这些文件是安全的默认值，不能替代部署专属的策略或机密管理。
 

@@ -1,58 +1,37 @@
 # aeloop
 
-**Model-agnostic, governance-first coder/tester engine.**
+**模型无关、以治理为核心的 coder/tester 引擎。**
 
-Four nested layers — **Prompt ⊂ Context ⊂ Harness ⊂ Loop** — plus a profile
-overlay, so one engine powers two profiles: a **personal subscription
-profile** (claude-cli / codex-cli, CLI bridge) and a **company API /
-LiteLLM profile** (LiteLLM proxy) — corresponding to the `subscription` and
-`apikey` overlays, respectively. Neither is a submodule; both are *profiles*
-on aeloop.
+四层嵌套架构 —— **Prompt ⊂ Context ⊂ Harness ⊂ Loop** —— 再加一层 profile
+overlay,让同一个引擎支撑两个 profile:一个**个人订阅 profile**(claude-cli
+/ codex-cli,CLI bridge)和一个**公司 API / LiteLLM profile**(LiteLLM
+代理),分别对应 `subscription` 和 `apikey` 两个 overlay。两者都不是子模块,
+而是 aeloop 之上的 *profile*。
 
-## Why
+## 为什么这么设计
 
-- **Anti-hallucination by mechanism**, not by asking the model to be honest: structured-output schema forces every claim to expose its confidence + source; an independent tester (a *different* model) reviews the coder; on the CLI-bridge path, tool-execution is verified against what the model *claims* it did.
-- **Human-gated loop**: Coder → G1 → Tester → reject-threshold → escalation → G3 final sign-off. Every write is gated.
-- **Model-agnostic**: any provider per role via adapters — LiteLLM (`direct-api`) or claude/codex CLI (`cli-bridge`).
+- **靠机制防幻觉,而不是指望模型"说实话"**:结构化输出 schema 强制每条 claim 都要带上置信度和来源;一个独立的 tester(用**不同**模型)复审 coder 的产出;在 CLI-bridge 路径上,工具执行会被拿去和模型*声称*做过的动作做核对。
+- **人工把关的 loop**:Coder → G1 → Tester → 拒绝阈值 → 升级 → G3 最终签字。每一次写入都经过 gate。
+- **模型无关**:任意角色可配任意 provider,走适配器 —— LiteLLM(`direct-api`)或 claude/codex CLI(`cli-bridge`)。
 
-## Status
+## 当前状态
 
-A0 through A5 are complete: all four engine layers (Prompt, Context,
-Harness, Loop) are implemented, plus the profile/overlay mechanism and a
-real, installable CLI (`aeloop start`/`resume`/`list`) driving the engine
-against the `subscription` profile. **368 tests passing**; `pnpm lint`
-(`tsc --noEmit`) and `pnpm build` are both clean. Remaining milestone is
-**A6 (dual-profile acceptance run)** — see [`docs/ROADMAP.md`](./docs/ROADMAP.md)
-for the full milestone-by-milestone breakdown.
+A0 到 A4b 已经全部完成:四个引擎层(Prompt、Context、Harness、Loop)均已
+实现,profile/overlay 机制也已就绪。**300 个测试全部通过**,覆盖 34 个测试
+文件;`pnpm lint`(`tsc --noEmit`)和 `pnpm build` 均保持干净。剩余里程碑是
+**A5(CLI/TUI)**和**A6(双 profile 验收跑)**——完整的里程碑拆解见
+[`docs/ROADMAP.md`](./docs/ROADMAP.md)。
 
-## Getting started
+## 快速开始
 
 ```sh
 pnpm install
-cp .env.example .env   # set AI_AGENT_PROFILE and, for the apikey profile, LITELLM_BASE_URL/LITELLM_TOKEN
+cp .env.example .env   # 设置 AI_AGENT_PROFILE;如果用 apikey profile,还要设置 LITELLM_BASE_URL/LITELLM_TOKEN
 pnpm test
 pnpm build
 ```
 
-Drive one Loop run through the real, interactive CLI (`subscription`
-profile only — see `docs/ROADMAP.md`'s A5 entry for the `apikey` profile's
-status):
+## 文档
 
-```sh
-node dist/cli/bin.js start "<task description>"
-# ...renders each gate's diff/issues, prompts for a decision (G1/G3
-# approve-or-reject, G2 approve-or-escalate, Escalation revise/
-# force-pass/abandon)...
-node dist/cli/bin.js list             # see paused/escalated runs
-node dist/cli/bin.js resume <runId>   # continue one, even in a new process
-```
-
-## Documentation
-
-- [`docs/DESIGN.md`](./docs/DESIGN.md) — full design: architecture, sequence diagrams, DB schema, file structure, milestones.
-- [`docs/ROADMAP.md`](./docs/ROADMAP.md) — milestone-by-milestone progress.
-- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — tech stack, project layout, commands, PR expectations.
-
-## Contributing
-
-See [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+- [`docs/DESIGN.md`](./docs/DESIGN.md) —— 完整设计:架构、时序图、数据库 schema、文件结构、里程碑。
+- [`docs/ROADMAP.md`](./docs/ROADMAP.md) —— 按里程碑划分的进度看板。
