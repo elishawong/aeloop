@@ -233,7 +233,7 @@ sequenceDiagram
 
 | 铁律条款 | 🔒能硬机制化 / 👁只能软 | 依据 | 失效风险（若👁，必须写） |
 |---|---|---|---|
-| commit/push 审批门 | 🔒 | `brain-commit-gate.mjs`（§3.b）PreToolUse deny，真拦截 | 见 §3.b 已知局限：只挡 Bash 里 token 化能解析的命令位置，绕不过变量拼接/`eval`（同 Helix `session-commit-gate.mjs` 已知局限①，逻辑完全一致，不重复展开） |
+| commit/push 审批门 | 🔒 | `brain-commit-gate.mjs`（§3.b）PreToolUse deny，真拦截 | **两条已知局限，缺一不完整**（Zorro 2026-07-23 复审 finding-3：此前这里只写了第①条，漏了源文件本身记入风险清单的第②条，本次补齐，不是新发现，是移植时漏披露）：① 只挡 Bash 里 token 化能解析的命令位置，绕不过变量拼接/`eval`（同 Helix `session-commit-gate.mjs` 已知局限①，逻辑完全一致）；② **只用 `cwd` 判定目标仓库，不解析命令文本里的 `-C`/`--git-dir=` 参数**——从仓库外用 `cd /path/to/aeloop && git commit`、`git -C /path/to/aeloop commit`、`gh -R owner/aeloop pr merge` 把目标重定向回 aeloop，本 gate 会因为 `cwd` toplevel 不是 aeloop 而直接 allow，是**真正的绕过路径**（精确对应源文件 `session-commit-gate.mjs:57-61` finding-3）。**两条都是和 ai-agent 生产基线完全相同的、已接受的软门局限，不是本设计引入的新缺陷，也不在本次修复范围**——`brain-commit-gate.mjs` 头注释已同步补齐这两条披露 |
 | 无 issue 不动手 | 🔒（**operator 已确认：能力保留真 deny，但默认档位关闭**，见 §3.b/§7） | `brain-issue-gate.mjs`（§3.b），`enforce` 模式下机制与 Helix 一致 | 只挡 Edit/Write，不挡 Bash 里 `cat >> file`/`sed -i` 类绕过（同 Helix `session-issue-gate.mjs` 已知局限，逻辑一致）；**新增一条**：默认档位关闭意味着"无 issue 不动手"这条铁律在日常模式下**完全不生效**，只有 operator 主动切到 `enforce` 才生效——这不是"机制没做到"，是 operator 主动选择的产品档位，如实标注这条边界，不要在 `CLAUDE.md`/`BRAIN.md` 里把这条铁律写得像默认就在生效 |
 | `rm -rf`/`.env`/force-push 硬拦 | 🔒 | `brain-red-line-guard.mjs`（§3.b，新设计） | 命令混淆同上；`.env` 侧只挡通过 Bash 重定向或 Edit/Write 工具的写入，挡不住模型用其他工具间接达成（如通过一个自定义脚本文件写 `.env`，脚本本身不叫 `.env` 这个名字） |
 | worktree 隔离 | 👁（纠正 issue body 分类，见 §1） | `brain-isolation-guard.mjs` 只是 SessionStart 警告注入 | 高负载/心急时模型或 operator 都可能无视警告继续操作；真正做成硬拦（比如检测到并发会话就 deny 所有写操作）Phase1 不做——代价是"防止两个会话互相踩脚"这件事没有真正的安全网，只有提醒 |

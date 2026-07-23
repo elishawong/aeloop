@@ -1,0 +1,4 @@
+{
+  "_comment": "复制这份文件成 .claude/brain.local.json（已 gitignore，不会被提交）。issue #88 B9：解决 IDE/图形界面启动的 Claude Code 会话不继承 shell profile export 的坑——AELOOP_BRAIN_IDENTITY_DB 环境变量优先，读不到时 hook 会 fallback 读这份本地配置的 identityDbPath 字段。见 docs/conductor-brain-layer/WAKE-GREETING-RUNBOOK.md 的『IDE 启动读不到 env 的坑』一节。",
+  "identityDbPath": "/absolute/path/to/your/identity.db"
+}
