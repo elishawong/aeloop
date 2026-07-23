@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { EvidenceBundleBuilder, EvidenceEventProjector, TokenBudgetExceededError, TokenBudgetLedger } from "../bundle.js";
 import type { LoopEvent } from "../../loop/events.js";
+import { VERSION_STRING } from "../../shared/version.js";
 
 describe("EvidenceBundle", () => {
+  it("issue #98: engineVersion is always populated and matches the single VERSION_STRING every other face reads (CLI --version, wake-greeting)", () => {
+    const bundle = new EvidenceBundleBuilder({ runId: 1 }).build();
+    expect(bundle.engineVersion).toBe(VERSION_STRING);
+    expect(bundle.engineVersion).not.toBe("");
+  });
+
   it("keeps requirement coverage and explicitly reports unproven items", () => {
     const bundle = new EvidenceBundleBuilder({ runId: 1, contractId: "c-1", requirementIds: ["REQ-1", "REQ-2"] })
       .addEvidence({ id: "test-1", kind: "test", title: "unit test", ref: "artifact://test-1", passed: true })

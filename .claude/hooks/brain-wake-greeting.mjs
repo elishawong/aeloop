@@ -48,6 +48,11 @@ import { resolveIdentityDbPath } from "./lib/db-path.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SPIKE_LIB_DIR = path.join(HERE, "..", "..", "docs", "conductor-brain-layer", "spike", "lib");
+// issue #98：`resolveVersionLine()`（lib/version-info.mjs）要读 `<REPO_ROOT>/dist/shared/
+// version-info.generated.js`——真实源码仓库和全局安装后的 `repo-snapshot/` 两种场景下，
+// `REPO_ROOT` 都是这个 hook 自己所在目录（`.claude/hooks/`）往上两级，和 SPIKE_LIB_DIR 的
+// 计算方式同一惯例（目录骨架保留，见 `install-global-brain.mjs` 头注释）。
+const REPO_ROOT = path.join(HERE, "..", "..");
 
 function emitAdditionalContext(text) {
   process.stdout.write(
@@ -103,6 +108,17 @@ async function main() {
 
   if (process.env.AELOOP_BRAIN_IDENTITY_NAME) {
     data = { ...data, identityName: process.env.AELOOP_BRAIN_IDENTITY_NAME };
+  }
+
+  // issue #98：版本行解析单独包 try/catch——这一步失败（比如 dist/ 没 build 过）绝不能拖累
+  // 整段开场白（`resolveVersionLine()` 自己已经 fail-soft 返回 undefined 不抛错，这里再加一层
+  // 纯粹是防御性的：即便它未来某天违反自己的契约意外抛错，也只丢版本行，不影响开场白其余部分）。
+  try {
+    const { resolveVersionLine } = await import(path.join(SPIKE_LIB_DIR, "version-info.mjs"));
+    const versionLine = await resolveVersionLine(REPO_ROOT);
+    if (versionLine) data = { ...data, versionLine };
+  } catch {
+    /* 版本行是锦上添花的诊断信息，不是开场白的必需部分——解析失败就没有这一行，不阻断 */
   }
 
   const greeting = renderGreeting(data);

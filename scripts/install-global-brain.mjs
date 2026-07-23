@@ -56,6 +56,10 @@ export const COPY_ITEMS = [
   { src: path.join("docs", "conductor-brain-layer", "spike", "lib", "render-greeting.mjs"), type: "file" },
   { src: path.join("docs", "conductor-brain-layer", "spike", "lib", "status-table.mjs"), type: "file" },
   { src: path.join("docs", "conductor-brain-layer", "spike", "lib", "sanitize.mjs"), type: "file" },
+  // issue #98：brain-wake-greeting.mjs 动态 import 这个 lib 来读版本行——不在这份清单里的话，
+  // 装完之后会是 MODULE_NOT_FOUND（这一步本身有 try/catch 兜底不会阻断开场白，但版本行会永远
+  // 缺失，等同于没做）。
+  { src: path.join("docs", "conductor-brain-layer", "spike", "lib", "version-info.mjs"), type: "file" },
 ];
 
 /** @param {string} [homeDir] */
@@ -352,6 +356,34 @@ export function installGlobalBrain(opts = {}) {
   // ④ 身份库数据目录（不预先 touch db 文件——better-sqlite3 首次 open 会自动创建）
   mkdirSync(dataDir, { recursive: true });
 
+  // issue #98：安装完成后回显"装的是哪个版本"——读的是**刚换入的这份 snapshotDir**（新快照
+  // 已经生效，见上方原子换入），不是当前运行这个安装脚本的仓库自己的 dist/：两者理论上应该
+  // 一致（都出自同一次 `pnpm run build`），但如果哪天这两个目录不巧不同步，读 snapshotDir 才
+  // 是"真实装进去的那份"，不是"打算装的那份"。用正则从生成的 .js 文件文本里提取 JSON 字面量
+  // ——不用动态 `import()`（那会让 `installGlobalBrain()` 整个函数变成 async，波及
+  // `test-install-global-brain.mjs` 里几十处 `assert.throws(() => installGlobalBrain(...))` 的
+  // "同步抛错"断言，得不偿失；这里只是读一份已知格式的生成产物，不需要真的执行它）。fail-soft：
+  // 读不出来（理论上不该发生，因为 assertStagingUsable() 已经在换入前确认过 dist/ 非空——但
+  // 版本文件本身内容不对/被自定义 execImpl 的假 build 跳过时仍可能读不到）不阻断安装本身，只是
+  // 回显文案变成占位符。
+  //
+  // issue #98 Zorro 独立复审 #2：直接读生成产物里的 `versionString` 字段（`scripts/
+  // generate-version.mjs` 的 `formatVersionString()` 已经算过一次），不在这里自己再拼一遍
+  // "+"/"-dirty"——本文件、`src/shared/version.ts`、`docs/conductor-brain-layer/spike/lib/
+  // version-info.mjs` 三处此前各自重建格式化规则,现在统一读同一个已经算好的字符串字面量。
+  let installedVersion = "(无法读取版本信息)";
+  try {
+    const versionModulePath = path.join(snapshotDir, "dist", "shared", "version-info.generated.js");
+    const versionModuleSource = readFileSync(versionModulePath, "utf8");
+    const match = /GENERATED_VERSION_INFO\s*=\s*(\{[\s\S]*?\});/.exec(versionModuleSource);
+    const info = match ? JSON.parse(match[1]) : null;
+    if (info && typeof info.versionString === "string" && info.versionString.trim() !== "") {
+      installedVersion = info.versionString;
+    }
+  } catch {
+    /* fail-soft，见上方注释 —— 不阻断安装 */
+  }
+
   // ⑤ 合并写入 settings.json（先备份，即便本次没有实质改动也不额外写入——幂等，见下 changed 判据）
   //
   // 🔒 Zorro 第3-5轮多次复审收口（2026-07-23）：这是全批次唯一真的写用户 `~/.claude/settings.json`
@@ -419,7 +451,7 @@ export function installGlobalBrain(opts = {}) {
     }
   }
 
-  return { dryRun: false, snapshotDir, dataDir, settingsPath, hookCommand, settingsChanged };
+  return { dryRun: false, snapshotDir, dataDir, settingsPath, hookCommand, settingsChanged, installedVersion };
 }
 
 function parseArgs(argv) {
@@ -444,4 +476,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   console.log(`  settingsPath: ${result.settingsPath}`);
   console.log(`  hookCommand: ${result.hookCommand}`);
   console.log(`  settings.json ${result.settingsChanged ? "将/已新增一条 SessionStart hook 条目" : "已包含该条目（幂等跳过）"}`);
+  // issue #98：dry-run 不真的 build/拷贝，没有产出可读的版本信息，只在真实安装完成后回显。
+  if (!result.dryRun) console.log(`  已安装版本: ${result.installedVersion}`);
 }

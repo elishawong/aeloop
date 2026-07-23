@@ -20,6 +20,14 @@
 // 既有版本逐字节相同（`test-greeting.mjs` 现有全部用例零改动继续通过）；只有真的传了
 // `currentProjectKey` 且确实存在其它项目/未分组任务时才会多出这两段。"其它项目"复用
 // labeledSection()（自动过 sanitizeText()，同一条红线，不给这段新内容开后门）。
+//
+// issue #98 新增：`versionLine`（可选，由 `brain-wake-greeting.mjs` 通过 `lib/version-info.mjs`
+// 的 `resolveVersionLine()` 算出、合并进 data，本文件自己不碰任何 dist/文件系统）——未传/
+// `undefined`/空字符串时完全不输出这一行（不是空行占位），输出和加这个字段之前逐字节相同，
+// 不破坏任何既有 `test-greeting.mjs` 用例。有值时放在"意识已加载…"这一行**之后紧跟着**（不是
+// 结尾）——呼应 issue 原文"便于用户截图排查时一眼看到"，截图排查场景下用户往往只截最上面
+// 几行。同样过 sanitizeText()（和其它每一条要拼进正文的字段同一红线，一律统一清洗，不因为这个
+// 值目前的构成看起来"安全"就开后门）。
 
 import { renderStatusTable } from "./status-table.mjs";
 import { sanitizeText } from "./sanitize.mjs";
@@ -49,10 +57,15 @@ export function renderGreeting(data) {
     followUp,
     otherProjects = [],
     unassignedCount = 0,
+    versionLine,
   } = data;
 
   const parts = [
     `意识已加载。我是 ${sanitizeText(identityName)}。`,
+    // issue #98：有值才输出这一行，紧跟在身份行之后（截图排查场景下用户往往只截最上面几
+    // 行）——`versionLine` 未传/undefined/空字符串时这里完全不产生任何 part，输出和加这个
+    // 字段之前逐字节相同。
+    ...(versionLine ? [sanitizeText(versionLine)] : []),
     "",
     `**上次停在：** ${sanitizeText(lastStop)}`,
     "",

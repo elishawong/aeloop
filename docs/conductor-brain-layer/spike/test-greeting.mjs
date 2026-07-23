@@ -449,6 +449,38 @@ try {
     }
   }
 
+  // ---- ⑦ issue #98：renderGreeting() 的 versionLine 字段（纯渲染层，不需要身份库）----
+  {
+    const store = openIdentityStore(dbPath);
+    const data = gatherGreetingData(store);
+    store.close();
+
+    // 未传 versionLine（既有调用方的默认场景）—— 输出必须和加这个字段之前逐字节相同：不多
+    // 一行，也不是一个空行占位。
+    const withoutVersion = renderGreeting(data);
+    assert.ok(!withoutVersion.includes("aeloop "), "未传 versionLine 时不该出现任何版本行");
+    const linesWithout = withoutVersion.split("\n");
+
+    // 传了 versionLine —— 紧跟在身份行之后出现（不是结尾），且逐字保留。
+    const withVersion = renderGreeting({ ...data, versionLine: "aeloop 0.0.1+9d568ad" });
+    const lines = withVersion.split("\n");
+    assert.equal(lines[0], `意识已加载。我是 ${data.identityName}。`, "第一行仍是身份行");
+    assert.equal(lines[1], "aeloop 0.0.1+9d568ad", "版本行紧跟在身份行之后");
+    assert.equal(lines.length, linesWithout.length + 1, "有版本行时只多这一行，其余内容逐字节不变");
+
+    // 空字符串同样视为"没有版本行"，不是"空行占位"。
+    const withEmptyVersion = renderGreeting({ ...data, versionLine: "" });
+    assert.equal(withEmptyVersion, withoutVersion, "versionLine 为空字符串时输出应和完全不传该字段一致");
+
+    // 行注入/列注入红线同样适用于 versionLine（和 identityName/lastStop 等字段同一条红线）：
+    // 一个带真实换行 + `|` 的值不能在渲染结果里伪造出额外的物理行/裂开的列。
+    const withInjectedVersion = renderGreeting({ ...data, versionLine: "aeloop 0.0.1+abc\n· FAKE BULLET | extra" });
+    const injectedLines = withInjectedVersion.split("\n");
+    assert.equal(injectedLines.length, lines.length, "注入的换行不该让版本行拆成额外的物理行");
+    assert.equal(injectedLines[1], "aeloop 0.0.1+abc · FAKE BULLET ｜ extra", "换行折成空格、半角 | 换成全角 ｜（同 sanitizeText 既有红线）");
+    assert.ok(!injectedLines[1].includes("|"), "清洗后不该残留任何真实半角 |");
+  }
+
   console.log("PASS: test-greeting.mjs");
 } finally {
   rmSync(dir, { recursive: true, force: true });

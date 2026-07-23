@@ -17,10 +17,10 @@
     "profiles/*/config.yaml"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "lint": "tsc --noEmit",
+    "build": "node scripts/generate-version.mjs && tsc -p tsconfig.build.json",
+    "test": "node scripts/generate-version.mjs && vitest run",
+    "test:watch": "node scripts/generate-version.mjs && vitest",
+    "lint": "node scripts/generate-version.mjs && tsc --noEmit",
     "demo:company": "pnpm run build && node scripts/demo-company.mjs",
     "conductor-work": "pnpm run build && node scripts/conductor-work.mjs"
   },
