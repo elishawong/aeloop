@@ -147,6 +147,71 @@ describe("main — argv parsing errors (no dependency graph ever assembled)", ()
     expect(logSpy.mock.calls.flat().join("\n")).toContain("Usage:");
   });
 
+  it("issue #98: --version prints VERSION_STRING and exits cleanly (exitCode undefined), without assembling any dependency graph", async () => {
+    await main(["--version"]);
+    expect(assembleSubscriptionDepsMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+    const printed = logSpy.mock.calls.flat().join("\n");
+    expect(printed).toMatch(/^aeloop \S+\+\S+/); // "aeloop <packageVersion>+<gitSha>[-dirty]"
+  });
+
+  it("issue #98: -v is the same as --version", async () => {
+    await main(["-v"]);
+    expect(process.exitCode).toBeUndefined();
+    expect(logSpy.mock.calls.flat().join("\n")).toMatch(/^aeloop \S+\+\S+/);
+  });
+
+  it("issue #98: --version and EvidenceBundle.engineVersion agree on the exact same string (cross-face consistency, PRD §6 acceptance core)", async () => {
+    const { VERSION_STRING } = await import("../../shared/version.js");
+    await main(["--version"]);
+    const printed = logSpy.mock.calls.flat().join("\n").trim();
+    expect(printed).toBe(`aeloop ${VERSION_STRING}`);
+  });
+
+  it("issue #98: --help output also mentions --version, and VERSION_STRING appears in the help banner", async () => {
+    const { VERSION_STRING } = await import("../../shared/version.js");
+    await main(["--help"]);
+    const printed = logSpy.mock.calls.flat().join("\n");
+    expect(printed).toContain("aeloop --version, -v");
+    expect(printed).toContain(VERSION_STRING);
+  });
+
+  it("issue #98 Zorro blocker: --version --bogus is reported as unrecognized option, NOT silently swallowed into a clean --version exit", async () => {
+    await main(["--version", "--bogus"]);
+    expect(assembleSubscriptionDepsMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+    const printed = errorSpy.mock.calls.flat().join("\n");
+    expect(printed).toContain("unrecognized option");
+    expect(printed).toContain("--bogus");
+    expect(logSpy.mock.calls.flat().join("\n")).not.toMatch(/^aeloop /); // never printed the version banner
+  });
+
+  it("issue #98 Zorro blocker: --bogus --version (unknown option BEFORE --version) is also reported as unrecognized, not swallowed", async () => {
+    await main(["--bogus", "--version"]);
+    expect(assembleSubscriptionDepsMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+    expect(errorSpy.mock.calls.flat().join("\n")).toContain("unrecognized option");
+  });
+
+  it("issue #98 Zorro blocker: -vx (combined short flags, -v known + -x unknown) reports the unknown -x, doesn't silently swallow it into --version", async () => {
+    await main(["-vx"]);
+    expect(assembleSubscriptionDepsMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+    const printed = errorSpy.mock.calls.flat().join("\n");
+    expect(printed).toContain("unrecognized option");
+    expect(printed).toContain("-x");
+  });
+
+  it("issue #98 Zorro blocker: --help --bogus is reported as unrecognized option, NOT silently swallowed into a clean --help exit", async () => {
+    await main(["--help", "--bogus"]);
+    expect(assembleSubscriptionDepsMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+    const printed = errorSpy.mock.calls.flat().join("\n");
+    expect(printed).toContain("unrecognized option");
+    expect(printed).toContain("--bogus");
+    expect(logSpy.mock.calls.flat().join("\n")).not.toContain("Usage:"); // never printed the help banner
+  });
+
   it("顺手修: bare aeloop with no command prints usage instead of an 'unrecognized command' error", async () => {
     await main([]);
     expect(assembleSubscriptionDepsMock).not.toHaveBeenCalled();

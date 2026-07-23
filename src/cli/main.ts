@@ -47,6 +47,7 @@ import { runInteractiveLoop } from "./run-loop.js";
 import { stripControlSequences } from "./sanitize-terminal.js";
 import { SystemConfig } from "../context/config.js";
 import { getPendingInterrupt, getResumableRuns, startRun } from "../loop/runner.js";
+import { VERSION_STRING } from "../shared/version.js";
 
 export interface MainOverrides {
   profilesRoot?: string;
@@ -224,13 +225,14 @@ async function runList(overrides: MainOverrides): Promise<void> {
  * repo's `README.md` "Getting started" section both already describe this
  * exact usage as the documented entry point.
  */
-const HELP_TEXT = `aeloop — model-agnostic, governance-first workflow engine
+const HELP_TEXT = `aeloop — model-agnostic, governance-first workflow engine (${VERSION_STRING})
 
 Usage:
   aeloop start "<task description>"   Start a new run against AI_AGENT_PROFILE (default: subscription)
   aeloop resume <runId>               Resume a paused/escalated run — safe from a brand-new process
   aeloop list                         List resumable (running/escalated) runs
   aeloop --help, -h                   Show this help
+  aeloop --version, -v                Show version
 
 Each gate (G1/G2/G3/Escalation) renders the coder/tester's diff/issues and prompts for a decision:
 G1/G3 approve-or-reject, G2 approve-or-escalate, Escalation revise/force-pass/abandon.
@@ -242,14 +244,24 @@ function printHelp(): void {
 }
 
 /**
- * The only long option this CLI recognizes at all — `--help`/`-h`. Declaring
- * it explicitly (rather than `parseArgs`'s bare `{}` this file used before)
- * is also what makes the unrecognized-option check below possible: with no
- * `options` config, `strict:false` alone gives no reliable way to tell "a
- * flag `parseArgs` doesn't know about" apart from "a flag this file
- * deliberately supports".
+ * issue #98: `aeloop --version`/`-v` prints the single `VERSION_STRING` every other face
+ * (`EvidenceBundle.engineVersion`, the wake-greeting hook's version line, the installed
+ * snapshot's own `dist/`) also reads — see `src/shared/version.ts` and
+ * `docs/version-stamping/PRD.md` §3.2. Same "clean exit, no dependency graph assembled" posture
+ * as `printHelp()` above.
  */
-const KNOWN_OPTIONS = { help: { type: "boolean", short: "h" } } as const;
+function printVersion(): void {
+  console.log(`aeloop ${VERSION_STRING}`);
+}
+
+/**
+ * The only long options this CLI recognizes at all — `--help`/`-h` and `--version`/`-v`.
+ * Declaring them explicitly (rather than `parseArgs`'s bare `{}` this file used before) is also
+ * what makes the unrecognized-option check below possible: with no `options` config, `strict:
+ * false` alone gives no reliable way to tell "a flag `parseArgs` doesn't know about" apart from
+ * "a flag this file deliberately supports".
+ */
+const KNOWN_OPTIONS = { help: { type: "boolean", short: "h" }, version: { type: "boolean", short: "v" } } as const;
 
 async function dispatch(argv: string[], overrides: MainOverrides): Promise<void> {
   const { positionals, values, tokens } = parseArgs({
@@ -260,18 +272,33 @@ async function dispatch(argv: string[], overrides: MainOverrides): Promise<void>
     tokens: true,
   });
 
-  if (values.help) {
-    printHelp();
-    return;
-  }
-
   // `strict:false` was chosen (PRD §6.7's judgment call, file header) so a genuinely unknown
   // `--flag` doesn't itself crash parseArgs — but silently swallowing it is its own footgun (Zorro
   // re-review "顺手修" item): a typo'd flag would otherwise just vanish with no feedback at all.
   // Report it as a clean error instead, the same way an unrecognized *command* already is below.
-  const unknownOption = tokens.find((t) => t.kind === "option" && t.name !== "help" && t.name !== "h");
+  //
+  // issue #98 Zorro 独立复审 blocker（Codex gpt-5.6-sol 二签，exit0 真跑复现）：这段检测此前
+  // 排在 `values.version`/`values.help` 两个 early-return **之后** —— `--version --bogus` /
+  // `--bogus --version` / `-vx` / `--help --bogus` 全部会先命中 version/help 分支直接 return，
+  // `--bogus`/多出来的 `x` 从未被检查到，静默吞掉、exit0，直接违反本段注释自己声称的"typo'd
+  // flag 不该无声消失"这条不变量。修法：unknownOption 检测必须在任何 early-return **之前**
+  // 跑一遍——一个命令行里只要混进任何这两者之外的未知 option，不管 `--version`/`--help` 是否
+  // 也同时出现，都先报错、不打印任何东西、不 return。
+  const unknownOption = tokens.find(
+    (t) => t.kind === "option" && t.name !== "help" && t.name !== "h" && t.name !== "version" && t.name !== "v",
+  );
   if (unknownOption && unknownOption.kind === "option") {
     throw new Error(`aeloop: unrecognized option "${unknownOption.rawName}" (run "aeloop --help" for usage)`);
+  }
+
+  if (values.version) {
+    printVersion();
+    return;
+  }
+
+  if (values.help) {
+    printHelp();
+    return;
   }
 
   const [command, ...rest] = positionals;

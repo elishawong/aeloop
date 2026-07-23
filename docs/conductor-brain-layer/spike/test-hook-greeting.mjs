@@ -23,7 +23,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -140,6 +140,83 @@ try {
   }
 
   console.log("PASS: test-hook-greeting.mjs（⑤ stdin cwd 正确反查当前项目并驱动分组渲染，issue #93 B4）");
+
+  // ⑥（issue #98）真实 spawn 这个 hook（本仓库自己 dist/ 已 build 好），additionalContext
+  //    里应该带上版本行，且和 dist/shared/version-info.generated.js 的真实内容一致——这是
+  //    "运行时读 build 时刻固化的产物，不现算 git"这条设计在 hook 层面的端到端证明。
+  {
+    const dbDir6 = mkdtempSync(path.join(tmpdir(), "aeloop-test-hook-greeting-version-"));
+    const dbPath6 = path.join(dbDir6, "identity.db");
+    try {
+      const { GENERATED_VERSION_INFO } = await import(
+        path.join(REPO_ROOT, "dist", "shared", "version-info.generated.js")
+      );
+      // issue #98 Zorro 独立复审 #2：读生成产物里已经算好的 versionString 字段，不在这条测试
+      // 自己再拼一遍 "+"/"-dirty"（这条断言本身也是唯一格式化真源的消费方之一）。
+      const expectedLine = `aeloop ${GENERATED_VERSION_INFO.versionString}`;
+
+      const stdinPayload6 = JSON.stringify({ session_id: "test-hook-version", cwd: REPO_ROOT });
+      const proc6 = spawnSync("node", [HOOK_PATH], {
+        input: stdinPayload6,
+        encoding: "utf8",
+        env: { ...process.env, AELOOP_BRAIN_IDENTITY_DB: dbPath6 },
+      });
+      assert.equal(proc6.status, 0, `hook 必须 exit 0，实际 status=${proc6.status}，stderr=${proc6.stderr}`);
+      const additionalContext6 = JSON.parse(proc6.stdout).hookSpecificOutput.additionalContext;
+      assert.ok(additionalContext6.includes(expectedLine), `additionalContext 应包含版本行 "${expectedLine}"`);
+
+      const lines6 = additionalContext6.split("\n").filter((line) => line.startsWith("意识已加载。") || line === expectedLine);
+      assert.equal(lines6[1], expectedLine, "版本行应紧跟在身份行之后");
+    } finally {
+      rmSync(dbDir6, { recursive: true, force: true });
+    }
+  }
+
+  console.log("PASS: test-hook-greeting.mjs（⑥ 版本行真实端到端出现在 additionalContext 里，issue #98）");
+
+  // ⑦（issue #98 Zorro 独立复审 #3）：hook 级 fail-soft 负向用例，PRD §4 明列但初版实现漏做的
+  //    那条——"REPO_ROOT 下没有 dist/ 时开场白仍正常输出、只是没有版本行"。此前⑥段的注释声称
+  //    这个场景"已经在 test-version-info.mjs 用例覆盖"，那是不准确的：test-version-info.mjs
+  //    只覆盖了 resolveVersionLine() 这一个函数自己的返回值（dist 缺失时返回 undefined），从没
+  //    有真实 spawn 过 brain-wake-greeting.mjs 的 main()，没有验证它自己那层独立 try/catch +
+  //    `if (versionLine) data = {...}` 条件渲染路径真的按预期工作——这条订正后的注释 + 这条新
+  //    用例才是真正把这段路径端到端跑一遍。
+  //    做法：真实把本仓库自己 dist/shared/version-info.generated.js **临时改名挪走**（不是
+  //    另建一个没有 dist/ 的假仓库——那样 REPO_ROOT 也得跟着换，version-info.mjs 之外的其它
+  //    spike lib 全部要重新拷一份，成本远高于"挪走一个文件、spawn、再挪回来"），spawn 真实
+  //    hook，断言：① exit 0（不崩）② additionalContext 里没有任何 "aeloop " 开头的版本行
+  //    ③ 开场白其余部分（身份行/"上次停在"等）照常完整输出，不因为版本行解析失败被牵连。
+  //    finally 块无条件把文件挪回原位——即便中间断言失败也不能让本仓库自己的 dist/ 处于残缺
+  //    状态（后续任何人再跑这个文件或别的测试都会被这个残缺状态坑到）。
+  {
+    const versionFilePath = path.join(REPO_ROOT, "dist", "shared", "version-info.generated.js");
+    const versionFileBackupPath = `${versionFilePath}.test-hook-greeting-backup`;
+    const dbDir7 = mkdtempSync(path.join(tmpdir(), "aeloop-test-hook-greeting-nodist-"));
+    const dbPath7 = path.join(dbDir7, "identity.db");
+    renameSync(versionFilePath, versionFileBackupPath); // 真实挪走——不是 mock，hook 自己的
+    // 动态 import 会真的踩到 MODULE_NOT_FOUND。
+    try {
+      const stdinPayload7 = JSON.stringify({ session_id: "test-hook-nodist", cwd: REPO_ROOT });
+      const proc7 = spawnSync("node", [HOOK_PATH], {
+        input: stdinPayload7,
+        encoding: "utf8",
+        env: { ...process.env, AELOOP_BRAIN_IDENTITY_DB: dbPath7 },
+      });
+      assert.equal(proc7.status, 0, `dist/shared/version-info.generated.js 缺失时 hook 仍必须 exit 0（fail-soft，不阻断），实际 status=${proc7.status}，stderr=${proc7.stderr}`);
+      const additionalContext7 = JSON.parse(proc7.stdout).hookSpecificOutput.additionalContext;
+      assert.ok(
+        !/\naeloop \S+\+\S+/.test(additionalContext7),
+        "version-info.generated.js 缺失时不该出现任何版本行（哪怕格式凑巧对不上也不该硬凑一行）",
+      );
+      assert.ok(additionalContext7.includes("意识已加载。"), "版本行解析失败不该拖累开场白其余部分——身份行必须照常出现");
+      assert.ok(additionalContext7.includes("有什么想让我接手的？"), "结尾的前瞻问句也必须照常出现，证明整段开场白渲染完整、没有中途截断");
+    } finally {
+      renameSync(versionFileBackupPath, versionFilePath); // 无条件挪回来，即便上面断言失败
+      rmSync(dbDir7, { recursive: true, force: true });
+    }
+  }
+
+  console.log("PASS: test-hook-greeting.mjs（⑦ dist/ 缺失时 hook 级 fail-soft 端到端验证：exit 0 + 无版本行 + 开场白其余部分完整，issue #98）");
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

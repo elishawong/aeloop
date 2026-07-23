@@ -1,6 +1,7 @@
 import type { AgentCompletedEvent, LoopEvent } from "../loop/events.js";
 import type { ProviderUsage, ToolExecChecked } from "../harness/types.js";
 import type { Claim } from "../prompt/schema.js";
+import { VERSION_STRING } from "../shared/version.js";
 
 export type EvidenceKind = "source" | "tool" | "test" | "artifact" | "human";
 export type ClaimStatus = "supported" | "unsupported" | "unknown" | "rejected";
@@ -102,6 +103,14 @@ export interface TokenUsage {
 
 export interface EvidenceBundle {
   readonly schemaVersion: "1";
+  /**
+   * issue #98: the aeloop engine's own version (`<packageVersion>+<gitSha>[-dirty]`,
+   * `src/shared/version.ts`'s `VERSION_STRING`) that produced this bundle — troubleshooting
+   * metadata (which build ran this), distinct from `schemaVersion` (the *shape* of this bundle
+   * itself). Always populated by `EvidenceBundleBuilder.build()` (the only real constructor of a
+   * full `EvidenceBundle` — see that method), never absent on a genuinely produced bundle.
+   */
+  readonly engineVersion: string;
   readonly runId?: number;
   readonly contractId?: string;
   readonly status: "running" | "completed" | "failed" | "cancelled" | "escalated";
@@ -461,6 +470,7 @@ export class EvidenceBundleBuilder {
     const requirements = [...this.requirements.values()];
     return {
       schemaVersion: "1",
+      engineVersion: VERSION_STRING,
       runId: this.input.runId,
       contractId: this.input.contractId,
       status: this.status,

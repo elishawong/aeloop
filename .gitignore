@@ -3,6 +3,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# issue #98 版本戳：build 时刻由 scripts/generate-version.mjs 重新生成，不进 git
+src/shared/version-info.generated.ts
+
 # Runtime state (per-profile memory store, not tracked in git)
 *.db
 *.db-journal
