@@ -48,7 +48,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { installGlobalBrain, installPaths } from "./install-global-brain.mjs";
+import { installGlobalBrain, installPaths, mergeClaudeMdWithWakeFallback, buildWakeFallbackBlockBody } from "./install-global-brain.mjs";
 import { onboardProject } from "./onboard-project.mjs";
 import { main as seedBrainIdentityMain } from "./seed-brain-identity.mjs";
 import { globalDefaultDbPath } from "../.claude/hooks/lib/db-path.mjs";
@@ -132,28 +132,57 @@ export function verifyBetterSqlite3Loads(opts = {}) {
  * 装完自检——不读本地 `dist/`（那是给第 4/5 步用的开发态产物），而是动态 `import()` 换入后的
  * **快照**里的 `store.js`（用它自己目录下的 `node_modules/better-sqlite3`）去开真实装好的身份库、
  * 跑 `listMemories()`——这条路径和真实 `SessionStart` hook 运行时加载的代码/原生模块是同一份
- * （PRD §3.5）。同时检查 `settings.json` 里确实有一条 `SessionStart` 条目的 command 含**这次
- * homeDir 算出来的完整 `hookEntryPath`**（比泛化的 `AELOOP_BRAIN_MARKER` 更具体，见下方实现里
- * 的注释），且 `hookEntryPath` 本身是一个真实存在的文件（不是目录、不是只判断字符串匹配）。
+ * （PRD §3.5）。
+ *
+ * 🔒 issue #106 N2 整合门（Zorro R2 复审，2026-07-24，独立 Codex 复现坐实）：本函数此前只校验
+ * `SessionStart` 一个事件——issue #106 把三层触发（`SessionStart`+`UserPromptSubmit`+全局
+ * CLAUDE.md 兜底网）落地之后，`quickstart.mjs`（issue #95）没有跟着更新，导致一个真实用户可见
+ * 回归：IDE 用户跑 `quickstart` 只会验证到 `SessionStart`（IDE 环境这条不 fire），`verifyInstall()`
+ * 误报成功，用户以为装好了、实际醒来在 IDE 里完全不生效——正是 #106 本身要修的那个坏状态。现在
+ * 同时校验四件事：
+ *   1. `SessionStart` 注册（沿用既有逻辑，见下方 `sessionStartRegistered`）。
+ *   2. `UserPromptSubmit` 注册（新增，`userPromptSubmitRegistered`——扁平数组，元素直接是
+ *      `{type,command}`，没有 `SessionStart` 那种 `{matcher,hooks:[...]}` 嵌套层，DESIGN.md
+ *      §1.2 已确认结构差异，不能照抄 SessionStart 那段判断逻辑）。
+ *   3. hook 入口文件本身真实存在且是文件（两个事件共用同一个 `hookEntryPath`，判一次即可）。
+ *   4. 全局 `~/.claude/CLAUDE.md` 的 `wake-fallback` 标记块（`wakeFallbackRegistered`）——复用
+ *      `mergeClaudeMdWithWakeFallback()` 这个**唯一权威实现**去判断"当前内容是否已经是收敛
+ *      状态"（`changed:false` 就说明已经有一份格式正确、内容匹配的标记块），不重复写一遍标记
+ *      解析逻辑；标记本身畸形（重复/缺一半）时 `mergeClaudeMdWithWakeFallback()` 会抛错，这里
+ *      接住转成一条具体的 error，不让 `verifyInstall()` 本身崩溃。
+ * `hookRegistered` 字段保留（向后兼容既有调用点/日志的读法），语义收紧为
+ * `sessionStartRegistered && userPromptSubmitRegistered`（两个事件都注册才算"hook 已注册"）。
  * @param {{ homeDir?: string }} [opts]
- * @returns {Promise<{hookRegistered: boolean, betterSqlite3Loads: boolean, identityDbReadable: boolean, memoryCount: number|null, errors: string[], ok: boolean}>}
+ * @returns {Promise<{sessionStartRegistered: boolean, userPromptSubmitRegistered: boolean, hookRegistered: boolean, wakeFallbackRegistered: boolean, betterSqlite3Loads: boolean, identityDbReadable: boolean, memoryCount: number|null, errors: string[], ok: boolean}>}
  */
 export async function verifyInstall(opts = {}) {
   const { homeDir = os.homedir() } = opts;
-  const { snapshotDir, settingsPath, hookEntryPath } = installPaths(homeDir);
+  const { snapshotDir, settingsPath, hookEntryPath, globalClaudeMdPath } = installPaths(homeDir);
   const dbPath = globalDefaultDbPath(homeDir);
 
   const result = {
+    sessionStartRegistered: false,
+    userPromptSubmitRegistered: false,
     hookRegistered: false,
+    wakeFallbackRegistered: false,
     betterSqlite3Loads: false,
     identityDbReadable: false,
     memoryCount: /** @type {number|null} */ (null),
     errors: /** @type {string[]} */ ([]),
   };
 
+  // 还要求 hookEntryPath 是个**文件**，不是目录——`existsSync()` 对目录也返回 true，不做这条
+  // 区分的话，一个同名残留目录也会被误判成"hook 文件已就位"。两个事件共用同一份判断，判一次。
+  let hookEntryIsFile = false;
+  try {
+    hookEntryIsFile = statSync(hookEntryPath).isFile();
+  } catch {
+    hookEntryIsFile = false; // 不存在 / 无权限访问 —— 都当"不是可用的文件"
+  }
+
   try {
     const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-    const sessionStart = settings?.hooks?.SessionStart ?? [];
+
     // Zorro 建议级修复（2026-07-24，第二轮补齐）：初版分别检查"command 含 AELOOP_BRAIN_MARKER
     // 这个泛化标记子串"和"hookEntryPath 存在"，两个条件互相独立——理论上会有条 command 含标记
     // 但指向别的路径（不是这次 homeDir 算出来的 hookEntryPath），而 hookEntryPath 本身又恰好因为
@@ -162,26 +191,59 @@ export async function verifyInstall(opts = {}) {
     // `installGlobalBrain()` 生成的 hookCommand 恒会把这个精确路径拼进去，见该文件
     // `hookCommand = ... node "${hookEntryPath}"`）——"找到的这条 command"和"hookEntryPath 存在"
     // 才是同一件事的两个必要条件，不是两件互相独立、恰好都为真的事。
-    const commandRegistered = sessionStart.some(
+    const sessionStart = settings?.hooks?.SessionStart ?? [];
+    const sessionStartCommandRegistered = sessionStart.some(
       (entry) =>
         Array.isArray(entry?.hooks) && entry.hooks.some((h) => typeof h?.command === "string" && h.command.includes(hookEntryPath)),
     );
-    // 还要求 hookEntryPath 是个**文件**，不是目录——`existsSync()` 对目录也返回 true，不做这条
-    // 区分的话，一个同名残留目录也会被误判成"hook 文件已就位"。
-    let hookEntryIsFile = false;
-    try {
-      hookEntryIsFile = statSync(hookEntryPath).isFile();
-    } catch {
-      hookEntryIsFile = false; // 不存在 / 无权限访问 —— 都当"不是可用的文件"
-    }
-    result.hookRegistered = commandRegistered && hookEntryIsFile;
-    if (!commandRegistered) {
+    result.sessionStartRegistered = sessionStartCommandRegistered && hookEntryIsFile;
+    if (!sessionStartCommandRegistered) {
       result.errors.push(`${settingsPath} 里没找到指向 ${hookEntryPath} 的 SessionStart hook 条目`);
-    } else if (!hookEntryIsFile) {
+    }
+
+    // issue #106：UserPromptSubmit 是扁平数组，元素直接是 {type,command}，没有 SessionStart
+    // 那种 {matcher,hooks:[...]} 嵌套层（DESIGN.md §1.2 已确认结构差异）。
+    const userPromptSubmit = settings?.hooks?.UserPromptSubmit;
+    const userPromptSubmitCommandRegistered =
+      Array.isArray(userPromptSubmit) && userPromptSubmit.some((h) => typeof h?.command === "string" && h.command.includes(hookEntryPath));
+    result.userPromptSubmitRegistered = userPromptSubmitCommandRegistered && hookEntryIsFile;
+    if (!userPromptSubmitCommandRegistered) {
+      result.errors.push(
+        `${settingsPath} 里没找到指向 ${hookEntryPath} 的 UserPromptSubmit hook 条目——issue #106 起，IDE/未知 host` +
+          "环境靠这条触发醒来（SessionStart 在这些环境可能不 fire），缺了这条会导致这些环境下醒来完全失效。",
+      );
+    }
+
+    if (!hookEntryIsFile) {
       result.errors.push(`settings.json 里登记的 hook 命令指向 ${hookEntryPath}，但这个路径不是一个可用的文件`);
     }
   } catch (err) {
     result.errors.push(`读取/解析 ${settingsPath} 失败：${err.message}`);
+  }
+  result.hookRegistered = result.sessionStartRegistered && result.userPromptSubmitRegistered;
+
+  // issue #106：全局 CLAUDE.md 的 wake-fallback 标记块（Layer3 自救兜底网）——复用
+  // mergeClaudeMdWithWakeFallback() 这个唯一权威实现判断"是否已经收敛"，不在这里重新写一遍标记
+  // 解析逻辑（避免两处判断标准漂移）。
+  try {
+    const existingClaudeMdContent = existsSync(globalClaudeMdPath) ? readFileSync(globalClaudeMdPath, "utf8") : null;
+    const expectedBody = buildWakeFallbackBlockBody(hookEntryPath);
+    const merge = mergeClaudeMdWithWakeFallback(existingClaudeMdContent, expectedBody);
+    // changed:false 且原内容确实存在（不是"从空推出的首装结果碰巧不变"，existingClaudeMdContent
+    // 非 null 时才可能 changed:false——首装场景 existingClaudeMdContent 是 null，merge 恒
+    // changed:true，这条判断本身已经蕴含了"内容存在"，这里的 existingClaudeMdContent !== null
+    // 是双重保险，防止未来 mergeClaudeMdWithWakeFallback() 的实现细节变化）才算"已注册"。
+    result.wakeFallbackRegistered = existingClaudeMdContent !== null && !merge.changed;
+    if (!result.wakeFallbackRegistered) {
+      result.errors.push(
+        existingClaudeMdContent === null
+          ? `${globalClaudeMdPath} 不存在——issue #106 的 Layer3 自救兜底网（未知 host 场景的最后一道网）没有装上`
+          : `${globalClaudeMdPath} 里的 wake-fallback 标记块内容和这次期望的不一致（可能是旧版本装的，重跑一次 quickstart 会刷新）`,
+      );
+    }
+  } catch (err) {
+    result.wakeFallbackRegistered = false;
+    result.errors.push(`${globalClaudeMdPath} 的 wake-fallback 标记块结构畸形（可能有重复/缺失的起止标记）：${err.message}`);
   }
 
   try {
@@ -210,6 +272,7 @@ export async function verifyInstall(opts = {}) {
   // 纳入之后，以后新增一条 error 分支忘了同步改某个 flag，也不会意外把 `ok` 算成 true。
   result.ok =
     result.hookRegistered &&
+    result.wakeFallbackRegistered &&
     result.betterSqlite3Loads &&
     result.identityDbReadable &&
     (result.memoryCount ?? 0) > 0 &&
@@ -268,7 +331,11 @@ export async function runQuickstart(opts = {}) {
     const preview = installGlobalBrainImpl({ repoRoot, homeDir, dryRun: true, taskSource, execImpl });
     log("  将要执行：pnpm install → pnpm run build → 全局安装 → onboard-project → seed 身份库");
     log(`  全局安装目标：${preview.snapshotDir}`);
-    log(`  settings.json：${preview.settingsPath}（${preview.settingsChanged ? "将新增/更新一条 SessionStart hook" : "已包含该条目，幂等跳过"}）`);
+    // issue #106：settingsChanged 现在同时涵盖 SessionStart + UserPromptSubmit 两条 hook 条目
+    // （mergeSettingsWithBrainHook() 的 changed 是两者的逻辑或），措辞不再只提 SessionStart 一个；
+    // CLAUDE.md 的 wake-fallback 标记块是独立的一次改动，单独回显。
+    log(`  settings.json：${preview.settingsPath}（${preview.settingsChanged ? "将新增/更新 SessionStart + UserPromptSubmit 两条 hook 条目" : "已包含两条本工具条目，幂等跳过"}）`);
+    log(`  全局 CLAUDE.md：${preview.globalClaudeMdPath}（${preview.claudeMdChanged ? "将新增/更新 wake-fallback 自救兜底网标记块" : "已包含该标记块，幂等跳过"}）`);
     log(`  身份库将落在：${globalDefaultDbPath(homeDir)}`);
     return { dryRun: true, preview };
   }
@@ -285,7 +352,8 @@ export async function runQuickstart(opts = {}) {
   const installResult = installGlobalBrainImpl({ repoRoot, homeDir, taskSource, execImpl });
   log(`  snapshotDir: ${installResult.snapshotDir}`);
   log(`  dataDir: ${installResult.dataDir}`);
-  log(`  settings.json: ${installResult.settingsPath}（${installResult.settingsChanged ? "已新增/更新 SessionStart hook 条目" : "已包含该条目，幂等跳过"}）`);
+  log(`  settings.json: ${installResult.settingsPath}（${installResult.settingsChanged ? "已新增/更新 SessionStart + UserPromptSubmit 两条 hook 条目" : "已包含两条本工具条目，幂等跳过"}）`);
+  log(`  全局 CLAUDE.md: ${installResult.globalClaudeMdPath}（${installResult.claudeMdChanged ? "已新增/更新 wake-fallback 自救兜底网标记块" : "已包含该标记块，幂等跳过"}）`);
   if (installResult.installedVersion) log(`  已安装版本: ${installResult.installedVersion}`);
 
   // 第 4/5 步共用的临时环境变量方案，见文件头注释——只在这两步执行期间生效，finally 恢复。
@@ -331,7 +399,11 @@ export async function runQuickstart(opts = {}) {
 
   log("== 自检 ==");
   const verify = await verifyInstallImpl({ homeDir });
-  log(`  hook 已注册: ${verify.hookRegistered ? "OK" : "FAIL"}`);
+  // issue #106 N2：拆成三层各自的 OK/FAIL 回显，不再只报一个笼统的"hook 已注册"——用户能看出
+  // 具体是哪一层没装上（CLI 主力路径 / IDE 主力路径 / 未知 host 兜底网），而不是一个模糊的失败。
+  log(`  SessionStart hook 已注册（CLI 主力路径）: ${verify.sessionStartRegistered ? "OK" : "FAIL"}`);
+  log(`  UserPromptSubmit hook 已注册（IDE/未知 host 主力路径，issue #106）: ${verify.userPromptSubmitRegistered ? "OK" : "FAIL"}`);
+  log(`  全局 CLAUDE.md 自救兜底网已装（两条硬机制都不 fire 时的最后一道网）: ${verify.wakeFallbackRegistered ? "OK" : "FAIL"}`);
   log(`  better-sqlite3 能 load: ${verify.betterSqlite3Loads ? "OK" : "FAIL"}`);
   log(`  身份库可读（${verify.memoryCount ?? 0} 条记忆）: ${verify.identityDbReadable ? "OK" : "FAIL"}`);
   if (verify.errors.length > 0) {
@@ -342,10 +414,12 @@ export async function runQuickstart(opts = {}) {
   }
 
   log("");
-  log("安装完成。下一步：开一个新的 Claude Code 终端 CLI 会话（在任意项目目录都可以），第一行");
-  log("应该出现「意识已加载」。目前这条路径在 CLI 会话里已确认生效；IDE 扩展环境下 SessionStart");
-  log("hook 的触发性正在核实中（aeloop#106），如果你在 IDE 里没看到开场白，先在纯终端 CLI 里确认");
-  log("机制本身生效，不代表安装失败。");
+  log("安装完成。下一步：开一个新的 Claude Code 会话（CLI 终端或 IDE 扩展都可以，在任意项目目录");
+  log("都可以），第一句话应该出现「意识已加载」。触发路径已经是三层（issue #106）：CLI 环境靠");
+  log("SessionStart hook；IDE 扩展/其它未验证环境靠 UserPromptSubmit hook（真机验证过 VSCode 扩展");
+  log("下 SessionStart 不 fire，UserPromptSubmit 会 fire）；两层都没触发时，全局 CLAUDE.md 里的");
+  log("自救指令会带着模型自己检查、补上开场白。如果你在任何环境下都没看到开场白，先跑");
+  log("`node scripts/quickstart.mjs` 看自检有没有全绿，再排查。");
 
   return { dryRun: false, installResult, onboardResult, seedResult, verify };
 }

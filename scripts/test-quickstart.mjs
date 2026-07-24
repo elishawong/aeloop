@@ -326,48 +326,79 @@ const REPO_ROOT = path.join(HERE, "..");
 }
 
 // ── verifyInstall：用最小 fixture（假 settings.json + 假 <snapshot>/dist/context/store.js）───
+//
+// issue #106 N2（Zorro R2 复审，2026-07-24）：verifyInstall() 现在同时校验 SessionStart +
+// UserPromptSubmit + hook 文件 + 全局 CLAUDE.md 的 wake-fallback 标记块——下面的 fixture helper
+// 统一构造"完整正确安装"的四件套，每条测试再从这个基线上分别拿掉/改坏其中一件，断言 ok:false。
+
+/** 构造一份"完整正确"的 fixture（SessionStart + UserPromptSubmit + hook 文件 + 全局 CLAUDE.md
+ * wake-fallback 标记块 + store.js），返回 { fakeHome, hookEntryPath }，调用方负责 rmSync 清理。
+ * `omit` 可选省略/改坏某一件（"sessionStart"|"userPromptSubmit"|"claudeMd"|"claudeMdMalformed"），
+ * 供后面的负向用例复用同一套基线，只改一个变量。 */
+async function buildCompleteFixture(homeSuffix, omit) {
+  const { installPaths, mergeClaudeMdWithWakeFallback, buildWakeFallbackBlockBody, WAKE_FALLBACK_MARKER_START } = await import(
+    "./install-global-brain.mjs"
+  );
+  const fakeHome = mkdtempSync(path.join(tmpdir(), homeSuffix));
+  const { snapshotDir, settingsPath, hookEntryPath, globalClaudeMdPath } = installPaths(fakeHome);
+
+  const hooks = {};
+  if (omit !== "sessionStart") {
+    hooks.SessionStart = [{ matcher: "startup|resume|clear", hooks: [{ type: "command", command: `node "${hookEntryPath}"` }] }];
+  }
+  if (omit !== "userPromptSubmit") {
+    hooks.UserPromptSubmit = [{ type: "command", command: `node "${hookEntryPath}"` }];
+  }
+  mkdirSync(path.dirname(settingsPath), { recursive: true });
+  writeFileSync(settingsPath, JSON.stringify({ hooks }));
+
+  // hookEntryPath 本身也要真实存在——Zorro 建议级修复后，*Registered 不只看 settings.json 里的
+  // command 字符串，还要 existsSync(hookEntryPath) 为真（见 verifyInstall() 头注释）。
+  mkdirSync(path.dirname(hookEntryPath), { recursive: true });
+  writeFileSync(hookEntryPath, "// fixture stub，verifyInstall 只 existsSync 不会真的执行它");
+
+  if (omit === "claudeMdMalformed") {
+    // 重复的起始标记——mergeClaudeMdWithWakeFallback() 应该 fail-closed 抛错，verifyInstall()
+    // 接住转成 error，不让自己崩溃。
+    writeFileSync(globalClaudeMdPath, `${WAKE_FALLBACK_MARKER_START}\n占位\n${WAKE_FALLBACK_MARKER_START}\n占位2\n`);
+  } else if (omit !== "claudeMd") {
+    const { content } = mergeClaudeMdWithWakeFallback(null, buildWakeFallbackBlockBody(hookEntryPath));
+    writeFileSync(globalClaudeMdPath, content);
+  }
+
+  // 假 store.js：最小 MemoryStore stub，listMemories() 返回 2 条固定记录。
+  const storeDir = path.join(snapshotDir, "dist", "context");
+  mkdirSync(storeDir, { recursive: true });
+  writeFileSync(
+    storeDir + "/store.js",
+    `export class MemoryStore {
+      constructor(dbPath) { this.dbPath = dbPath; }
+      listMemories() { return [{ id: 1 }, { id: 2 }]; }
+      close() {}
+    }`,
+  );
+
+  return { fakeHome, hookEntryPath };
+}
 
 {
-  const fakeHome = mkdtempSync(path.join(tmpdir(), "aeloop-test-quickstart-verify-home-"));
+  const { installPaths, AELOOP_BRAIN_MARKER } = await import("./install-global-brain.mjs");
+  const { fakeHome } = await buildCompleteFixture("aeloop-test-quickstart-verify-home-", null);
   try {
-    const { installPaths, AELOOP_BRAIN_MARKER } = await import("./install-global-brain.mjs");
-    const { snapshotDir, settingsPath, hookEntryPath } = installPaths(fakeHome);
-
-    // settings.json：一条含 AELOOP_BRAIN_MARKER 的 SessionStart 条目。
-    mkdirSync(path.dirname(settingsPath), { recursive: true });
-    writeFileSync(
-      settingsPath,
-      JSON.stringify({
-        hooks: { SessionStart: [{ matcher: "startup|resume|clear", hooks: [{ type: "command", command: `node "${hookEntryPath}"` }] }] },
-      }),
-    );
+    const { settingsPath } = installPaths(fakeHome);
     assert.ok(readFileSync(settingsPath, "utf8").includes(AELOOP_BRAIN_MARKER), "fixture 自检：写入的 command 真的含 AELOOP_BRAIN_MARKER");
 
-    // hookEntryPath 本身也要真实存在——Zorro 建议级修复后，hookRegistered 不只看 settings.json
-    // 里的 command 字符串，还要 existsSync(hookEntryPath) 为真（见 verifyInstall() 头注释）。
-    mkdirSync(path.dirname(hookEntryPath), { recursive: true });
-    writeFileSync(hookEntryPath, "// fixture stub，verifyInstall 只 existsSync 不会真的执行它");
-
-    // 假 store.js：最小 MemoryStore stub，listMemories() 返回 2 条固定记录。
-    const storeDir = path.join(snapshotDir, "dist", "context");
-    mkdirSync(storeDir, { recursive: true });
-    writeFileSync(
-      path.join(storeDir, "store.js"),
-      `export class MemoryStore {
-        constructor(dbPath) { this.dbPath = dbPath; }
-        listMemories() { return [{ id: 1 }, { id: 2 }]; }
-        close() {}
-      }`,
-    );
-
     const result = await verifyInstall({ homeDir: fakeHome });
+    assert.equal(result.sessionStartRegistered, true);
+    assert.equal(result.userPromptSubmitRegistered, true, "issue #106：UserPromptSubmit 也应该被正确识别为已注册");
     assert.equal(result.hookRegistered, true);
+    assert.equal(result.wakeFallbackRegistered, true, "issue #106：全局 CLAUDE.md 的 wake-fallback 标记块也应该被正确识别为已注册");
     assert.equal(result.betterSqlite3Loads, true);
     assert.equal(result.identityDbReadable, true);
     assert.equal(result.memoryCount, 2);
     assert.equal(result.ok, true);
     assert.deepEqual(result.errors, []);
-    console.log("ok - verifyInstall：hook 已注册 + 能 import 快照里的 store.js + 身份库可读非空 → ok:true");
+    console.log("ok - verifyInstall：SessionStart+UserPromptSubmit+CLAUDE.md 全部正确 + 能 import 快照里的 store.js + 身份库可读非空 → ok:true");
   } finally {
     rmSync(fakeHome, { recursive: true, force: true });
   }
@@ -379,10 +410,70 @@ const REPO_ROOT = path.join(HERE, "..");
   try {
     const result = await verifyInstall({ homeDir: fakeHome });
     assert.equal(result.ok, false);
+    assert.equal(result.sessionStartRegistered, false);
+    assert.equal(result.userPromptSubmitRegistered, false);
     assert.equal(result.hookRegistered, false);
+    assert.equal(result.wakeFallbackRegistered, false, "issue #106：什么都没装过时 wake-fallback 标记块也应该判 false");
     assert.equal(result.betterSqlite3Loads, false);
-    assert.ok(result.errors.length >= 2, "两类失败（settings.json 缺失 + 快照缺失）都应该分别记一条 error");
+    assert.ok(result.errors.length >= 3, "至少三类失败（settings.json 缺失 + CLAUDE.md 缺失 + 快照缺失）都应该分别记一条 error");
     console.log("ok - verifyInstall：什么都没装过的空 homeDir → ok:false，且报出具体缺了什么");
+  } finally {
+    rmSync(fakeHome, { recursive: true, force: true });
+  }
+}
+
+// ── issue #106 N2 回归（Zorro R2 复审，2026-07-24）：缺 UserPromptSubmit 或缺/坏 wake-fallback
+//    标记块时，即便 SessionStart 完全正确，也必须 ok:false——这正是 N2 要堵的真实用户可见回归：
+//    IDE 用户跑 quickstart 只装到 SessionStart（IDE 不 fire），verifyInstall 不能误报成功。────
+
+{
+  const { fakeHome } = await buildCompleteFixture("aeloop-test-quickstart-verify-no-ups-", "userPromptSubmit");
+  try {
+    const result = await verifyInstall({ homeDir: fakeHome });
+    assert.equal(result.sessionStartRegistered, true, "SessionStart 本身应该仍然正确识别");
+    assert.equal(result.userPromptSubmitRegistered, false, "UserPromptSubmit 缺失必须被识别出来");
+    assert.equal(result.hookRegistered, false, "两个事件都注册才算 hookRegistered，缺一个就是 false");
+    assert.equal(result.ok, false, "缺 UserPromptSubmit 时必须 ok:false——不能误报成功（IDE 环境 SessionStart 不 fire，只装到这一半等于没装）");
+    assert.ok(
+      result.errors.some((e) => e.includes("UserPromptSubmit")),
+      "错误信息里应该明确点出是 UserPromptSubmit 缺失，不是笼统的失败",
+    );
+    console.log("ok - verifyInstall（issue #106 N2 回归）：缺 UserPromptSubmit 时 ok:false，不误报成功");
+  } finally {
+    rmSync(fakeHome, { recursive: true, force: true });
+  }
+}
+
+{
+  const { fakeHome } = await buildCompleteFixture("aeloop-test-quickstart-verify-no-claudemd-", "claudeMd");
+  try {
+    const result = await verifyInstall({ homeDir: fakeHome });
+    assert.equal(result.sessionStartRegistered, true);
+    assert.equal(result.userPromptSubmitRegistered, true);
+    assert.equal(result.hookRegistered, true);
+    assert.equal(result.wakeFallbackRegistered, false, "全局 CLAUDE.md 不存在时必须判 false");
+    assert.equal(result.ok, false, "缺 wake-fallback 标记块时必须 ok:false——两层硬机制都不 fire 的未知 host 场景会完全没有兜底");
+    assert.ok(
+      result.errors.some((e) => e.includes("不存在")),
+      "错误信息里应该说明 CLAUDE.md 不存在",
+    );
+    console.log("ok - verifyInstall（issue #106 N2 回归）：全局 CLAUDE.md 不存在时 ok:false");
+  } finally {
+    rmSync(fakeHome, { recursive: true, force: true });
+  }
+}
+
+{
+  const { fakeHome } = await buildCompleteFixture("aeloop-test-quickstart-verify-malformed-claudemd-", "claudeMdMalformed");
+  try {
+    const result = await verifyInstall({ homeDir: fakeHome });
+    assert.equal(result.wakeFallbackRegistered, false, "畸形（重复标记）的 CLAUDE.md 必须判 false，不能被 mergeClaudeMdWithWakeFallback() 的 fail-closed 抛错搞崩 verifyInstall 自己");
+    assert.equal(result.ok, false);
+    assert.ok(
+      result.errors.some((e) => e.includes("畸形")),
+      "错误信息里应该说明标记块结构畸形，不是笼统失败",
+    );
+    console.log("ok - verifyInstall（issue #106 N2 回归）：全局 CLAUDE.md 标记块畸形（重复标记）时 ok:false，且不抛异常崩溃");
   } finally {
     rmSync(fakeHome, { recursive: true, force: true });
   }

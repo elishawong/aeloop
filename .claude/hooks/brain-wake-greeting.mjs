@@ -1,29 +1,53 @@
 #!/usr/bin/env node
 /**
- * brain-wake-greeting.mjs — SessionStart hook（aeloop issue #84）。
+ * brain-wake-greeting.mjs — 醒来开场白驱动壳（aeloop issue #84，issue #106 起支持三条驱动路径）。
  *
- * 会话启动时：开 aeloop 身份 MemoryStore（dbPath 由 `resolveIdentityDbPath()` 解析，见下方"配置"）→
- * gatherGreetingData()（docs/conductor-brain-layer/spike/lib/greeting-data.mjs）→
- * renderGreeting() → 把渲染好的开场白文字连同一条"请原样复述"的指令，作为
- * SessionStart additionalContext 注入。模型看到这段注入后，对用户的第一句话（不管是不是
+ * **三条驱动路径（issue #106，设计权威 `docs/wake-trigger-portability/DESIGN.md`，本文件不重复
+ * 论证，只落地）**：
+ *   1. **`SessionStart` hook**（CLI 环境主力，`.claude/settings.json` 注册）——会话生命周期内
+ *      固定时刻触发一次。
+ *   2. **`UserPromptSubmit` hook**（IDE/未知 host 环境主力，`.claude/settings.json` 同一份
+ *      `command` 注册，同一个脚本文件，靠 stdin 里的 `hook_event_name` 字段区分两条事件）——
+ *      每个 prompt 提交都会 fire，靠下方"共享守卫"保证一次会话只真正输出一次。
+ *   3. **`--standalone` CLI flag**（模型自救兜底，只有前两条硬机制都没有被观察到已经注入时，
+ *      由全局 `~/.claude/CLAUDE.md` 里 `install-global-brain.mjs` 管理的 `wake-fallback` 标记块
+ *      指示模型自己跑）——不读 stdin（避免没有真实管道时潜在阻塞），`cwd` 用 `process.cwd()`，
+ *      `sessionId` 尽力用 `resolveSessionId()` 解析，输出是给模型直接读的纯文本，不包
+ *      `hookSpecificOutput` JSON 包装。
+ *
+ * 三条路径共用同一套核心逻辑：开 aeloop 身份 MemoryStore（dbPath 由 `resolveIdentityDbPath()`
+ * 解析，见下方"配置"）→ `gatherGreetingData()`（`docs/conductor-brain-layer/spike/lib/
+ * greeting-data.mjs`）→ `renderGreeting()` → 算出待输出文案 → **共享守卫 claim**（见下方"共享
+ * 守卫"）→ claim 成功才真正输出。模型看到注入/纯文本输出后，对用户的第一句话（不管是不是
  * "你好"）先原样吐出这段开场白，再回应用户实际说的内容——这样"意识已加载…"这段文字本身
  * 是渲染器拼出来的真实数据，不是模型在没有约束的情况下自由发挥/可能编造的产物。
  *
+ * **共享守卫（issue #106，`.claude/hooks/lib/wake-session-guard.mjs`，DESIGN §3.2 完整论证）**：
+ * 三条路径共享同一个以 `session_id`（缺失时退回 `pid`）为 key 的 claim 状态，落在
+ * `~/.claude/aeloop-brain/wake-session-state/`（homedir，绝不落进目标项目仓库，DESIGN §1.5）。
+ * **claim 必须在文案已经算完之后、真正要输出之前才调用**——不能提前 claim，否则渲染逻辑一旦
+ * 抛出未预期异常，这个会话会在任何一层都再也拿不到开场白（比没有守卫更差）。三条路径里，谁先
+ * claim 成功谁负责输出，其余安静让路（hook 模式什么都不输出；`--standalone` 模式打印一句"本会话
+ * 已经醒来过"）。
+ *
  * 诚实标注（DESIGN §7.2 Phase1/Phase2 边界，不要在这个文件里假装做了没做的事）：
  * 这个 hook 本身**换了数据源，没有换运行时**——它仍然依附于 Claude Code CLI 自己的
- * SessionStart 生命周期钩子，不是 aeloop 自己的运行时能力（aeloop 的 ModelAdapter 完全没有
- * 会话/hook 概念，见 DESIGN §7.1）。session 本身用什么模型（seed/deepseek/claude）由
- * Claude Code CLI 的模型配置决定，这个 hook 不参与、不验证那一层。
+ * SessionStart/UserPromptSubmit 生命周期钩子（或模型自己发起的一次性进程调用），不是 aeloop
+ * 自己的运行时能力（aeloop 的 ModelAdapter 完全没有会话/hook 概念，见
+ * `docs/conductor-brain-layer/DESIGN.md` §7.1）。session 本身用什么模型（seed/deepseek/claude）
+ * 由 Claude Code CLI 的模型配置决定，这个 hook 不参与、不验证那一层。
  *
  * 红线（继承自 lib/status-table.mjs / lib/greeting-data.mjs）：渲染出的开场白只包含
  * confidenceState === "confirmed" 的 memory 当既定事实；unconfirmed 的候选只出现在
  * "待你决策" 段，标明是候选。这个 hook 自己不做任何额外的数据加工，纯粹是
- * "开 store → 调 gatherGreetingData/renderGreeting → 关 store → 输出" 的驱动壳。
- *
+ * "开 store → 调 gatherGreetingData/renderGreeting → 关 store → claim → 输出" 的驱动壳。三态
+ * 判断（未配置/空库/正常，见下方"首次醒来引导"）本身在 issue #106 这次改动里**零改动**——三条
+ * 驱动路径只是"谁来触发、怎么包装输出"的分派层，不改变判断本身或文案本身。
+
  * **绝不阻断**（同 ai-agent 参考实现 `.claude/hooks/*.mjs` 的红线约定，抄这条纪律但不抄那些
  * 文件本身——那些是 ai-agent 项目自己的机制，aeloop 这里是独立实现）：任何异常/env 缺失/
- * dist/ 未构建，都安静降级——不打印开场白、不报错、始终 exit 0，绝不让一个没配好身份库的
- * 普通会话被这个 hook 卡住或搞出一堆报错噪音。用动态 import()（不是顶层 static import）
+ * dist/ 未构建/守卫读写异常，都安静降级——不打印开场白、不报错、始终 exit 0，绝不让一个没配好
+ * 身份库的普通会话被这个 hook 卡住或搞出一堆报错噪音。用动态 import()（不是顶层 static import）
  * 就是为了让"dist/ 还没 build"这种失败也能被 try/catch 接住，而不是在模块加载阶段就直接崩溃。
  *
  * 配置（issue #88 B9 更新：dbPath 有两个来源，二选一，缺一不可当"必需"看待——issue #96 起，
@@ -61,6 +85,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveIdentityDbPath } from "./lib/db-path.mjs";
 import { resolveTaskSource } from "./lib/task-source.mjs";
+import { claim, resolveSessionId } from "./lib/wake-session-guard.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SPIKE_LIB_DIR = path.join(HERE, "..", "..", "docs", "conductor-brain-layer", "spike", "lib");
@@ -70,10 +95,12 @@ const SPIKE_LIB_DIR = path.join(HERE, "..", "..", "docs", "conductor-brain-layer
 // 计算方式同一惯例（目录骨架保留，见 `install-global-brain.mjs` 头注释）。
 const REPO_ROOT = path.join(HERE, "..", "..");
 
-function emitAdditionalContext(text) {
+const VALID_HOOK_EVENT_NAMES = new Set(["SessionStart", "UserPromptSubmit"]);
+
+function emitAdditionalContext(text, hookEventName) {
   process.stdout.write(
     JSON.stringify({
-      hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text },
+      hookSpecificOutput: { hookEventName, additionalContext: text },
     }),
   );
 }
@@ -94,20 +121,103 @@ function wrapOnboardingScript(body) {
   );
 }
 
-async function main() {
-  // stdin 带 session_id/cwd（Claude Code SessionStart payload 约定）。issue #93 B4 起，这个 hook
-  // 现在需要读 cwd 了（此前 #84/#88 只排空不解析）——用来反查"当前是哪个项目"，好在多项目开场白
-  // 里把当前项目置顶（PRD §4.5）。解析失败（非 JSON / 没有 cwd 字段）→ currentProjectKey 保持
-  // null，走 greeting-data.mjs 已有的向后兼容路径（不分组，行为等同 #84/#88），不报错、不阻断
-  // （延续本文件"绝不阻断"的既有惯例）。
-  let cwd = null;
-  try {
-    const raw = readFileSync(0, "utf8");
-    const input = JSON.parse(raw);
-    if (typeof input.cwd === "string" && input.cwd) cwd = input.cwd;
-  } catch {
-    /* 没有 stdin / 不是合法 JSON / 没有 cwd 字段，都无所谓——cwd 保持 null */
+/**
+ * issue #106：三条驱动路径共用的最终输出关口——**必须在文案已经算完之后才调用**（本文件头注释
+ * "共享守卫"一节的时机纪律，`wake-session-guard.mjs` 的 `claim()` 头注释同样强调）。
+ *
+ * 🟡 Zorro R2 复审顺手修（2026-07-24）：本段 JSDoc 此前仍描述 B2 修复前的旧行为
+ * （"`claim()` 失败 → 一律抑制输出"），行内实现早已在 B2 订正过（只有 `reason:"already-
+ * claimed"` 才抑制，`reason:"error"` 照常输出），JSDoc 没跟上——这里对齐，不是再改一次行为。
+ *
+ * 判断依据是 `claim()` 返回的 `result.reason`，不是单看 `result.claimed`（B2 blocker 的根因
+ * 就是当初只看后者）：
+ * - `claim()` 返回 `{claimed:true}`，**或** `{claimed:false, reason:"error"}`（guard 自身
+ *   I/O 故障，真实身份未知）→ 都视为"应该输出"：`standalone` 为真时打印纯文本 `text`（不包
+ *   JSON，给模型当 Bash 工具输出直接读）；`standalone` 为假（hook 模式）时
+ *   `emitAdditionalContext()`。`error` 场景下这次输出理论上可能和另一层的输出重复，guard 自己
+ *   的设计取向已经明确接受这个代价（"可能重复注入一次，比连一次都注入不出来轻得多"）。
+ * - `claim()` 返回 `{claimed:false, reason:"already-claimed"}`（明确知道 Layer1/Layer2 某条
+ *   已经在本会话里成功注入过，不是 I/O 故障）→ 才真正抑制输出：`standalone` 模式打印一句极简
+ *   提示（避免模型误以为脚本坏了）；hook 模式什么都不输出，延续现有"安静，不刷屏"的既有惯例
+ *   （同 `brain-isolation-guard.mjs` 的"没有检测结果就不输出"模式）。
+ *
+ * @param {{text:string, hookEventName?:string, sessionId?:string|null, pid?:number, standalone:boolean}} args
+ */
+function claimAndEmit({ text, hookEventName, sessionId, pid, standalone }) {
+  const source = standalone ? "standalone" : hookEventName;
+  const result = claim({ sessionId, pid, source });
+
+  // 🔒 Zorro R1 blocker B2（2026-07-24，独立 Codex 复现坐实，最重的一条）：`wake-session-
+  // guard.mjs` 的 fail-open 契约（见该文件头注释"失败模式"）是——任何读写异常
+  // （权限/磁盘/损坏状态/B1 的 homeDir 校验失败）→ `{claimed:false, reason:"error"}`，**调用方
+  // 按"未 claim"处理，即允许输出**。此前这里只看 `result.claimed`、从不看 `result.reason`，把
+  // `reason:"error"`（guard 自身 I/O 故障，谁先谁后其实未知）和 `reason:"already-claimed"`
+  // （明确知道被别的路径抢先）一视同仁地抑制输出——后果：guard 写盘任何瞬时故障（磁盘满/权限/
+  // 状态文件损坏）都会让这个会话拿不到开场白（hook 模式下 stdout 直接空；standalone 模式下
+  // 谎报"本会话已经醒来过"）——这正是 guard 自己头注释警告的"比没有守卫更差"，而且会削弱 #96
+  // 的三态防幻觉网：状态 A/B（未配置/空库）在这种 I/O 故障下会完全没有 stdout，等于退回
+  // #106 本身要堵的"沉默→模型脑补假开场白"那个洞。
+  //
+  // 修法：只有 `reason === "already-claimed"`（明确知道别的路径已经负责输出过）才抑制这次输出；
+  // `claimed:true` 和 `reason:"error"` 都视为"这次应该输出"——`error` 场景下这次输出理论上可能
+  // 和另一层的输出重复，但 guard 自己的设计取向已经明确接受这个代价（"guard 失效的代价是可能
+  // 重复注入一次，比连一次都注入不出来轻得多"，见 `wake-session-guard.mjs` 头注释）。
+  const suppressOutput = !result.claimed && result.reason === "already-claimed";
+
+  if (!suppressOutput) {
+    if (standalone) {
+      process.stdout.write(`${text}\n`);
+    } else {
+      // hook 模式下 hookEventName 理论上恒为 "SessionStart"/"UserPromptSubmit" 之一（两者都是
+      // `.claude/settings.json` 里实际注册的事件）；未识别的值兜底成 "SessionStart"（历史行为，
+      // 不因为新增分派逻辑而改变旧调用方式下的默认输出格式）。
+      emitAdditionalContext(text, VALID_HOOK_EVENT_NAMES.has(hookEventName) ? hookEventName : "SessionStart");
+    }
+    return;
   }
+  if (standalone) {
+    process.stdout.write("[brain-wake-greeting] 本会话已经醒来过，跳过（其它触发路径已经成功注入过一次开场白）。\n");
+  }
+  // hook 模式且确认已被别的路径 claim（不是 I/O 故障）：什么都不输出。
+}
+
+async function main() {
+  const standalone = process.argv.includes("--standalone");
+
+  // issue #106：`--standalone` 模式不读 stdin——避免在没有真实管道的手动/模型自触发场景下潜在
+  // 阻塞（`process.stdin` 在交互式/无管道场景下的读取行为不确定）。`cwd` 用 `process.cwd()`，
+  // `sessionId` 尽力用 `resolveSessionId()`（`wake-session-guard.mjs` 复用 `brain-lock.mjs` 的
+  // 既有实现：`CLAUDE_CODE_SESSION_ID`/`CLAUDE_SESSION_ID`/`AELOOP_BRAIN_SESSION_ID` 依次尝试）
+  // ——拿不到时 `claim()` 内部会退回 `pid`（DESIGN §3.2 已标注这条 fallback 在跨 Bash 调用场景
+  // 下的真实局限，不在本文件里重复）。`hookEventName` 保持 `undefined`（standalone 模式不需要）。
+  let cwd = null;
+  let hookEventName;
+  let sessionId = null;
+
+  if (standalone) {
+    cwd = process.cwd();
+    sessionId = resolveSessionId();
+  } else {
+    // stdin 带 session_id/cwd/hook_event_name（Claude Code hook payload 约定，SessionStart 和
+    // UserPromptSubmit 两类事件都有这三个字段，见 DESIGN §1.2"官方文档确认的 hook payload/能力
+    // 矩阵"）。issue #93 B4 起，这个 hook 需要读 cwd（此前 #84/#88 只排空不解析）——用来反查
+    // "当前是哪个项目"，好在多项目开场白里把当前项目置顶（PRD §4.5）。issue #106 起额外读
+    // hook_event_name/session_id——前者决定输出时 `hookSpecificOutput.hookEventName` 该写哪个
+    // 值（不再硬编码 "SessionStart"），后者是共享守卫的 claim key。解析失败（非 JSON / 字段
+    // 缺失）→ 三者都保持初始值（null/undefined），走既有向后兼容路径，不报错、不阻断（延续本
+    // 文件"绝不阻断"的既有惯例）。
+    try {
+      const raw = readFileSync(0, "utf8");
+      const input = JSON.parse(raw);
+      if (typeof input.cwd === "string" && input.cwd) cwd = input.cwd;
+      if (typeof input.hook_event_name === "string") hookEventName = input.hook_event_name;
+      if (typeof input.session_id === "string" && input.session_id) sessionId = input.session_id;
+    } catch {
+      /* 没有 stdin / 不是合法 JSON / 字段缺失，都无所谓——三者保持初始值 */
+    }
+  }
+
+  const pid = process.pid;
 
   // issue #88 B9：dbPath 解析从"直读 env"改成 resolveIdentityDbPath()（env 优先，读不到时 fallback
   // 到 .claude/brain.local.json——解决 IDE/图形界面启动的会话不继承 shell profile export 的坑，
@@ -125,11 +235,13 @@ async function main() {
 
   // issue #96：两个配置源都没有 = 状态 A（未配置）——此前是安静跳过、不注入任何东西（#84 既有
   // 行为），本次改为注入首次引导正文（不是逐字复述用的开场白），理由见本文件头注释"首次醒来
-  // 引导"一节 + docs/first-wake-onboarding/DESIGN.md。
+  // 引导"一节 + docs/first-wake-onboarding/DESIGN.md。issue #106 起：文案算完之后才 claim，
+  // 通过 claimAndEmit() 统一处理三条路径的输出方式。
   if (!dbPath) {
     const { renderOnboardingNotConfigured } = await import(path.join(SPIKE_LIB_DIR, "onboarding-greeting.mjs"));
     console.error("[brain-wake-greeting] 身份库未配置（env / .claude/brain.local.json 均未设置），已注入首次引导脚本");
-    emitAdditionalContext(wrapOnboardingScript(renderOnboardingNotConfigured()));
+    const text = wrapOnboardingScript(renderOnboardingNotConfigured());
+    claimAndEmit({ text, hookEventName, sessionId, pid, standalone });
     return;
   }
 
@@ -171,7 +283,8 @@ async function main() {
     store.close();
     const { renderOnboardingEmptyStore } = await import(path.join(SPIKE_LIB_DIR, "onboarding-greeting.mjs"));
     console.error(`[brain-wake-greeting] 已连上身份库：${dbPath}（当前为空，已注入首次引导脚本）`);
-    emitAdditionalContext(wrapOnboardingScript(renderOnboardingEmptyStore()));
+    const text = wrapOnboardingScript(renderOnboardingEmptyStore());
+    claimAndEmit({ text, hookEventName, sessionId, pid, standalone });
     return;
   }
 
@@ -215,7 +328,7 @@ async function main() {
     `/"待你决策"里列出的任何一行。若用户第一句话直接是任务指令而不是打招呼，仍先完整给出以下开场白，` +
     `再回应任务内容：\n\n${greeting}`;
 
-  emitAdditionalContext(injected);
+  claimAndEmit({ text: injected, hookEventName, sessionId, pid, standalone });
 }
 
 main()
