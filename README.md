@@ -22,7 +22,21 @@ A0 到 A4b 已经全部完成:四个引擎层(Prompt、Context、Harness、Loop)
 **A5(CLI/TUI)**和**A6(双 profile 验收跑)**——完整的里程碑拆解见
 [`docs/ROADMAP.md`](./docs/ROADMAP.md)。
 
-## 快速开始
+## 安装(开箱即用:装完就能醒来)
+
+想让 Claude Code 一打开就自动醒来成带身份、能延续记忆的调度员?一条命令装完:
+
+```sh
+node scripts/quickstart.mjs
+```
+
+完整说明(装了什么、每一步的用途、已知的坑)见 [`docs/getting-started/`](./docs/getting-started/)。
+
+## 快速开始(引擎自身的开发者 quickstart)
+
+> 这一节是给要改 aeloop 引擎源码本身的人看的(跑测试、跑 build)——和上面「安装」讲的不是
+> 同一件事:上面装的是**conductor-brain 层**(让 Claude Code 醒来的那一层),这里跑的是
+> **引擎自身**的测试/构建。
 
 ```sh
 pnpm install

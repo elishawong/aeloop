@@ -22,7 +22,8 @@
     "test:watch": "node scripts/generate-version.mjs && vitest",
     "lint": "node scripts/generate-version.mjs && tsc --noEmit",
     "demo:company": "pnpm run build && node scripts/demo-company.mjs",
-    "conductor-work": "pnpm run build && node scripts/conductor-work.mjs"
+    "conductor-work": "pnpm run build && node scripts/conductor-work.mjs",
+    "quickstart": "node scripts/quickstart.mjs"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.5.2",
