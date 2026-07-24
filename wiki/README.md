@@ -17,6 +17,7 @@
 7. [Workflow 扩展](./07-workflow-extension.md)
 8. [公司运行与安全边界](./08-company-operation.md)
 9. [当前状态与后续路线](./09-status-and-roadmap.md)
+10. [图形资源（MMD / SVG / PNG）](./diagrams/README.md)
 
 ## Aeloop 是什么
 
