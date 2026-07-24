@@ -1,5 +1,5 @@
 {
-  "$comment": "aeloop 自己的 Claude Code hooks（aeloop issue #84：brain 醒来开场白 Phase1）。AELOOP_BRAIN_IDENTITY_DB 未设置、或已设置但身份库是空的时，brain-wake-greeting.mjs 不再安静跳过——会注入一段首次引导脚本，带用户走一遍配置问答（issue #96，docs/first-wake-onboarding/DESIGN.md）；已有真实数据的会话行为不变。配置方式见 docs/conductor-brain-layer/WAKE-GREETING-RUNBOOK.md。诚实标注：这只换了数据源（aeloop 身份 MemoryStore），没有换运行时——仍然依附 Claude Code CLI 自己的 SessionStart 生命周期钩子（DESIGN.md §7.1/§7.2 Phase1/Phase2 边界）。",
+  "$comment": "aeloop 自己的 Claude Code hooks（aeloop issue #84：brain 醒来开场白 Phase1）。AELOOP_BRAIN_IDENTITY_DB 未设置、或已设置但身份库是空的时，brain-wake-greeting.mjs 不再安静跳过——会注入一段首次引导脚本，带用户走一遍配置问答（issue #96，docs/first-wake-onboarding/DESIGN.md）；已有真实数据的会话行为不变。配置方式见 docs/conductor-brain-layer/WAKE-GREETING-RUNBOOK.md。诚实标注：这只换了数据源（aeloop 身份 MemoryStore），没有换运行时——仍然依附 Claude Code CLI 自己的 SessionStart/UserPromptSubmit 生命周期钩子（DESIGN.md §7.1/§7.2 Phase1/Phase2 边界）。issue #106：SessionStart 在 VSCode 扩展里真机验证不 fire，UserPromptSubmit 会 fire——brain-wake-greeting.mjs 现在同时注册在两个事件下（同一份 command，脚本内部按 stdin 的 hook_event_name 分派），靠 .claude/hooks/lib/wake-session-guard.mjs 共享守卫保证一次会话只真正注入一次开场白；两层都未被观察到已注入时，还有第三层 CLAUDE.md 自觉兜底网（落点是全局 ~/.claude/CLAUDE.md，不是这份项目级文件），完整架构见 docs/wake-trigger-portability/DESIGN.md。",
   "hooks": {
     "SessionStart": [
       {
@@ -14,6 +14,12 @@
             "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/brain-isolation-guard.mjs\""
           }
         ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "type": "command",
+        "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/brain-wake-greeting.mjs\""
       }
     ],
     "PreToolUse": [

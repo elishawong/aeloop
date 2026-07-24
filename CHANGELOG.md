@@ -6,6 +6,36 @@
 
 ## [Unreleased]
 
+- **2026-07-24** — 醒来触发跨 host 可移植性 + 三层优雅降级(#106):真机验证 `SessionStart`
+  hook 在 VSCode 扩展里不 fire(醒来在指挥官主力 IDE 环境完全失效),`UserPromptSubmit` 会
+  fire——把触发点从"赌单个事件"升级成三层:Layer1 `SessionStart`(CLI 主力,不变)+ Layer2
+  `UserPromptSubmit`(新增,IDE/未知 host 主力,`.claude/settings.json` 同一份 command 双注册,
+  脚本内部按 stdin 的 `hook_event_name` 分派)+ Layer3 CLAUDE.md 自觉兜底网(两层都未被观察到
+  已注入时,模型跑 `brain-wake-greeting.mjs --standalone`,落点是全局 `~/.claude/CLAUDE.md`,
+  不是项目级文件——`install-global-brain.mjs` 新增 merge-not-overwrite 的 `wake-fallback`
+  标记块管理,和 `settings.json` 那套幂等机制同一纪律)。三层共享一个新的会话级守卫
+  (`.claude/hooks/lib/wake-session-guard.mjs`,`session_id` 键 + `O_EXCL` 原子 claim,状态只落
+  `~/.claude/aeloop-brain/wake-session-state/`,绝不落进目标项目仓库),保证一次会话只真正注入
+  一次开场白。`install-global-brain.mjs` 的 `mergeSettingsWithBrainHook()` 同时管理
+  `SessionStart`(`{matcher,hooks:[...]}`)和 `UserPromptSubmit`(扁平数组,结构不同)两个事件;
+  `resolveSettingsWriteTarget()` 泛化改名为 `resolveWriteTarget()`,供 settings.json 和
+  CLAUDE.md 两条写入路径共用同一套已经验证过的软链/mode/EXDEV/原子写/备份逻辑。#96 的三态
+  防幻觉判断(未配置/空库/正常)零改动,只是换了"谁触发、怎么包装输出"。build 阶段发现并修复
+  一个真实 bug:`wake-session-guard.mjs` 最初 import `brain-lock.mjs` 的两个纯函数,但
+  `brain-lock.mjs` 从未进 `COPY_ITEMS`,会在全局安装场景下 `MODULE_NOT_FOUND`——改为独立维护
+  这两个函数(不 import),真机验证过修复后的全局安装快照 `--standalone` 正常工作。`src/**`
+  零改动,`pnpm test` 634 个测试全绿,`pnpm lint` 干净,全仓 24 个 `test-*.mjs` 逐个手跑全部
+  PASS(`test-install-global-brain.mjs` 从 66 组增到 82 组)。**Zorro R1 独立复审(Codex 引擎)
+  FAIL 后修复 4 个 blocker**:①`wake-session-guard.mjs` 的 `guardStateDir()` 新增非绝对路径
+  fail-closed 校验(此前相对 `homeDir` 会把守卫状态落进目标第三方项目仓库);②
+  `claimAndEmit()` 修正只看 `result.claimed` 不看 `result.reason` 的 bug——guard 自身 I/O
+  故障(`reason:"error"`)此前会被误当成"已被别的路径 claim"抑制输出,吞掉整段开场白,现在只有
+  `reason:"already-claimed"` 才抑制;③`mergeClaudeMdWithWakeFallback()` 新增标记数量校验
+  (此前 `indexOf()` 只取第一个标记,遇到重复标记会删掉用户内容且不 fail-closed);④ 一处
+  用越权嵌套 agent(`--allow-dangerously-skip-permissions`)产出的、无可复核产物的"CLI
+  headless 模式探针结论"已降级为 `[?]`,不再当已验证事实。详见
+  `docs/wake-trigger-portability/DESIGN.md`/`PRD.md`/`progress.md`。
+
 - **2026-07-24** — 在途任务来源可插拔、默认关(#103):新增
   `AELOOP_BRAIN_TASK_SOURCE`(`"none"` 默认 \| `"github"`)选择器
   (`.claude/hooks/lib/task-source.mjs`),shipped 默认零 GitHub——开场白的"现在在途"/"Idea

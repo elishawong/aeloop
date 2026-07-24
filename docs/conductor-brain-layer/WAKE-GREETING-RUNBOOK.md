@@ -141,15 +141,33 @@ macOS 上从 Dock / Spotlight / IDE 图形界面启动的进程**不继承** she
 
 ## 让"你好" → 开场白 真的跑起来
 
-`.claude/settings.json` 已经把 `SessionStart` 接到 `.claude/hooks/brain-wake-greeting.mjs`
-（`matcher: "startup|resume|clear"`）——只要在这个仓库（或包含它的目录）里开一个 Claude Code
-会话，且 `AELOOP_BRAIN_IDENTITY_DB` 在会话启动前已经在环境变量里（比如写进
-shell 的 profile，或者用支持传环境变量启动的方式打开会话），SessionStart 就会自动触发这个 hook。
+`.claude/settings.json` 已经把 `SessionStart` **和** `UserPromptSubmit`（issue #106）都接到
+`.claude/hooks/brain-wake-greeting.mjs`（`SessionStart` 用 `matcher: "startup|resume|clear"`，
+`UserPromptSubmit` 不支持 matcher，扁平注册）——只要在这个仓库（或包含它的目录）里开一个 Claude
+Code 会话，且 `AELOOP_BRAIN_IDENTITY_DB` 在会话启动前已经在环境变量里（比如写进 shell 的
+profile，或者用支持传环境变量启动的方式打开会话），两个事件里**至少一个**会自动触发这个 hook
+——具体哪个触发取决于 host（**真机验证**：CLI 里 `SessionStart` 会 fire；VSCode 扩展里
+`SessionStart` **不会** fire，但 `UserPromptSubmit` 会 fire）。三层触发架构 + 跨 host 可移植性
+矩阵的完整论证见下方"三层触发（issue #106）"一节。
 
 **issue #96 起不再是"安静跳过"**：`AELOOP_BRAIN_IDENTITY_DB` 没设置、或者已经设置但身份库是空的
 （还没跑过种子脚本）时，hook 会注入一段首次引导脚本，带用户走一遍问答式配置——不会报错、不影响
 会话正常启动，但也不再彻底沉默。完整设计权威见 `docs/first-wake-onboarding/DESIGN.md`；已有真实
 数据的会话（`listMemories().length >= 1`）行为完全不变。
+
+## 三层触发（issue #106）
+
+`SessionStart`/`UserPromptSubmit` 都没有被观察到已经注入过开场白时（已知场景：某个未验证的
+host，两条硬机制都不 fire），还有第三层——全局 `~/.claude/CLAUDE.md` 里由
+`install-global-brain.mjs` 管理的 `wake-fallback` 标记块（`<!-- aeloop-brain:wake-fallback -->`
+… `<!-- /aeloop-brain:wake-fallback -->`），指示模型在对用户第一条实质回复前，若没见过注入，就
+自己跑一次 `node <hookEntryPath> --standalone`（跳过 stdin，`cwd`/`session_id` 各自兜底解析）。
+三层共享同一个会话级守卫（`.claude/hooks/lib/wake-session-guard.mjs`，状态落
+`~/.claude/aeloop-brain/wake-session-state/`，绝不落进目标项目仓库），保证一次会话只真正注入
+一次。完整架构/跨 host 矩阵/守卫设计：`docs/wake-trigger-portability/DESIGN.md`；实现细节/批次
+拆分：`docs/wake-trigger-portability/PRD.md`。**这段 Layer3 自救指令只装在全局 CLAUDE.md 里，
+不在这份仓库自己的 `/CLAUDE.md` 里**——本地开发本仓库时 Layer1/Layer2 已经通过这份
+`.claude/settings.json` 直接注册好了。
 
 ## 首次醒来引导（issue #96）
 

@@ -71,6 +71,10 @@ export const COPY_ITEMS = [
   // 变回 #96 本身要堵的"沉默=模型脑补假开场白"那个洞**，而且是在全局模式首次在新机器上跑（dbPath
   // 恒非 null，首次必然命中状态 B）这个 #96 最该生效的场景下失效。
   { src: path.join("docs", "conductor-brain-layer", "spike", "lib", "onboarding-greeting.mjs"), type: "file" },
+  // issue #106：brain-wake-greeting.mjs 动态 import 这个 lib 来做三层共享守卫的 claim——同
+  // #96/#98/#103 已经踩过三次的"新库没进 COPY_ITEMS = 全局模式下 MODULE_NOT_FOUND"这条坑，这里
+  // 第四次点名防止再漏（DESIGN.md §附 第1点）。
+  { src: path.join(".claude", "hooks", "lib", "wake-session-guard.mjs"), type: "file" },
 ];
 
 /** @param {string} [homeDir] */
@@ -80,7 +84,10 @@ export function installPaths(homeDir = os.homedir()) {
   const dataDir = path.join(installDir, "data");
   const settingsPath = path.join(homeDir, ".claude", "settings.json");
   const hookEntryPath = path.join(snapshotDir, ".claude", "hooks", "brain-wake-greeting.mjs");
-  return { installDir, snapshotDir, dataDir, settingsPath, hookEntryPath };
+  // issue #106：全局 CLAUDE.md 的 wake-fallback 标记块落点（DESIGN.md §3.5）——和 settingsPath
+  // 同级（`~/.claude/` 下的两个平级文件），不新建目录。
+  const globalClaudeMdPath = path.join(homeDir, ".claude", "CLAUDE.md");
+  return { installDir, snapshotDir, dataDir, settingsPath, hookEntryPath, globalClaudeMdPath };
 }
 
 /**
@@ -136,42 +143,15 @@ function assertValidTaskSourceOpt(value) {
 export const AELOOP_BRAIN_MARKER = "/.claude/aeloop-brain/repo-snapshot/";
 
 /**
- * 纯函数——给定既有 `settings.json` 内容（已 parse 的对象，或 `null`/`undefined` 表示文件不存在）
- * 和本工具要注册的 hook 命令字符串，返回合并后的新对象 + 是否发生了改动。绝不修改入参对象本身
- * （每一层都浅拷贝），供单测直接对"原有条目是否逐字节保留"做 deep-equal 断言。
- *
- * 🔒 Zorro must-fix（2026-07-23）：对"语法合法但结构不认识"的畸形 JSON，本函数**fail-closed
- * 抛错**，不静默归一化/丢内容——此前的实现对三个层级都有同一类缺陷：`existingSettings`/
- * `settings.hooks` 是数组（而不是 plain object）时，`typeof x === "object"` 判断为真，
- * `{...x}` 会把数组内容静默展开/丢弃（见上面 `isPlainObject()` 的注释）；`hooks.SessionStart`
- * 存在但不是数组（比如是个对象/字符串）时，`Array.isArray(...) ? [...x] : []` 会静默把它替换
- * 成空数组，原始值直接丢失。这是往用户**真实** `~/.claude/settings.json` 写文件的工具（B0 是本
- * 批次唯一会真的修改用户主目录文件的批次），"看不懂的结构就拒绝"必须和"JSON 语法本身就是坏的"
- * 走同一条 fail-closed 路径——本函数抛出的错误会在 `installGlobalBrain()` 里于任何实际写入
- * （包括 build/拷贝快照/`npm install`）发生**之前**就中止整个安装，原文件不会被触碰，不需要
- * 额外的 `.bak`（因为压根没写）。
- * @param {object|null|undefined} existingSettings
+ * `SessionStart` 分支——`{matcher, hooks:[{type,command}]}` 结构，本工具的条目在其中某个 entry
+ * 的 `.hooks` 数组里。抽成独立函数（issue #106），供 `mergeSettingsWithBrainHook()` 和
+ * `hooks.UserPromptSubmit` 那条平行分支（`mergeUserPromptSubmitEntries()`，下方）各自独立处理
+ * ——两种事件的 settings.json 结构本身不同（有无 `matcher` 包装），不能共用同一段合并逻辑。
+ * @param {object} hooks 已经浅拷贝过的 `settings.hooks`
  * @param {string} hookCommand
- * @returns {{settings: object, changed: boolean}}
+ * @returns {{sessionStart: object[], changed: boolean}}
  */
-export function mergeSettingsWithBrainHook(existingSettings, hookCommand) {
-  if (existingSettings != null && !isPlainObject(existingSettings)) {
-    throw new Error(
-      `既有 settings.json 顶层不是一个对象（实际是${Array.isArray(existingSettings) ? "数组" : `"${typeof existingSettings}"`}）` +
-        "——拒绝继续，不盲目归一化/覆盖（fail-closed）。这可能是格式已经损坏，或是本工具不认识的新结构；" +
-        "原文件未被触碰，请人工检查后再重试。",
-    );
-  }
-  const settings = existingSettings ? { ...existingSettings } : {};
-
-  if (settings.hooks !== undefined && !isPlainObject(settings.hooks)) {
-    throw new Error(
-      `既有 settings.json 的 "hooks" 字段不是一个对象（实际是${Array.isArray(settings.hooks) ? "数组" : `"${typeof settings.hooks}"`}）` +
-        "——拒绝继续，不盲目归一化/覆盖（fail-closed）。原文件未被触碰，请人工检查后再重试。",
-    );
-  }
-  const hooks = settings.hooks ? { ...settings.hooks } : {};
-
+function mergeSessionStartEntries(hooks, hookCommand) {
   if (hooks.SessionStart !== undefined && !Array.isArray(hooks.SessionStart)) {
     throw new Error(
       `既有 settings.json 的 "hooks.SessionStart" 字段不是一个数组（实际是"${typeof hooks.SessionStart}"）` +
@@ -214,10 +194,7 @@ export function mergeSettingsWithBrainHook(existingSettings, hookCommand) {
       matcher: "startup|resume|clear",
       hooks: [{ type: "command", command: hookCommand }],
     };
-    return {
-      settings: { ...settings, hooks: { ...hooks, SessionStart: [...sessionStart, newEntry] } },
-      changed: true,
-    };
+    return { sessionStart: [...sessionStart, newEntry], changed: true };
   }
 
   // 找到已有的本工具条目——command 字符串完全相同 → 真幂等 no-op；不同（哪怕只是 flag 差异）
@@ -226,7 +203,7 @@ export function mergeSettingsWithBrainHook(existingSettings, hookCommand) {
   const matchedEntry = sessionStart[matchedEntryIndex];
   const matchedHook = matchedEntry.hooks[matchedHookIndex];
   if (matchedHook.command === hookCommand) {
-    return { settings: { ...settings, hooks: { ...hooks, SessionStart: sessionStart } }, changed: false };
+    return { sessionStart, changed: false };
   }
 
   const updatedHooks = [...matchedEntry.hooks];
@@ -235,10 +212,230 @@ export function mergeSettingsWithBrainHook(existingSettings, hookCommand) {
   const updatedSessionStart = [...sessionStart];
   updatedSessionStart[matchedEntryIndex] = updatedEntry;
 
+  return { sessionStart: updatedSessionStart, changed: true };
+}
+
+/**
+ * `UserPromptSubmit` 分支（issue #106，DESIGN §1.2/附录第3点）——**扁平数组，元素直接是
+ * `{type, command}` hook 对象，没有 `SessionStart` 那种 `{matcher, hooks:[...]}` 包装层**
+ * （官方文档确认 `UserPromptSubmit` 不支持 `matcher`）。判据/幂等/替换逻辑和
+ * `mergeSessionStartEntries()` 同构（同一个 `AELOOP_BRAIN_MARKER` 子串识别"是不是本工具装的"），
+ * 但因为少一层 `.hooks` 嵌套，不能直接复用那个函数，独立实现一份。
+ * @param {object} hooks 已经浅拷贝过的 `settings.hooks`
+ * @param {string} hookCommand
+ * @returns {{userPromptSubmit: object[], changed: boolean}}
+ */
+function mergeUserPromptSubmitEntries(hooks, hookCommand) {
+  if (hooks.UserPromptSubmit !== undefined && !Array.isArray(hooks.UserPromptSubmit)) {
+    throw new Error(
+      `既有 settings.json 的 "hooks.UserPromptSubmit" 字段不是一个数组（实际是"${typeof hooks.UserPromptSubmit}"）` +
+        "——拒绝继续，不盲目归一化/覆盖（fail-closed）。原文件未被触碰，请人工检查后再重试。",
+    );
+  }
+  const userPromptSubmit = hooks.UserPromptSubmit ? [...hooks.UserPromptSubmit] : [];
+
+  let matchedIndex = -1;
+  for (let i = 0; i < userPromptSubmit.length; i++) {
+    const h = userPromptSubmit[i];
+    if (typeof h?.command === "string" && h.command.includes(AELOOP_BRAIN_MARKER)) {
+      matchedIndex = i;
+      break;
+    }
+  }
+
+  if (matchedIndex === -1) {
+    const newHook = { type: "command", command: hookCommand };
+    return { userPromptSubmit: [...userPromptSubmit, newHook], changed: true };
+  }
+
+  const matchedHook = userPromptSubmit[matchedIndex];
+  if (matchedHook.command === hookCommand) {
+    return { userPromptSubmit, changed: false };
+  }
+
+  const updated = [...userPromptSubmit];
+  updated[matchedIndex] = { ...matchedHook, command: hookCommand };
+  return { userPromptSubmit: updated, changed: true };
+}
+
+/**
+ * 纯函数——给定既有 `settings.json` 内容（已 parse 的对象，或 `null`/`undefined` 表示文件不存在）
+ * 和本工具要注册的 hook 命令字符串，返回合并后的新对象 + 是否发生了改动。绝不修改入参对象本身
+ * （每一层都浅拷贝），供单测直接对"原有条目是否逐字节保留"做 deep-equal 断言。
+ *
+ * issue #106：同时管理 `hooks.SessionStart`（CLI 环境）和 `hooks.UserPromptSubmit`（IDE/未知
+ * host 环境）两个事件——两者用**同一个** `hookCommand`（同一个脚本文件，内部按 stdin 的
+ * `hook_event_name` 分派，见 `docs/wake-trigger-portability/DESIGN.md` §3.3/附录第2点），委托
+ * 给 `mergeSessionStartEntries()`/`mergeUserPromptSubmitEntries()` 两个独立函数各自处理（结构
+ * 不同，不能共用逻辑），`changed` 是两者的逻辑或——任一个需要写入，整体就报告 `changed:true`。
+ *
+ * 🔒 Zorro must-fix（2026-07-23）：对"语法合法但结构不认识"的畸形 JSON，本函数**fail-closed
+ * 抛错**，不静默归一化/丢内容——此前的实现对三个层级都有同一类缺陷：`existingSettings`/
+ * `settings.hooks` 是数组（而不是 plain object）时，`typeof x === "object"` 判断为真，
+ * `{...x}` 会把数组内容静默展开/丢弃（见上面 `isPlainObject()` 的注释）；`hooks.SessionStart`/
+ * `hooks.UserPromptSubmit` 存在但不是数组（比如是个对象/字符串）时，`Array.isArray(...) ?
+ * [...x] : []` 会静默把它替换成空数组，原始值直接丢失。这是往用户**真实**
+ * `~/.claude/settings.json` 写文件的工具（B0 是本批次唯一会真的修改用户主目录文件的批次），
+ * "看不懂的结构就拒绝"必须和"JSON 语法本身就是坏的"走同一条 fail-closed 路径——本函数抛出的
+ * 错误会在 `installGlobalBrain()` 里于任何实际写入（包括 build/拷贝快照/`npm install`）发生
+ * **之前**就中止整个安装，原文件不会被触碰，不需要额外的 `.bak`（因为压根没写）。
+ * @param {object|null|undefined} existingSettings
+ * @param {string} hookCommand
+ * @returns {{settings: object, changed: boolean}}
+ */
+export function mergeSettingsWithBrainHook(existingSettings, hookCommand) {
+  if (existingSettings != null && !isPlainObject(existingSettings)) {
+    throw new Error(
+      `既有 settings.json 顶层不是一个对象（实际是${Array.isArray(existingSettings) ? "数组" : `"${typeof existingSettings}"`}）` +
+        "——拒绝继续，不盲目归一化/覆盖（fail-closed）。这可能是格式已经损坏，或是本工具不认识的新结构；" +
+        "原文件未被触碰，请人工检查后再重试。",
+    );
+  }
+  const settings = existingSettings ? { ...existingSettings } : {};
+
+  if (settings.hooks !== undefined && !isPlainObject(settings.hooks)) {
+    throw new Error(
+      `既有 settings.json 的 "hooks" 字段不是一个对象（实际是${Array.isArray(settings.hooks) ? "数组" : `"${typeof settings.hooks}"`}）` +
+        "——拒绝继续，不盲目归一化/覆盖（fail-closed）。原文件未被触碰，请人工检查后再重试。",
+    );
+  }
+  const hooks = settings.hooks ? { ...settings.hooks } : {};
+
+  const sessionStartResult = mergeSessionStartEntries(hooks, hookCommand);
+  const userPromptSubmitResult = mergeUserPromptSubmitEntries(hooks, hookCommand);
+  const changed = sessionStartResult.changed || userPromptSubmitResult.changed;
+
   return {
-    settings: { ...settings, hooks: { ...hooks, SessionStart: updatedSessionStart } },
-    changed: true,
+    settings: {
+      ...settings,
+      hooks: { ...hooks, SessionStart: sessionStartResult.sessionStart, UserPromptSubmit: userPromptSubmitResult.userPromptSubmit },
+    },
+    changed,
   };
+}
+
+// ── issue #106：全局 ~/.claude/CLAUDE.md 的 wake-fallback 标记块（DESIGN.md §3.4/§3.5） ──────
+//
+// Layer3（模型自己跑 `--standalone` 的自救兜底网）的指令文本落点是全局 `~/.claude/CLAUDE.md`，
+// 不是 aeloop 项目自己的 `/CLAUDE.md`——理由（指挥官 2026-07-24 确认）：项目级文件每接入一个
+// 新项目都要重新配一遍，"兜底网"的名字就名不副实了；#93 全局安装的卖点就是"装一次，全项目
+// 生效"，Layer3 必须和 Layer1/Layer2（本来就是全局 settings.json 里注册的 hook，天然跨项目）
+// 享有同等待遇。
+
+/**
+ * 标记块起止行——和 `AELOOP_BRAIN_MARKER`（settings.json 场景）同一个定位：一段高特异性、正常
+ * 用户手写文档几乎不可能巧合撞上的标记，用来在任意既有 `CLAUDE.md` 文本里可靠定位"这是不是本
+ * 工具管理的那一块"。#105（uninstall-global-brain，当前 OPEN 未实现）落地对称摘除时必须复用
+ * 这两个常量，不能各写一份字面量（同 `AELOOP_BRAIN_MARKER` 头注释里对 #105 的既有要求）。
+ */
+export const WAKE_FALLBACK_MARKER_START = "<!-- aeloop-brain:wake-fallback -->";
+export const WAKE_FALLBACK_MARKER_END = "<!-- /aeloop-brain:wake-fallback -->";
+
+/**
+ * 生成要塞进标记块里的正文——DESIGN.md §3.4 草案文案，用真实 `hookEntryPath` 替换其中的固定
+ * 路径。纯函数，不读写任何文件。
+ * @param {string} hookEntryPath 真实的 `installPaths().hookEntryPath`（全局安装路径）
+ * @returns {string}
+ */
+export function buildWakeFallbackBlockBody(hookEntryPath) {
+  return (
+    "## 醒来（issue #106 全局兜底网，由 install-global-brain.mjs 管理，请勿手动编辑本标记块）\n\n" +
+    "每次会话启动，`brain-wake-greeting.mjs` 会尝试通过 `SessionStart`（CLI 环境）或 " +
+    "`UserPromptSubmit`（IDE/未知 host 环境）hook 注入一份延续式开场白——这是硬机制，两条路径" +
+    "至少一条会在已验证的 host 上生效，你对“要不要执行”没有选择权。**只有在你对用户的第一条" +
+    "实质性回复之前，确认自己完全没有看到过任何以 `[brain-wake-greeting]` 开头的注入内容时**" +
+    "（说明这个 host 上两条硬机制都没有 fire——已知的未验证场景），才需要自己主动跑一次：\n\n" +
+    `\`node "${hookEntryPath}" --standalone\`\n\n` +
+    "并按它的输出行事——这条自救路径只检查一次（对话的第一条实质回复之前），不是每条回复都重新" +
+    "检查。如果输出说“本会话已经醒来过”，说明其实某条硬机制已经生效过，正常处理用户的请求即可，" +
+    "不要再重复一遍开场白。这段自救指令不会主动告诉用户“这是软路径兜底”——默默做，不额外提示。"
+  );
+}
+
+/** 统计 `needle` 在 `haystack` 里出现的次数（不重叠计数）——`mergeClaudeMdWithWakeFallback()`
+ * 的 B3 修复要用它精确判断"起止标记是不是各恰好一个"，不能只用 `indexOf() !== -1` 判断"存在"
+ * （那样量测不出"存在几个"，见下方函数头注释）。 */
+function countOccurrences(haystack, needle) {
+  let count = 0;
+  let idx = haystack.indexOf(needle);
+  while (idx !== -1) {
+    count += 1;
+    idx = haystack.indexOf(needle, idx + needle.length);
+  }
+  return count;
+}
+
+/**
+ * 纯函数——给定既有 `~/.claude/CLAUDE.md` 内容（字符串，或 `null`/`undefined` 表示文件不存在）
+ * 和本工具要写入的标记块正文，返回合并后的新内容 + 是否发生了改动。**红线（指挥官原话）**：
+ * 用户自己的 `CLAUDE.md` 内容神圣不可动——本工具只能追加/原地更新自己那一小块，绝不整文件
+ * 覆盖、绝不触碰用户自己写的任何一行（DESIGN.md §3.5）。
+ *
+ * 语义（DESIGN.md §3.5 已完整论证；🔒 **Zorro R1 blocker B3 订正，2026-07-24，独立 Codex 复现
+ * 坐实**：初版判定只用 `indexOf()` 各取"第一个"标记的位置，**没有校验标记数量**——如果既有内容
+ * 里恰好出现两个起始标记 + 一个结束标记（比如用户不小心手动复制粘贴过一次，或安装脚本以外的
+ * 方式追加过），`indexOf()` 会静默取到第一个起始标记和唯一的结束标记，把两个起始标记**之间的
+ * 用户内容当成"标记块内部"整个删掉替换掉**——这正是本函数存在的理由（"用户内容神圣不可动"）
+ * 被自己的实现破坏,且原本的规则 3（只对"缺一半"fail-closed）没有覆盖"标记数量不对但两种标记
+ * 都不缺"这个同样畸形的状态,是一个真实的不一致：单侧缺失 fail-closed,单侧过量却不 fail-closed）：
+ *   1. 起始标记和结束标记都**恰好各出现 1 次**、且结束标记在起始标记之后 → 原地替换标记块
+ *      之间（含标记行本身）的内容；标记块外的所有内容逐字节保留。替换前后内容完全相同 →
+ *      `changed:false`（真幂等 no-op）。
+ *   2. 起始标记和结束标记**都出现 0 次**（含 `existingContent` 为 `null`/空串，首装场景）→
+ *      追加到文件末尾（若原内容非空且不以换行结尾，先补一个换行再追加，不和用户最后一行文字
+ *      粘连）；原有内容原样保留在前面，一个字不动。
+ *   3. **除以上两种之外的任何组合**（只有一个标记存在缺另一半 / 任一标记出现 2 次及以上 /
+ *      恰好各一个但结束标记出现在起始标记之前）→ **fail-closed 拒绝写入，抛出错误**——不盲目
+ *      猜测标记块边界该在哪，猜错的后果是删掉用户自己写的真实内容，比拒绝安装更危险（同
+ *      `mergeSettingsWithBrainHook()` 对畸形结构的既有 fail-closed 取向）。
+ * @param {string|null|undefined} existingContent
+ * @param {string} blockBody `buildWakeFallbackBlockBody()` 的产出
+ * @returns {{content: string, changed: boolean}}
+ */
+export function mergeClaudeMdWithWakeFallback(existingContent, blockBody) {
+  const content = existingContent ?? "";
+  const newBlock = `${WAKE_FALLBACK_MARKER_START}\n${blockBody}\n${WAKE_FALLBACK_MARKER_END}`;
+
+  const startCount = countOccurrences(content, WAKE_FALLBACK_MARKER_START);
+  const endCount = countOccurrences(content, WAKE_FALLBACK_MARKER_END);
+
+  if (startCount === 0 && endCount === 0) {
+    // 规则 2：都不存在 → 追加。
+    if (content === "") {
+      return { content: newBlock, changed: true };
+    }
+    const separator = content.endsWith("\n") ? "\n" : "\n\n";
+    const merged = `${content}${separator}${newBlock}`;
+    return { content: merged, changed: true };
+  }
+
+  if (startCount !== 1 || endCount !== 1) {
+    // 规则 3（B3 修复）：数量不是"恰好各一个"——覆盖"缺一半"（0/1、1/0）和"标记重复"
+    // （2+/任意、任意/2+）两类畸形状态，统一 fail-closed，不猜测边界。
+    throw new Error(
+      `既有 CLAUDE.md 里 wake-fallback 标记块的起止标记数量异常（起始标记 ${startCount} 个，结束标记 ` +
+        `${endCount} 个，正常应该各恰好 1 个）——拒绝继续，不盲目猜测标记块边界该在哪（fail-closed）。` +
+        "这可能是文件被手工编辑过、或被安装脚本以外的方式重复写入；原文件未被触碰，请人工检查后再重试。",
+    );
+  }
+
+  const startIdx = content.indexOf(WAKE_FALLBACK_MARKER_START);
+  const endIdx = content.indexOf(WAKE_FALLBACK_MARKER_END);
+
+  if (endIdx < startIdx) {
+    throw new Error("既有 CLAUDE.md 里 wake-fallback 标记块的结束标记出现在起始标记之前——拒绝继续（fail-closed），原文件未被触碰，请人工检查后再重试。");
+  }
+
+  // 规则 1：两个标记各恰好一个、顺序正确 → 原地替换标记块之间（含标记行本身）的内容。
+  const endOfEndMarker = endIdx + WAKE_FALLBACK_MARKER_END.length;
+  const before = content.slice(0, startIdx);
+  const after = content.slice(endOfEndMarker);
+  const merged = `${before}${newBlock}${after}`;
+
+  if (merged === content) {
+    return { content, changed: false };
+  }
+  return { content: merged, changed: true };
 }
 
 function defaultExecImpl(cmd, args, options) {
@@ -268,48 +465,53 @@ function assertStagingUsable(dir) {
 }
 
 /**
- * 🔒 Zorro must-fix（2026-07-23，第4轮）：`settings.json` 的"有效写入目标"解析——这是本文件
- * 第5次在同一处 settings 写逻辑上被挑出边界（损坏 JSON → 非原子写 → mode 丢失/软链被换掉），
+ * 🔒 Zorro must-fix（2026-07-23，第4轮）：某个用户主目录下的目标文件的"有效写入目标"解析——
+ * 这是本文件第5次在同一处写逻辑上被挑出边界（损坏 JSON → 非原子写 → mode 丢失/软链被换掉），
  * 这次一次性把 metadata/边界预判完，不再一条条打地鼠：
  *
- *   - **软链（write-through）**：`settingsPath` 本身是软链时，绝不能直接 `renameSync` 换掉它——
+ *   - **软链（write-through）**：`filePath` 本身是软链时，绝不能直接 `renameSync` 换掉它——
  *     那会把软链换成一个普通文件，孤立掉软链原本指向的真身（典型场景：操作者把
- *     `~/.claude/settings.json` 软链到自己的 dotfiles 仓库，`rename` 覆盖软链会让 dotfiles
- *     仓库那份"失联"，magit/git status 也不会再反映这次改动）。正确做法是**解析真身路径，
- *     在真身所在目录做 temp+rename**——软链本身完全不被触碰，仍然指向同一个路径，只是那个
- *     路径底下的内容被原子地换成了新内容。
- *   - **悬空软链**：`settingsPath` 是软链但指向的路径不存在（`realpathSync` 解析失败）——
+ *     `~/.claude/settings.json`/`~/.claude/CLAUDE.md` 软链到自己的 dotfiles 仓库，`rename`
+ *     覆盖软链会让 dotfiles 仓库那份"失联"，magit/git status 也不会再反映这次改动）。正确做法
+ *     是**解析真身路径，在真身所在目录做 temp+rename**——软链本身完全不被触碰，仍然指向同一个
+ *     路径，只是那个路径底下的内容被原子地换成了新内容。
+ *   - **悬空软链**：`filePath` 是软链但指向的路径不存在（`realpathSync` 解析失败）——
  *     fail-closed 明确拒绝，不猜测操作者的意图（有 write-through 硬阻碍：不知道该往哪创建
  *     真身、以什么 mode 创建，猜错比拒绝更危险）。
- *   - **首装 vs 重装**：`settingsPath`（或它指向的真身）压根不存在时（`lstatSync` 直接
+ *   - **首装 vs 重装**：`filePath`（或它指向的真身）压根不存在时（`lstatSync` 直接
  *     `ENOENT`）→ 首装场景，`existedBefore: false`，调用方不会尝试读取/保留一个不存在的
  *     mode，新文件的 mode 完全交给进程当前 umask 决定，不额外 chmod 成任何"我们觉得对"的值。
  *
- * @param {string} settingsPath
+ * issue #106：这段逻辑原名 `resolveSettingsWriteTarget()`，只服务 `settings.json`——本次
+ * 泛化改名为 `resolveWriteTarget()`（不针对具体文件名的通用 helper），供 `settings.json` 和
+ * `~/.claude/CLAUDE.md`（DESIGN.md §3.5 的 `wake-fallback` 标记块）两条写入路径共用，不重新
+ * 发明一套逻辑去踩一遍同样的坑（软链/mode/EXDEV，已经用真实 blocker 换来的教训）。纯重命名 +
+ * 参数泛化，逻辑本身零改动——不影响 `settings.json` 既有调用点的任何行为。
+ * @param {string} filePath
  * @returns {{ writeTargetPath: string, existedBefore: boolean }}
  */
-function resolveSettingsWriteTarget(settingsPath) {
+function resolveWriteTarget(filePath) {
   let lstat;
   try {
-    lstat = lstatSync(settingsPath);
+    lstat = lstatSync(filePath);
   } catch (err) {
     // 🔒 Zorro finding 12（2026-07-23 第5轮）：只有 ENOENT（真的什么都没有，首装场景）才该走
     // 这条"当成首装"的分支——此前是不分错误类型的 blanket catch，会把权限不足（EACCES）、
     // 路径过长、坏文件描述符等其它真实故障也一并静默吞掉当成"文件不存在"，掩盖真实问题。
     if (err.code !== "ENOENT") throw err;
-    return { writeTargetPath: settingsPath, existedBefore: false };
+    return { writeTargetPath: filePath, existedBefore: false };
   }
 
   if (!lstat.isSymbolicLink()) {
-    return { writeTargetPath: settingsPath, existedBefore: true };
+    return { writeTargetPath: filePath, existedBefore: true };
   }
 
   let realTarget;
   try {
-    realTarget = realpathSync(settingsPath);
+    realTarget = realpathSync(filePath);
   } catch (err) {
     throw new Error(
-      `settings.json（${settingsPath}）是一个软链，但解析真实路径失败（很可能是悬空软链，` +
+      `${filePath} 是一个软链，但解析真实路径失败（很可能是悬空软链，` +
         `指向的文件不存在）：${err.message}——拒绝继续（fail-closed，不猜测该往哪创建真身/用什么 ` +
         "mode，宁可拒绝也不冒险写错地方）。",
     );
@@ -356,7 +558,10 @@ export function installGlobalBrain(opts = {}) {
   } = opts;
   assertValidTaskSourceOpt(taskSource); // fail-closed 早退——即便是编程调用（绕过 CLI）也不静默降级
 
-  const { installDir, snapshotDir, dataDir, settingsPath, hookEntryPath } = installPaths(homeDir);
+  const { installDir, snapshotDir, dataDir, settingsPath, hookEntryPath, globalClaudeMdPath } = installPaths(homeDir);
+  // issue #106：SessionStart 和 UserPromptSubmit 用同一个 hookCommand（同一个脚本文件，内部按
+  // stdin 的 hook_event_name 分派，见 DESIGN.md §3.3/附录第2点）——不需要为 UserPromptSubmit
+  // 单独生成一条不同的命令字符串。
   const hookCommand =
     taskSource === "github"
       ? `AELOOP_BRAIN_GLOBAL_MODE=1 AELOOP_BRAIN_TASK_SOURCE=github node "${hookEntryPath}"`
@@ -377,16 +582,39 @@ export function installGlobalBrain(opts = {}) {
     hookCommand,
   );
 
+  // issue #106：全局 CLAUDE.md 的 wake-fallback 标记块——同 settings.json 一样，即便 dry-run 也
+  // 读（只读不算副作用），纯文本文件不存在 JSON 解析失败这种问题，读不到就当空串处理
+  // （`mergeClaudeMdWithWakeFallback()` 内部对 `null` 的处理和空串等价）。
+  let existingClaudeMdContent = null;
+  if (existsSync(globalClaudeMdPath)) {
+    existingClaudeMdContent = readFileSync(globalClaudeMdPath, "utf8");
+  }
+  const wakeFallbackBlockBody = buildWakeFallbackBlockBody(hookEntryPath);
+  const { content: mergedClaudeMdContent, changed: claudeMdChanged } = mergeClaudeMdWithWakeFallback(
+    existingClaudeMdContent,
+    wakeFallbackBlockBody,
+  );
+
   // 🔒 Zorro finding 14（2026-07-23 第5轮）：settings 写入目标解析（含悬空软链 fail-closed
-  // 校验，见 resolveSettingsWriteTarget() 头注释）挪到这里——build/快照换入**之前**——而不是
-  // 留到最后写 settings.json 那一步才做。原来的顺序会导致"软链解析失败"这种一开始就能判定
-  // 的错误，要等 build 完、快照都换入完成之后才报出来，前面这些实质性改动已经落地，不是真正
-  // 的整体 fail-closed。只有 `settingsChanged` 时才解析/校验——这次运行如果本来就不需要碰
-  // settings.json（已经幂等跳过），不该因为一个这次用不到的悬空软链而挡住整个安装。
-  const settingsWriteTarget = settingsChanged ? resolveSettingsWriteTarget(settingsPath) : null;
+  // 校验，见 resolveWriteTarget() 头注释）挪到这里——build/快照换入**之前**——而不是留到最后
+  // 写 settings.json 那一步才做。原来的顺序会导致"软链解析失败"这种一开始就能判定的错误，要等
+  // build 完、快照都换入完成之后才报出来，前面这些实质性改动已经落地，不是真正的整体
+  // fail-closed。只有 `settingsChanged`/`claudeMdChanged` 时才解析/校验各自的目标——这次运行
+  // 如果本来就不需要碰某个文件（已经幂等跳过），不该因为一个这次用不到的悬空软链而挡住整个安装。
+  const settingsWriteTarget = settingsChanged ? resolveWriteTarget(settingsPath) : null;
+  const claudeMdWriteTarget = claudeMdChanged ? resolveWriteTarget(globalClaudeMdPath) : null;
 
   if (dryRun) {
-    return { dryRun: true, snapshotDir, dataDir, settingsPath, hookCommand, settingsChanged };
+    return {
+      dryRun: true,
+      snapshotDir,
+      dataDir,
+      settingsPath,
+      hookCommand,
+      settingsChanged,
+      globalClaudeMdPath,
+      claudeMdChanged,
+    };
   }
 
   // ① build（可注入，测试用假实现，不真的跑 pnpm）
@@ -501,7 +729,7 @@ export function installGlobalBrain(opts = {}) {
   // 过度工程，超出片①范围）。单纯 temp+rename 本身又会静默丢 metadata（真实复现过的两条
   // 回归）：① 把用户已有文件的权限位（如 `0600`）静默放宽成新建文件的默认 `0644`；②
   // `settingsPath` 是软链时（比如指向操作者自己的 dotfiles 仓库）把软链本身换成一个普通文件，
-  // 孤立掉软链原本指向的真身。`resolveSettingsWriteTarget()`（已在函数开头 `settingsChanged`
+  // 孤立掉软链原本指向的真身。`resolveWriteTarget()`（已在函数开头 `settingsChanged`
   // 判定后、`dryRun`/build/快照换入**之前**调用过一次，见上方"Zorro finding 14"说明，这里直接
   // 复用那次的结果，不重复 `lstatSync`）统一处理软链/首装两条分支。
   if (settingsChanged) {
@@ -524,7 +752,7 @@ export function installGlobalBrain(opts = {}) {
       // directory"），即便软链指向的明明是个普通文件（`statSync().isFile()` 为真）——这是
       // `cpSync` 自己在软链源 + dereference 组合下的一个实现细节坑，不是本文件的逻辑错误。
       // 更直接、也更不依赖这个坑会不会被修的做法：直接把**已经解析好的真实路径**
-      // （`writeTargetPath`，`resolveSettingsWriteTarget()` 早算出来的）当 `cpSync` 的 `src`
+      // （`writeTargetPath`，`resolveWriteTarget()` 早算出来的）当 `cpSync` 的 `src`
       // ——这时 `src` 本身就不是软链了，不需要 `dereference` 选项，也就绕开了这个坑。
       cpSync(writeTargetPath, backupPath);
     }
@@ -533,7 +761,7 @@ export function installGlobalBrain(opts = {}) {
     // 可保留；首装没有 mode 可读，交给默认 umask，不自作主张。
     const priorMode = existedBefore ? statSync(writeTargetPath).mode & 0o777 : null;
 
-    // temp 文件建在有效写入目标的同一目录（回归②+EXDEV 的共同修法，见 resolveSettingsWriteTarget()
+    // temp 文件建在有效写入目标的同一目录（回归②+EXDEV 的共同修法，见 resolveWriteTarget()
     // 头注释）；文件名额外拼一段随机后缀，配合 pid+timestamp 把"同一毫秒内、同一进程意外重入"
     // 这种极端小概率的 temp 命名冲突也一并堵掉（成本几乎为零，一次性做完不留隐患）。
     const settingsTempPath = path.join(
@@ -558,7 +786,54 @@ export function installGlobalBrain(opts = {}) {
     }
   }
 
-  return { dryRun: false, snapshotDir, dataDir, settingsPath, hookCommand, settingsChanged, installedVersion };
+  // ⑥（issue #106）合并写入全局 CLAUDE.md 的 wake-fallback 标记块——**结构上刻意照抄上面 ⑤ 那
+  // 段刚验证过的模式**（软链 write-through/悬空软链 fail-closed/mode 保留/`cpSync` 的
+  // `dereference` 陷阱/temp+rename 原子写/`.bak-<timestamp>` 备份），不抽成和 ⑤ 共用的函数——
+  // 这是本批次一处刻意的风险控制取舍：抽公共 helper 需要改动 ⑤ 那段已经通过 5 轮 Zorro 复审
+  // 硬化过的代码，本批次选择"复制一份结构相同、已验证正确的模式，针对 CLAUDE.md 场景重新写"，
+  // 不触碰 ⑤ 一行——用可控的小段代码重复换取零风险碰坏已经稳定的 settings.json 写入路径。
+  // `mergedSettings`→`mergedClaudeMdContent`、JSON.stringify→纯文本写入是这段和 ⑤ 唯一的
+  // 本质差异。
+  if (claudeMdChanged) {
+    mkdirSync(path.dirname(globalClaudeMdPath), { recursive: true });
+
+    const { writeTargetPath, existedBefore } = claudeMdWriteTarget;
+
+    if (existsSync(globalClaudeMdPath)) {
+      const backupPath = `${globalClaudeMdPath}.bak-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+      cpSync(writeTargetPath, backupPath); // 见 ⑤ 段注释：writeTargetPath 已经是解析过软链的真实
+      // 路径，不需要 { dereference: true }（那个组合在 cpSync 源是软链时会抛 ERR_FS_EISDIR）。
+    }
+
+    const priorMode = existedBefore ? statSync(writeTargetPath).mode & 0o777 : null;
+
+    const claudeMdTempPath = path.join(
+      path.dirname(writeTargetPath),
+      `${path.basename(writeTargetPath)}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    );
+    try {
+      writeFileSync(claudeMdTempPath, mergedClaudeMdContent);
+      if (priorMode !== null) {
+        chmodSync(claudeMdTempPath, priorMode);
+      }
+      renameImpl(claudeMdTempPath, writeTargetPath);
+    } catch (err) {
+      rmSync(claudeMdTempPath, { force: true });
+      throw err;
+    }
+  }
+
+  return {
+    dryRun: false,
+    snapshotDir,
+    dataDir,
+    settingsPath,
+    hookCommand,
+    settingsChanged,
+    globalClaudeMdPath,
+    claudeMdChanged,
+    installedVersion,
+  };
 }
 
 function parseArgs(argv) {
@@ -597,7 +872,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   console.log(`  dataDir: ${result.dataDir}`);
   console.log(`  settingsPath: ${result.settingsPath}`);
   console.log(`  hookCommand: ${result.hookCommand}`);
-  console.log(`  settings.json ${result.settingsChanged ? "将/已新增一条 SessionStart hook 条目" : "已包含该条目（幂等跳过）"}`);
+  console.log(`  settings.json ${result.settingsChanged ? "将/已新增或更新 SessionStart + UserPromptSubmit 两条 hook 条目" : "已包含两条本工具条目（幂等跳过）"}`);
+  // issue #106：全局 CLAUDE.md 的 wake-fallback 标记块（Layer3 自救兜底网指令），对齐上面
+  // settings.json 那一行的信息密度。
+  console.log(`  globalClaudeMdPath: ${result.globalClaudeMdPath}`);
+  console.log(`  CLAUDE.md ${result.claudeMdChanged ? "将/已新增或更新 wake-fallback 标记块" : "已包含该标记块（幂等跳过）"}`);
   // issue #98：dry-run 不真的 build/拷贝，没有产出可读的版本信息，只在真实安装完成后回显。
   if (!result.dryRun) console.log(`  已安装版本: ${result.installedVersion}`);
 }
