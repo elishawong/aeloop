@@ -1,0 +1,31 @@
+sequenceDiagram
+    actor User as 用户
+    participant Brain
+    participant Conductor
+    participant Engine as Aeloop Loop
+    participant Coder
+    participant Tester
+    participant Human as 人工 Gate
+    participant Audit as Events / Audit
+    User->>Brain: 自然语言需求 / PRD
+    Brain->>Conductor: versioned TaskContract
+    Conductor->>Conductor: schema、policy、workflow、budget 校验
+    Conductor->>Engine: RunPlan
+    Engine->>Coder: Prompt + Context
+    Coder-->>Engine: structured candidate
+    Engine->>Audit: run_started / node / usage
+    Engine->>Human: G1：是否发送给 tester？
+    Human-->>Engine: approve 或 reject
+    Engine->>Tester: candidate + contract + evidence
+    Tester-->>Engine: pass 或 findings
+    alt tester reject
+        Engine->>Human: G2：是否把 findings 返回 coder？
+        Human-->>Engine: approve 或 escalate
+        Engine->>Coder: fix-forward findings
+    else tester pass
+        Engine->>Human: G3：最终授权
+        Human-->>Engine: approve 或 reject
+    end
+    Engine->>Audit: EvidenceBundle + checkpoint
+    Engine-->>Conductor: run result
+    Conductor-->>User: 状态、证据、待决策项

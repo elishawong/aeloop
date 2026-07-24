@@ -4,25 +4,9 @@
 
 Aeloop 项目包含两个逻辑系统。它们在同一个仓库中协作，但职责不同：
 
-```mermaid
-flowchart LR
-    subgraph P[产品层]
-      B[Brain]
-      C[Conductor / conductor-work]
-      B --> C
-    end
+![产品层与执行层边界](./diagrams/architecture-boundaries.svg)
 
-    subgraph E[执行层]
-      L[Loop]
-      H[Harness]
-      X[Context]
-      R[Prompt]
-      L --> H --> X --> R
-    end
-
-    C -->|versioned TaskContract| L
-    L -->|EvidenceBundle + events| C
-```
+图源：[architecture-boundaries.mmd](./diagrams/architecture-boundaries.mmd)。
 
 ### 产品层
 

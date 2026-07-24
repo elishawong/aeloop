@@ -2,40 +2,9 @@
 
 ## 3.1 完整生命周期
 
-```mermaid
-sequenceDiagram
-    actor User as 用户
-    participant Brain
-    participant Conductor
-    participant Loop
-    participant Coder
-    participant Tester
-    participant Human as 人工 Gate
-    participant Audit as Events / Audit
+![一次任务的完整生命周期](./diagrams/run-lifecycle.svg)
 
-    User->>Brain: 自然语言需求 / PRD
-    Brain->>Conductor: versioned TaskContract
-    Conductor->>Conductor: schema、policy、workflow、budget 校验
-    Conductor->>Loop: RunPlan
-    Loop->>Coder: Prompt + Context
-    Coder-->>Loop: structured candidate
-    Loop->>Audit: run_started / node / usage
-    Loop->>Human: G1：是否发送给 tester？
-    Human-->>Loop: approve 或 reject
-    Loop->>Tester: candidate + contract + evidence
-    Tester-->>Loop: pass 或 findings
-    alt tester reject
-        Loop->>Human: G2：是否把 findings 返回 coder？
-        Human-->>Loop: approve 或 escalate
-        Loop->>Coder: fix-forward findings
-    else tester pass
-        Loop->>Human: G3：最终授权
-        Human-->>Loop: approve 或 reject
-    end
-    Loop->>Audit: EvidenceBundle + checkpoint
-    Loop-->>Conductor: run result
-    Conductor-->>User: 状态、证据、待决策项
-```
+图源：[run-lifecycle.mmd](./diagrams/run-lifecycle.mmd)。
 
 ## 3.2 每个阶段做什么
 

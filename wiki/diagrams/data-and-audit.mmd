@@ -1,0 +1,7 @@
+flowchart LR
+    R[Run / Node 执行] --> EV[Append-only LoopEvent]
+    EV --> PR[EvidenceEventProjector]
+    PR --> EB[EvidenceBundle]
+    EV --> US[Usage Ledger]
+    EB --> UI[CLI / UI / Brain]
+    US --> M[Token measurement]

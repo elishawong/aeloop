@@ -1,0 +1,7 @@
+flowchart LR
+    A[基线：真实 company run] --> B[持久化 usage / evidence]
+    B --> C[真实事件流与外部 gate]
+    C --> D[PromptDelta / cache 测量]
+    D --> E[第二个真实 workflow]
+    E --> F[稳定的 workflow plugin API]
+    F --> G[可视化 workflow builder]

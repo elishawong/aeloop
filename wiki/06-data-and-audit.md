@@ -4,15 +4,9 @@
 
 最终的一段自然语言总结不够审计。系统需要保留“发生过什么”的事件轨迹，再从事件投影出面向人的 EvidenceBundle。
 
-```mermaid
-flowchart LR
-    R[Run / Node 执行] --> EV[Append-only LoopEvent]
-    EV --> PR[EvidenceEventProjector]
-    PR --> EB[EvidenceBundle]
-    EV --> US[Usage Ledger]
-    EB --> UI[CLI / UI / Brain]
-    US --> M[Token measurement]
-```
+![事件、证据与 token 记录](./diagrams/data-and-audit.svg)
+
+图源：[data-and-audit.mmd](./diagrams/data-and-audit.mmd)。
 
 ## 6.2 主要数据对象
 

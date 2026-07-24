@@ -1,0 +1,17 @@
+flowchart TD
+    A[Loop 提交 InvokeRequest] --> B[ProviderRouter]
+    B --> C[AdapterRegistry]
+    C --> D{adapter kind}
+    D -- direct-api --> E[LiteLLMAdapter]
+    D -- cli-bridge --> F[Claude/Codex CLI Adapter]
+    E --> G[raw response]
+    F --> H[response + tool trace]
+    G --> I[SchemaValidator]
+    H --> I
+    H --> J[ToolExecVerifier]
+    I --> K{valid?}
+    J --> K
+    K -- 是 --> L[InvokeResult + usage/evidence]
+    K -- 否且有重试 --> M[带错误反馈再次调用]
+    M --> I
+    K -- 否且耗尽 --> X[fail-closed]

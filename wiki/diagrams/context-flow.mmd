@@ -1,0 +1,14 @@
+flowchart TD
+    A[任务 query] --> B[MemoryStore]
+    B --> C[核心记忆全量读取]
+    B --> D[FTS5 关键词召回]
+    C --> E[按 id 合并去重]
+    D --> E
+    E --> F[过滤 rejected]
+    F --> G[StalenessEngine 标记 stale/unconfirmed]
+    G --> H{启用 token budget?}
+    H -- 否 --> I[ContextInjectionResult]
+    H -- 是 --> J[ContextBudgetManager]
+    J --> K{protected 放得下?}
+    K -- 否 --> X[ContextBudgetExceededError]
+    K -- 是 --> I

@@ -1,0 +1,10 @@
+flowchart LR
+    A[候选记忆] --> B[estimateTokens]
+    B --> C{protected?}
+    C -- 是 --> D[必须保留]
+    C -- 否 --> E[按 priority/relevance 排序]
+    D --> F{预算足够?}
+    E --> F
+    F -- 是 --> G[注入]
+    F -- 否且非 protected --> H[omitted + reason]
+    F -- 否且 protected --> I[fail-closed]

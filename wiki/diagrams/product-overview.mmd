@@ -1,0 +1,17 @@
+flowchart TD
+    U[用户 / PRD / Figma] --> B[Brain<br/>personal 或 company]
+    B --> T[TaskContract<br/>目标、需求、验收、策略]
+    T --> C[Conductor<br/>验证 contract，选择 workflow]
+    C --> P[RunPlan<br/>版本化执行计划]
+    subgraph A[Aeloop 执行引擎]
+      L[Loop<br/>状态机、gate、checkpoint]
+      H[Harness<br/>模型适配、schema、工具核验]
+      X[Context<br/>记忆召回、预算、staleness]
+      R[Prompt<br/>persona、任务提示、输出 schema]
+      L --> H --> X --> R
+    end
+    P --> L
+    L --> O[候选 diff / 测试结果]
+    L --> E[Events / EvidenceBundle / Token Usage]
+    O --> G[人工 gate]
+    G --> V[外部发布流程]
