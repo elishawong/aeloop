@@ -24,6 +24,11 @@
 //      `{globalMode:true}` 分支的确定性）。
 //   ⑦ AI_AGENT_PROFILE 提示：两段正文都出现、且明确标"可选"/"独立"，不与身份库配置步骤混在一起；
 //      不断言 apikey 是"当前配置文件默认值"这类会和 .env.example 真实内容打架的措辞（DESIGN §4）。
+//   ⑨（issue #103）`taskSource` 措辞分支：shipped 默认（`taskSource:"none"`，两段正文默认调用
+//      即走这条分支）完全不提 `gh`/GitHub/"目标项目尚未注册"这条只在 github 来源下才可能发生的
+//      坑，改说"不需要 gh" + 怎么 opt-in；`taskSource:"github"` 时保留 #96 订正后的原始措辞
+//      （提 gh CLI + onboard-project.mjs 注册坑）。两段正文（notConfigured/emptyStore）都要覆盖
+//      这条分支，不只测其中一个。
 //
 // 跑法：node docs/conductor-brain-layer/spike/test-onboarding-greeting.mjs（零依赖，不需要
 // pnpm run build——这个模块不从 dist/ 导入任何东西）。
@@ -31,29 +36,57 @@
 import assert from "node:assert/strict";
 import { renderOnboardingNotConfigured, renderOnboardingEmptyStore } from "./lib/onboarding-greeting.mjs";
 
+// issue #103：两个函数默认（不传 taskSource）解析真实 AELOOP_BRAIN_TASK_SOURCE 环境变量——
+// 测试环境里这个变量按约定不应该被设置，显式 delete 一次，确保下面 "notConfigured"/"emptyStore"
+// 这两个别名真实代表的是 "taskSource:'none'" 分支（shipped 默认），不是被开发机本地遗留的 env
+// 悄悄带偏。
+delete process.env.AELOOP_BRAIN_TASK_SOURCE;
+
 const notConfigured = renderOnboardingNotConfigured();
 const emptyStore = renderOnboardingEmptyStore();
+const notConfiguredGithub = renderOnboardingNotConfigured({ taskSource: "github" });
+const emptyStoreGithub = renderOnboardingEmptyStore({ taskSource: "github" });
 
-// ① 不出现"意识已加载"
-assert.ok(!notConfigured.includes("意识已加载"), "renderOnboardingNotConfigured() 不能出现'意识已加载'");
-assert.ok(!emptyStore.includes("意识已加载"), "renderOnboardingEmptyStore() 不能出现'意识已加载'");
-console.log("PASS: test-onboarding-greeting.mjs（① 两段正文都不出现'意识已加载'）");
+const ALL_VARIANTS = [
+  ["notConfigured", notConfigured],
+  ["emptyStore", emptyStore],
+  ["notConfiguredGithub", notConfiguredGithub],
+  ["emptyStoreGithub", emptyStoreGithub],
+];
 
-// ② "这不是正常醒来"/"不要假装"这层约束
-for (const [name, text] of [["notConfigured", notConfigured], ["emptyStore", emptyStore]]) {
+// ① 不出现"意识已加载"——四个变体都不能出现，不只是默认的 taskSource:"none" 两个。
+for (const [name, text] of ALL_VARIANTS) {
+  assert.ok(!text.includes("意识已加载"), `${name} 不能出现'意识已加载'`);
+}
+console.log("PASS: test-onboarding-greeting.mjs（① 四个变体正文都不出现'意识已加载'）");
+
+// ② "这不是正常醒来"/"不要假装"这层约束——四个变体都要有。
+for (const [name, text] of ALL_VARIANTS) {
   assert.ok(text.includes("这不是一次正常的"), `${name} 应明确说明这不是正常的醒来`);
   assert.ok(text.includes("假装"), `${name} 应明确说不要假装有身份/在途/记忆`);
 }
-console.log("PASS: test-onboarding-greeting.mjs（② 两段正文都自带'不是正常醒来/不要假装'约束）");
+console.log("PASS: test-onboarding-greeting.mjs（② 四个变体正文都自带'不是正常醒来/不要假装'约束）");
 
-// ③ 真实坑的关键字命中
-for (const [name, text] of [["notConfigured", notConfigured], ["emptyStore", emptyStore]]) {
+// ③ 真实坑的关键字命中——seed 脚本 + #102 troubleshooting 四个变体都该有（和 taskSource 无关，
+//    build/native binding 坑不管选没选 GitHub 来源都可能发生）；"目标项目尚未注册"这条坑只在
+//    taskSource:"github" 时才可能真实发生（taskSource:"none" 时 seed 脚本整个跳过项目注册检查，
+//    见 seed-brain-identity.mjs 的 gate），所以只在 github 变体里断言存在，"none" 变体里断言
+//    不存在——不能在一个物理上不可能发生的场景上误导用户去排查。
+for (const [name, text] of ALL_VARIANTS) {
   assert.ok(text.includes("scripts/seed-brain-identity.mjs"), `${name} 应提到 seed 脚本`);
   assert.ok(text.includes("better-sqlite3") || text.includes("pnpm rebuild"), `${name} 应提到 #102 troubleshooting`);
   assert.ok(text.includes("issue #102"), `${name} 应点名 #102 是独立跟进的已知问题，不是本次改动引入`);
-  assert.ok(text.includes("scripts/onboard-project.mjs"), `${name} 应提到实测踩到的项目注册坑（seed 对未注册项目会非零退出）`);
 }
-console.log("PASS: test-onboarding-greeting.mjs（③ 两段正文都覆盖 seed 脚本 + #102 troubleshooting + 项目注册坑）");
+for (const [name, text] of [["notConfiguredGithub", notConfiguredGithub], ["emptyStoreGithub", emptyStoreGithub]]) {
+  assert.ok(text.includes("scripts/onboard-project.mjs"), `${name}（taskSource:github）应提到实测踩到的项目注册坑`);
+}
+for (const [name, text] of [["notConfigured", notConfigured], ["emptyStore", emptyStore]]) {
+  assert.ok(
+    !text.includes("scripts/onboard-project.mjs"),
+    `${name}（taskSource:none，shipped 默认）不该提项目注册坑——这条错误在这个配置下物理上不会发生（issue #103）`,
+  );
+}
+console.log("PASS: test-onboarding-greeting.mjs（③ 四个变体都覆盖 seed 脚本 + #102 troubleshooting；项目注册坑只在 taskSource:github 变体里出现）");
 
 // ④ renderOnboardingNotConfigured() 独有：两条配置方式
 assert.ok(notConfigured.includes("AELOOP_BRAIN_IDENTITY_DB"), "状态 A 应提到环境变量配置方式");
@@ -101,8 +134,13 @@ console.log("PASS: test-onboarding-greeting.mjs（⑦ AI_AGENT_PROFILE 提示可
 // COPY_ITEMS 从来没打算含它们，见该文件头注释）——引导正文如果直接写死相对路径会不可达。
 // `renderOnboardingEmptyStore({ globalMode: true })` 必须换成"需要一份真实 checkout + 带
 // AELOOP_BRAIN_GLOBAL_MODE=1 前缀"的措辞，不能假装相对路径在哪都能用。
+//
+// issue #103：这个块要验证的 onboard-project.mjs 命令构造只在 `taskSource:"github"` 时才会
+// 出现在正文里（③ 已经验证过"none"时这条命令整个不提），下面显式传 `taskSource:"github"`，
+// 不依赖真实环境变量——不这样传的话，这个块本身要验证的"AELOOP_BRAIN_GLOBAL_MODE=1 node
+// scripts/onboard-project.mjs"这条前缀构造逻辑不会被这里的用例真正跑到。
 {
-  const globalText = renderOnboardingEmptyStore({ globalMode: true });
+  const globalText = renderOnboardingEmptyStore({ globalMode: true, taskSource: "github" });
   assert.ok(globalText.includes("git clone"), "全局模式引导应提示需要一份真实 aeloop checkout");
   assert.ok(
     globalText.includes("AELOOP_BRAIN_GLOBAL_MODE=1 node scripts/seed-brain-identity.mjs"),
@@ -115,7 +153,7 @@ console.log("PASS: test-onboarding-greeting.mjs（⑦ AI_AGENT_PROFILE 提示可
   assert.ok(globalText.includes("repo-snapshot"), "全局模式引导应明确说明运行时快照不含这些脚本");
   assert.ok(!globalText.includes("意识已加载"), "全局模式引导同样不能出现'意识已加载'");
 
-  const localText = renderOnboardingEmptyStore({ globalMode: false });
+  const localText = renderOnboardingEmptyStore({ globalMode: false, taskSource: "github" });
   assert.ok(!localText.includes("git clone"), "非全局模式（本来就在 aeloop checkout 里）不该出现全局模式的 checkout 提示");
   assert.ok(
     localText.includes("`node scripts/seed-brain-identity.mjs`") && !localText.includes("AELOOP_BRAIN_GLOBAL_MODE=1 node scripts/seed-brain-identity.mjs"),
@@ -123,13 +161,45 @@ console.log("PASS: test-onboarding-greeting.mjs（⑦ AI_AGENT_PROFILE 提示可
   );
 
   // 默认值来自真实环境变量，不是硬编码 false——这里显式验证默认分支行为，覆盖调用方（hook）
-  // 不传 opts 时的真实路径。
+  // 不传 opts 时的真实路径。taskSource 显式传 "github"，隔离本块只测 globalMode 这一个维度
+  // （taskSource 维度已经在 ⑨ 单独测，混在一起会让这条断言同时依赖两个变量、意图不清）。
   delete process.env.AELOOP_BRAIN_GLOBAL_MODE;
-  assert.equal(renderOnboardingEmptyStore(), localText, "不传 opts 时默认应读真实 AELOOP_BRAIN_GLOBAL_MODE 环境变量，未设置时应等同非全局模式文案");
+  assert.equal(
+    renderOnboardingEmptyStore({ taskSource: "github" }),
+    localText,
+    "不传 opts.globalMode 时默认应读真实 AELOOP_BRAIN_GLOBAL_MODE 环境变量，未设置时应等同非全局模式文案",
+  );
   process.env.AELOOP_BRAIN_GLOBAL_MODE = "1";
-  assert.equal(renderOnboardingEmptyStore(), globalText, "不传 opts 时默认应读真实 AELOOP_BRAIN_GLOBAL_MODE 环境变量，设为 1 时应等同全局模式文案");
+  assert.equal(
+    renderOnboardingEmptyStore({ taskSource: "github" }),
+    globalText,
+    "不传 opts.globalMode 时默认应读真实 AELOOP_BRAIN_GLOBAL_MODE 环境变量，设为 1 时应等同全局模式文案",
+  );
   delete process.env.AELOOP_BRAIN_GLOBAL_MODE;
 }
 console.log("PASS: test-onboarding-greeting.mjs（⑧ 全局模式下 seed/onboard 命令带正确前缀 + 说明需要真实 checkout，issue #96 二签修复）");
+
+// ⑨（issue #103）taskSource 措辞分支——shipped 默认（"none"）完全不提 gh/GitHub，改说"不需要
+// gh" + 怎么 opt-in；显式选了 "github" 才提 gh CLI 措辞。两段正文（notConfigured/emptyStore）
+// 都要覆盖。
+for (const [name, text] of [["notConfigured", notConfigured], ["emptyStore", emptyStore]]) {
+  assert.ok(
+    !text.includes("需要 `gh` CLI 已安装并登录"),
+    `${name}（taskSource:none）不该出现"需要 gh CLI"这句只在 github 来源下才准确的措辞`,
+  );
+  assert.ok(text.includes("不需要 `gh`"), `${name}（taskSource:none）应明确说不需要 gh`);
+  assert.ok(text.includes("AELOOP_BRAIN_TASK_SOURCE=github"), `${name}（taskSource:none）应告诉用户怎么 opt-in 接回 GitHub 来源`);
+}
+for (const [name, text] of [["notConfiguredGithub", notConfiguredGithub], ["emptyStoreGithub", emptyStoreGithub]]) {
+  assert.ok(text.includes("`gh`"), `${name}（taskSource:github）应提到 gh CLI`);
+  assert.ok(text.includes("已配置 GitHub 在途来源"), `${name}（taskSource:github）应说明当前已配置 GitHub 来源`);
+}
+// 默认值来自真实环境变量：不传 opts.taskSource 时应读 AELOOP_BRAIN_TASK_SOURCE，未设置 → "none" 分支。
+delete process.env.AELOOP_BRAIN_TASK_SOURCE;
+assert.equal(renderOnboardingNotConfigured(), notConfigured, "不传 opts.taskSource 时默认应读真实 AELOOP_BRAIN_TASK_SOURCE，未设置时应等同 none 分支");
+process.env.AELOOP_BRAIN_TASK_SOURCE = "github";
+assert.equal(renderOnboardingNotConfigured(), notConfiguredGithub, "不传 opts.taskSource 时默认应读真实 AELOOP_BRAIN_TASK_SOURCE，设为 github 时应等同 github 分支");
+delete process.env.AELOOP_BRAIN_TASK_SOURCE;
+console.log("PASS: test-onboarding-greeting.mjs（⑨ taskSource 措辞分支：none 不提 gh + 有 opt-in 提示，github 保留原有 gh 措辞，issue #103）");
 
 console.log("ALL PASS: test-onboarding-greeting.mjs");

@@ -40,7 +40,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -140,6 +140,96 @@ try {
     "PASS: test-install-global-brain-onboarding-e2e.mjs（③ 全局模式 + 无关 cwd + 空库真实 spawn 换入后的 hook，" +
       "产出真实引导文本，不是 MODULE_NOT_FOUND 静默失败——issue #96 blocker 1 核心回归证明）",
   );
+
+  // ④（issue #103）task-source.mjs 必须真的出现在换入后的快照里（同②对 onboarding-greeting.mjs
+  //    的防线，第三次点名同一类坑）+ 全局模式下真实端到端：默认（未装 --task-source）时「现在
+  //    在途」整段不出现；重装带 --task-source=github 后板块出现，且换入后的 hook 子进程能真的
+  //    import() 到 task-source.mjs（不是 MODULE_NOT_FOUND 被吞掉、退化成"看起来一样"的假阴性）；
+  //    settings.json 里 aeloop 的 SessionStart 条目重装后仍只有一条（issue #103 ④ 幂等替换）。
+  {
+    const copiedTaskSourceLib = path.join(result.snapshotDir, ".claude", "hooks", "lib", "task-source.mjs");
+    assert.ok(existsSync(copiedTaskSourceLib), `COPY_ITEMS 必须包含 task-source.mjs，快照里应该能找到它：${copiedTaskSourceLib}`);
+
+    const { globalDefaultDbPath } = await import(path.join(REPO_ROOT, ".claude", "hooks", "lib", "db-path.mjs"));
+    const { openIdentityStore } = await import(
+      path.join(REPO_ROOT, "docs", "conductor-brain-layer", "spike", "lib", "wake.mjs")
+    );
+    const globalDbPath = globalDefaultDbPath(tempHome);
+    mkdirSync(path.dirname(globalDbPath), { recursive: true });
+    const seedStore = openIdentityStore(globalDbPath);
+    seedStore.insertMemory({
+      type: "identity",
+      title: "identity:name",
+      content: "task-source-e2e-identity",
+      tags: [],
+      confidenceState: "confirmed",
+    });
+    seedStore.insertMemory({
+      type: "active_task",
+      title: "task-source-e2e-active-task",
+      content: "应只在 taskSource=github 时出现在开场白里",
+      tags: ["status:in-progress"],
+      confidenceState: "confirmed",
+    });
+    seedStore.close();
+
+    // 默认（这个 spawn 沿用①装机时的 hookEntryPath，没带 --task-source）→ 板块整段不出现。
+    const stdinPayloadDefault = JSON.stringify({ session_id: "test-global-e2e-tasksource-default", cwd: unrelatedCwd });
+    const procDefault = spawnSync("node", [hookEntryPath], {
+      input: stdinPayloadDefault,
+      encoding: "utf8",
+      cwd: unrelatedCwd,
+      env: { ...process.env, HOME: tempHome, AELOOP_BRAIN_GLOBAL_MODE: "1" },
+    });
+    assert.equal(procDefault.status, 0, `默认 taskSource 时 hook 必须 exit 0，实际 status=${procDefault.status}，stderr=${procDefault.stderr}`);
+    const contextDefault = JSON.parse(procDefault.stdout).hookSpecificOutput.additionalContext;
+    assert.ok(contextDefault.includes("意识已加载"), "已有数据时应正常渲染（不是引导态）");
+    assert.ok(!contextDefault.includes("**现在在途："), "默认 taskSource（未装 --task-source，视为 none）时不该出现「现在在途」段——不是 COPY_ITEMS 漏拷就是门控没生效");
+    assert.ok(!contextDefault.includes("task-source-e2e-active-task"), "默认 taskSource 时不该泄露任何 active_task 内容");
+
+    // 重装同一个 tempHome，这次带 --task-source=github（模拟真实 CLI）→ 板块出现，且
+    // task-source.mjs 真的被换入后的 hook 子进程正确 import()（不是 MODULE_NOT_FOUND 被吞掉）。
+    const resultGithub = installGlobalBrain({ repoRoot: REPO_ROOT, homeDir: tempHome, execImpl: e2eExecImpl, taskSource: "github" });
+    assert.equal(resultGithub.settingsChanged, true, "重装带新 taskSource 应识别成同一条目的更新，changed=true");
+
+    // 这里**真的执行 `resultGithub.hookCommand` 这条完整命令字符串本身**（`shell: true`），
+    // 不是像上面①③段那样只 spawn `node hookEntryPath` 再手动往 env 里塞变量——本段要验证的
+    // 正是"`--task-source=github` 烘焙进 hookCommand 字符串"这个机制本身真的生效（Claude Code
+    // 注册进 settings.json 的 SessionStart command 就是这种"VAR=value node ..."形状，靠 shell
+    // 解析前缀赋值；如果只手动设 env 不经过 shell，测的是 resolveTaskSource() 认不认 env，不是
+    // "烘焙"这个环节本身对不对——两者是不同的断言，这里要测的是后者）。
+    const stdinPayloadGithub = JSON.stringify({ session_id: "test-global-e2e-tasksource-github", cwd: unrelatedCwd });
+    const procGithub = spawnSync(resultGithub.hookCommand, {
+      input: stdinPayloadGithub,
+      encoding: "utf8",
+      cwd: unrelatedCwd,
+      env: { ...process.env, HOME: tempHome },
+      shell: true,
+    });
+    assert.equal(procGithub.status, 0, `taskSource=github 装机后 hook 必须 exit 0，实际 status=${procGithub.status}，stderr=${procGithub.stderr}`);
+    assert.ok(
+      !/MODULE_NOT_FOUND|Cannot find module/i.test(procGithub.stderr),
+      `task-source.mjs 必须能被换入后的 hook 子进程正确 import()，stderr=${procGithub.stderr}`,
+    );
+    const contextGithub = JSON.parse(procGithub.stdout).hookSpecificOutput.additionalContext;
+    assert.ok(contextGithub.includes("**现在在途："), "装机时带 --task-source=github 后，「现在在途」段应该出现");
+    assert.ok(contextGithub.includes("task-source-e2e-active-task"), "应能看到之前种下的 active_task");
+
+    // settings.json 里 aeloop 的 SessionStart 条目应该还是只有一条（幂等按 aeloop-brain 标记
+    // 替换，不是新增第二条并存，issue #103 ④）。
+    const writtenSettings = JSON.parse(readFileSync(path.join(tempHome, ".claude", "settings.json"), "utf8"));
+    const aeloopEntries = writtenSettings.hooks.SessionStart.filter(
+      (entry) =>
+        Array.isArray(entry?.hooks) &&
+        entry.hooks.some((h) => typeof h?.command === "string" && h.command.includes("aeloop-brain")),
+    );
+    assert.equal(aeloopEntries.length, 1, "重装换 taskSource 后 settings.json 里 aeloop 的 SessionStart 条目必须仍只有一条，不能堆成两条");
+
+    console.log(
+      "PASS: test-install-global-brain-onboarding-e2e.mjs（④ task-source.mjs 真的在快照里 + 全局模式端到端：" +
+        "默认时板块整段不出现，--task-source=github 重装后板块出现且 settings.json 幂等替换成一条，issue #103）",
+    );
+  }
 } finally {
   rmSync(tempHome, { recursive: true, force: true });
   rmSync(unrelatedCwd, { recursive: true, force: true });

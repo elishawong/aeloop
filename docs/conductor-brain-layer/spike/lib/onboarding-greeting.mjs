@@ -43,11 +43,22 @@
 //     状态 A/B 都没有真实数据支撑，出现这个短语等于让模型有借口把它当成"可以直接用"的开场白抄。
 //   - 明确说"这不是正常醒来，不要假装有身份/在途任务/历史记忆"。
 //
+// issue #103（在途任务来源默认关，docs/enterprise-board-toggle/DESIGN.md §7/§9）：`seedStep()`
+// 现在按 `taskSource` 分支措辞——shipped 默认（`taskSource !== "github"`）的引导完全不提 gh/
+// GitHub，只讲"配身份/宪法"；只有操作者已经 opt-in（env/`.claude/brain.local.json`/全局装机时
+// `--task-source=github`）时才会看到 gh 相关措辞，这时候提是准确的，不是意外泄露。`taskSource`
+// 解析复用 `.claude/hooks/lib/task-source.mjs` 的 `resolveTaskSource()`（和 `resolveGlobalMode()`
+// 同一套"读真实 env，测试可用 opts 覆盖"的既有模式），不在本文件里重新发明一套简化判断——
+// `taskSource` 有 env + `.claude/brain.local.json` 两个来源，不像 `globalMode` 只有 env 一个源，
+// 用共享实现才能保证这里的措辞和 seed 脚本真实会做的事一致。
+//
 // AI_AGENT_PROFILE 措辞（DESIGN §4 已核实 + 定盘）：issue #96 原文"默认只能 apikey profile"和
 // `.env.example` 里 `AI_AGENT_PROFILE` 的当前默认值（`subscription`）字面相反——本文件按"推荐
 // 起步路径"措辞（对还没装好 claude-cli/codex-cli 的新用户，apikey 摩擦更小），不断言当前配置
 // 文件的默认值是什么，避免两边打架。这段内容放在正文末尾一个明确标"可选/和身份库配置完全独立"
 // 的小节，不让用户以为"不配 apikey 就没法用身份库"（那不是事实）。
+
+import { resolveTaskSource } from "../../../../.claude/hooks/lib/task-source.mjs";
 
 /**
  * @param {{globalMode?: boolean}} [opts]
@@ -55,6 +66,16 @@
  */
 function resolveGlobalMode(opts = {}) {
   return opts.globalMode ?? process.env.AELOOP_BRAIN_GLOBAL_MODE === "1";
+}
+
+/**
+ * issue #103：和 `resolveGlobalMode()` 同一套模式，但复用共享的 `resolveTaskSource()`（不在本
+ * 文件里重新实现 env/`.claude/brain.local.json` 那套 precedence——见文件头注释）。
+ * @param {{taskSource?: "none"|"github"}} [opts]
+ * @returns {"none"|"github"}
+ */
+function resolveTaskSourceOpt(opts = {}) {
+  return opts.taskSource ?? resolveTaskSource();
 }
 
 const IDE_ENV_GOTCHA =
@@ -75,38 +96,64 @@ const GLOBAL_MODE_CHECKOUT_NOTE =
   "（不加这个前缀，脚本会退回按非全局模式解析 dbPath，写进一个不相关的地方）。";
 
 /**
+ * issue #103：新增 `taskSource` 参数——`"github"` 时保留今天（#96 订正后）的措辞；否则
+ * （shipped 默认 `"none"`）改成不提 gh 的通用措辞，呼应指挥官"引导只讲配身份、不提 GitHub/gh"
+ * 的要求。两条分支的 `${command}` 本身不受影响（seed 命令怎么跑和 taskSource 无关），只有周围
+ * 的说明句不同。
  * @param {boolean} globalMode
+ * @param {"none"|"github"} taskSource
  * @returns {string}
  */
-function seedStep(globalMode) {
+function seedStep(globalMode, taskSource) {
   const command = globalMode
     ? "`AELOOP_BRAIN_GLOBAL_MODE=1 node scripts/seed-brain-identity.mjs`"
     : "`node scripts/seed-brain-identity.mjs`";
+
+  if (taskSource !== "github") {
+    return (
+      `跑 ${command} 种下初始身份与宪法约束（默认不连接任何外部在途任务来源，不需要 \`gh\`）。` +
+      "如果之后想接入 GitHub issue 同步，设环境变量 `AELOOP_BRAIN_TASK_SOURCE=github`（或在 " +
+      "`.claude/brain.local.json` 里加 `\"taskSource\": \"github\"`）后重新跑一次这个命令。"
+    );
+  }
+
   // issue #96（Zorro/Codex 跨模型二签 2026-07-23 FAIL 后订正，🟡 项1）：此前这里写"需要 gh CLI
   // 已登录才能同步 issue；没有 gh 也能跑"——这句话在当时的实现里不实：`gh` 缺失/未登录/调用
   // 失败会让 fetchOpenIssues() 抛错、冒泡到顶层未捕获、进程以非零 exit code 中止（哪怕身份/
   // 宪法约束已经写完），不是"能跑，只是没 active_task"。已经把 `seed-brain-identity.mjs` 的
   // fetchOpenIssues 调用点改成优雅降级（try/catch，见该文件 main() 里对应注释），这句话现在是
-  // 真实行为，不是描述一个还没实现的意图。
+  // 真实行为，不是描述一个还没实现的意图。issue #103：这条分支只在 `taskSource === "github"`
+  // （已经 opt-in）时才会出现，提 gh 是准确的。
   return (
-    `跑 ${command} 种下初始身份/宪法/在途任务（需要 \`gh\` CLI 已安装并登录才能同步 issue；` +
-    "没装 `gh`、没登录、或者调用失败，也能跑成功——会自动跳过 issue 同步，只是不会有" +
-    " active_task，身份和宪法约束照常写入，不会报错中止）。"
+    `跑 ${command} 种下初始身份/宪法/在途任务（已配置 GitHub 在途来源，需要 \`gh\` CLI 已安装并` +
+    "登录才能同步 issue；没装 `gh`、没登录、或者调用失败，也能跑成功——会自动跳过 issue 同步，" +
+    "只是不会有 active_task，身份和宪法约束照常写入，不会报错中止）。"
   );
 }
 
 /**
+ * issue #103：新增 `taskSource` 参数——"目标项目尚未注册"这条坑只在
+ * `taskSource === "github"` 时才可能真的发生（`taskSource !== "github"` 时 seed 脚本整个跳过
+ * 项目注册检查，见 `scripts/seed-brain-identity.mjs` main() 的 gate，`docs/enterprise-board-toggle/
+ * DESIGN.md` §6）——`taskSource !== "github"` 时不再提这条troubleshooting，避免在一个物理上
+ * 不可能发生的错误场景上误导用户去排查。
  * @param {boolean} globalMode
+ * @param {"none"|"github"} taskSource
  * @returns {string}
  */
-function seedTroubleshooting(globalMode) {
+function seedTroubleshooting(globalMode, taskSource) {
+  const bindingTip =
+    "已知坑（issue #102，独立跟进中，不代表你的配置错了）：如果这一步报 `better-sqlite3` native " +
+    'binding 相关错误（比如 "Could not locate the bindings file"），试 `pnpm approve-builds` 或 ' +
+    "`pnpm rebuild better-sqlite3`。";
+
+  if (taskSource !== "github") return bindingTip;
+
   const onboardCommand = globalMode
     ? "`AELOOP_BRAIN_GLOBAL_MODE=1 node scripts/onboard-project.mjs --repo-path <当前项目根目录的绝对路径>`"
     : "`node scripts/onboard-project.mjs --repo-path <当前项目根目录的绝对路径>`";
   return (
-    "已知坑（issue #102，独立跟进中，不代表你的配置错了）：如果这一步报 `better-sqlite3` native " +
-    'binding 相关错误（比如 "Could not locate the bindings file"），试 `pnpm approve-builds` 或 ' +
-    "`pnpm rebuild better-sqlite3`。另一个已知坑（issue #96 实测踩到，不是配置错了）：如果报" +
+    `${bindingTip}另一个已知坑（issue #96 实测踩到，不是配置错了）：如果报` +
     `"目标项目尚未注册"，先跑一次 ${onboardCommand}（只读一次 \`git remote get-url origin\`，不碰` +
     "目标项目任何其它文件），再重跑 seed。"
   );
@@ -145,7 +192,16 @@ function aiAgentProfileNote(globalMode) {
  * 不需要 `globalMode` 参数。
  * @returns {string}
  */
-export function renderOnboardingNotConfigured() {
+/**
+ * issue #103：新增可选 `opts.taskSource`（默认参数不计入 `Function.length`，`renderOnboarding
+ * NotConfigured.length` 仍然是 0——`test-onboarding-greeting.mjs` 既有断言"状态 A 物理上不需要
+ * 感知 globalMode"这条零参数契约不受影响，本次加的是 taskSource 这个独立轴，不是重新引入
+ * globalMode 判断）。
+ * @param {{taskSource?: "none"|"github"}} [opts]
+ * @returns {string}
+ */
+export function renderOnboardingNotConfigured(opts = {}) {
+  const taskSource = resolveTaskSourceOpt(opts);
   return [
     "检测到身份库尚未配置——这不是一次正常的“醒来”，接下来请不要编造/假装有身份、在途" +
       "任务或历史记忆，如实告诉用户现在的状态。",
@@ -164,7 +220,7 @@ export function renderOnboardingNotConfigured() {
       "不影响它。",
     `2. ${IDE_ENV_GOTCHA}`,
     "3. 配好路径后，如果还没 build 过，跑一次 `pnpm run build`。",
-    `4. ${seedStep(false)} ${seedTroubleshooting(false)}`,
+    `4. ${seedStep(false, taskSource)} ${seedTroubleshooting(false, taskSource)}`,
     `5. ${NEW_SESSION_STEP}`,
     "",
     SKIP_NOTE,
@@ -180,11 +236,14 @@ export function renderOnboardingNotConfigured() {
  * 不接收/不插值 dbPath 本身——DESIGN §5 已定盘：这段正文不插值任何身份库/环境变量数据，具体
  * 路径不放进这段要被模型逐字复述/转达的文本里。`opts.globalMode` 是唯一的例外分支选择器（不是
  * 数据插值，见文件头注释），默认读真实 `AELOOP_BRAIN_GLOBAL_MODE` 环境变量，测试可覆盖。
- * @param {{globalMode?: boolean}} [opts]
+ * issue #103：新增可选 `opts.taskSource`，同一套"默认读真实值，测试可覆盖"模式，见
+ * `resolveTaskSourceOpt()`。
+ * @param {{globalMode?: boolean, taskSource?: "none"|"github"}} [opts]
  * @returns {string}
  */
 export function renderOnboardingEmptyStore(opts = {}) {
   const globalMode = resolveGlobalMode(opts);
+  const taskSource = resolveTaskSourceOpt(opts);
   return [
     "检测到身份库已经配置了路径，但目前是空的（还没有任何记忆条目）——这不是一次正常的“醒来" +
       "”，接下来请不要编造/假装有身份、在途任务或历史记忆，如实告诉用户现在的状态。",
@@ -196,8 +255,8 @@ export function renderOnboardingEmptyStore(opts = {}) {
     "",
     ...(globalMode ? [GLOBAL_MODE_CHECKOUT_NOTE, ""] : []),
     globalMode ? "1. 如果那份 checkout 还没 build 过，跑一次 `pnpm run build`。" : "1. 如果还没 build 过，跑一次 `pnpm run build`。",
-    `2. ${seedStep(globalMode)}`,
-    `3. ${seedTroubleshooting(globalMode)}`,
+    `2. ${seedStep(globalMode, taskSource)}`,
+    `3. ${seedTroubleshooting(globalMode, taskSource)}`,
     `4. ${NEW_SESSION_STEP}`,
     "",
     SKIP_NOTE,

@@ -51,6 +51,10 @@ export const COPY_ITEMS = [
   { src: path.join(".claude", "hooks", "brain-wake-greeting.mjs"), type: "file" },
   { src: path.join(".claude", "hooks", "lib", "db-path.mjs"), type: "file" },
   { src: path.join(".claude", "hooks", "lib", "git-remote.mjs"), type: "file" },
+  // issue #103：brain-wake-greeting.mjs 动态 import 这个 lib 来解析 AELOOP_BRAIN_TASK_SOURCE——
+  // 同 #96/#98 已经踩过两次的"新库没进 COPY_ITEMS = 全局模式下 MODULE_NOT_FOUND"这条坑，这里
+  // 第三次点名防止再漏（docs/enterprise-board-toggle/DESIGN.md §3）。
+  { src: path.join(".claude", "hooks", "lib", "task-source.mjs"), type: "file" },
   { src: path.join("docs", "conductor-brain-layer", "spike", "lib", "wake.mjs"), type: "file" },
   { src: path.join("docs", "conductor-brain-layer", "spike", "lib", "greeting-data.mjs"), type: "file" },
   { src: path.join("docs", "conductor-brain-layer", "spike", "lib", "render-greeting.mjs"), type: "file" },
@@ -90,6 +94,46 @@ export function installPaths(homeDir = os.homedir()) {
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+
+/**
+ * issue #103：`installGlobalBrain()`/`parseArgs()` 共用的 `taskSource` 校验——值域目前只有
+ * `"github"`（省略/`undefined` 合法，代表不 opt-in）。
+ *
+ * 🔒 Zorro 复审 🟡 finding 后补齐（2026-07-24）：初版只有 CLI 的 `parseArgs()` 做了这条
+ * fail-closed 校验，直接调 `installGlobalBrain({taskSource:"bogus"})`（编程调用，绕过 CLI）
+ * 会静默降级成默认 `hookCommand`（不含 `AELOOP_BRAIN_TASK_SOURCE`），不报错——降级方向本身是
+ * 安全的（`resolveTaskSource()` 对未知值同样 fail-closed 到 `"none"`），所以不是数据安全 blocker，
+ * 但 API 和 CLI 两个入口的校验口径不一致，容易让人以为"JSDoc 类型就是运行时防线"。抽成一个
+ * 共享函数，两处都调用，口径统一。
+ * @param {unknown} value
+ * @returns {asserts value is undefined | "github"}
+ */
+function assertValidTaskSourceOpt(value) {
+  if (value !== undefined && value !== "github") {
+    throw new Error(`taskSource 只接受 "github" 或省略（代表不 opt-in），收到不认识的值："${value}"`);
+  }
+}
+
+/**
+ * issue #103 ④：识别"这条 SessionStart hook 是不是本工具装的"的标记子串——真实生成的
+ * `hookCommand` 恒含 `installPaths().hookEntryPath`（`<homeDir>/.claude/aeloop-brain/repo-
+ * snapshot/...`）。和 issue #105（uninstall-global-brain，按 command 含这同一个子串匹配摘除）
+ * 共用同一个值，两边判据对称——这里导出常量而不是让 #105 各自写一份字面量，保证漂移不了。
+ *
+ * 🔒 Zorro 复审 FAIL 后订正（2026-07-24，独立 Codex `gpt-5.6-sol` 交叉核实过的 blocker）：
+ * 初版这里用裸 `"aeloop-brain"`（不带路径分隔符）——Zorro 真实复现了这个判据的误伤面：一个和
+ * 本工具完全无关的第三方 hook，只要 command 字符串里**恰好**出现这几个字符（哪怕只是一个不相关
+ * 程序的路径片段，比如 `/opt/vendor/aeloop-brain-observer/hook.mjs`），就会被
+ * `mergeSettingsWithBrainHook()` 误判成"这是我们自己装的旧条目"，原地**覆盖掉**那条第三方 hook
+ * 的 command——这是本次 #103 改动新引入的回归（基线用的是 `command === hookCommand` 精确全串
+ * 匹配，物理上不可能误伤），爆炸半径是静默改写用户真实 `~/.claude/settings.json` 里别人的条目，
+ * 判定为数据丢失级 blocker。改用一段带路径分隔符、只有真实由 `installPaths()` 生成的
+ * `hookEntryPath` 才会天然包含的高特异性片段（`/.claude/aeloop-brain/repo-snapshot/`）——一个
+ * 巧合含"aeloop-brain"六个字母的无关 command 极不可能同时恰好带上这整段路径结构，把碰撞面从
+ * "任何含这几个字的命令"收窄到"确实装在 `~/.claude/aeloop-brain/repo-snapshot/` 下的本工具
+ * 条目"。#105 落地 uninstall 时必须复用这个常量，不能各写一份裸子串。
+ */
+export const AELOOP_BRAIN_MARKER = "/.claude/aeloop-brain/repo-snapshot/";
 
 /**
  * 纯函数——给定既有 `settings.json` 内容（已 parse 的对象，或 `null`/`undefined` 表示文件不存在）
@@ -136,19 +180,63 @@ export function mergeSettingsWithBrainHook(existingSettings, hookCommand) {
   }
   const sessionStart = hooks.SessionStart ? [...hooks.SessionStart] : [];
 
-  const alreadyPresent = sessionStart.some(
-    (entry) => Array.isArray(entry?.hooks) && entry.hooks.some((h) => h?.command === hookCommand),
-  );
-  if (alreadyPresent) {
+  // issue #103 ④（指挥官已确认）：幂等判据从"command 字符串完全相同"改成"command 含
+  // AELOOP_BRAIN_MARKER 子串"——`--task-source=github` 这个新 CLI flag 会让重装时生成的
+  // `hookCommand` 字符串本身发生变化（多/少 `AELOOP_BRAIN_TASK_SOURCE=github` 这一段），如果
+  // 还按"完全相同才算重复"判断，重装换 flag 会被误判成"没装过"，在 settings.json 里追加第二条
+  // aeloop 的 SessionStart 条目，两条都跑，行为不可预测。改成按标记子串识别"这是本工具管理的
+  // 那一条"，找到就原地替换 command（不管新旧 command 字符串具体差在哪），找不到才追加——和
+  // issue #105（uninstall-global-brain，按 command 含 "aeloop-brain" 匹配摘除）用同一个标记
+  // 子串，两边判据对称，不是本文件独有的一套逻辑。
+  //
+  // 命中口径：遍历每个 SessionStart 条目自己的 hooks 数组，找 command 含标记的那一个具体 hook
+  // 对象（不是整个 entry）——定位到具体 hook 再替换，不误伤同一个 entry 里理论上可能混有的别的
+  // 工具的 hook（虽然本文件自己写的 entry 目前只会有单个 hook，但判据本身不依赖这个假设）。
+  // 只处理第一条命中的：多条命中是一个已知的、本次修复要防止"以后再发生"的异常态（这条修复上线
+  // 前如果一台机器已经因为老逻辑攒出了两条重复条目，这里不会自动去重合并成一条，只保证从此以后
+  // 不再新增——自动合并已存在的重复条目不在本次改动范围内，如实标注，不是没考虑到）。
+  let matchedEntryIndex = -1;
+  let matchedHookIndex = -1;
+  for (let i = 0; i < sessionStart.length; i++) {
+    const entry = sessionStart[i];
+    if (!Array.isArray(entry?.hooks)) continue;
+    const hookIdx = entry.hooks.findIndex((h) => typeof h?.command === "string" && h.command.includes(AELOOP_BRAIN_MARKER));
+    if (hookIdx !== -1) {
+      matchedEntryIndex = i;
+      matchedHookIndex = hookIdx;
+      break;
+    }
+  }
+
+  if (matchedEntryIndex === -1) {
+    // 首装：原样保留既有条目，新增一条。
+    const newEntry = {
+      matcher: "startup|resume|clear",
+      hooks: [{ type: "command", command: hookCommand }],
+    };
+    return {
+      settings: { ...settings, hooks: { ...hooks, SessionStart: [...sessionStart, newEntry] } },
+      changed: true,
+    };
+  }
+
+  // 找到已有的本工具条目——command 字符串完全相同 → 真幂等 no-op；不同（哪怕只是 flag 差异）
+  // → 原地替换这一个 hook 对象的 command，不新增 entry、不动同一 entry 里其它 hook 对象、
+  // 不动其它 entry。
+  const matchedEntry = sessionStart[matchedEntryIndex];
+  const matchedHook = matchedEntry.hooks[matchedHookIndex];
+  if (matchedHook.command === hookCommand) {
     return { settings: { ...settings, hooks: { ...hooks, SessionStart: sessionStart } }, changed: false };
   }
 
-  const newEntry = {
-    matcher: "startup|resume|clear",
-    hooks: [{ type: "command", command: hookCommand }],
-  };
+  const updatedHooks = [...matchedEntry.hooks];
+  updatedHooks[matchedHookIndex] = { ...matchedHook, command: hookCommand };
+  const updatedEntry = { ...matchedEntry, hooks: updatedHooks };
+  const updatedSessionStart = [...sessionStart];
+  updatedSessionStart[matchedEntryIndex] = updatedEntry;
+
   return {
-    settings: { ...settings, hooks: { ...hooks, SessionStart: [...sessionStart, newEntry] } },
+    settings: { ...settings, hooks: { ...hooks, SessionStart: updatedSessionStart } },
     changed: true,
   };
 }
@@ -236,11 +324,18 @@ function resolveSettingsWriteTarget(settingsPath) {
  *   dryRun?: boolean,
  *   execImpl?: (cmd: string, args: string[], options: object) => string,
  *   renameImpl?: (src: string, dest: string) => void,
+ *   taskSource?: "github",
  * }} [opts] `renameImpl` 默认是真实 `node:fs` 的 `renameSync`——测试可以注入一个只对特定 `dest`
  *   失败的假实现，既用来验证"换入失败时旧内容/旧快照原封不动"，也顺带证明了实现真的走
  *   temp-file+rename 这条路径（如果实现退化成裸 `writeFileSync` 直接覆写，注入的 `renameImpl`
  *   根本不会被调用，这个失败注入也就不会有任何效果——见 `test-install-global-brain.mjs`
- *   "🔒 must-fix（settings.json 原子写）"那组用例的头注释）。
+ *   "🔒 must-fix（settings.json 原子写）"那组用例的头注释）。`taskSource`（issue #103）：
+ *   省略时（shipped 默认）`hookCommand` 不带 `AELOOP_BRAIN_TASK_SOURCE`，全局模式下
+ *   `resolveTaskSource()` 落到默认值 `"none"`——个人版 Helix 想 opt-in GitHub 在途来源，装机
+ *   时显式传 `taskSource: "github"`（CLI `--task-source=github`），和 `AELOOP_BRAIN_GLOBAL_
+ *   MODE=1` 同一个"烘焙进 hookCommand 字符串"机制，不受 IDE 不继承 shell profile export 的
+ *   已知坑影响（DESIGN §8）。值域目前只有 `"github"`（唯一的真实 adapter，不接受 `"none"`——
+ *   省略即 `"none"`，不需要一个显式传"none"的等价写法）。
  * @returns {{
  *   dryRun: boolean,
  *   snapshotDir: string,
@@ -257,10 +352,15 @@ export function installGlobalBrain(opts = {}) {
     dryRun = false,
     execImpl = defaultExecImpl,
     renameImpl = renameSync,
+    taskSource,
   } = opts;
+  assertValidTaskSourceOpt(taskSource); // fail-closed 早退——即便是编程调用（绕过 CLI）也不静默降级
 
   const { installDir, snapshotDir, dataDir, settingsPath, hookEntryPath } = installPaths(homeDir);
-  const hookCommand = `AELOOP_BRAIN_GLOBAL_MODE=1 node "${hookEntryPath}"`;
+  const hookCommand =
+    taskSource === "github"
+      ? `AELOOP_BRAIN_GLOBAL_MODE=1 AELOOP_BRAIN_TASK_SOURCE=github node "${hookEntryPath}"`
+      : `AELOOP_BRAIN_GLOBAL_MODE=1 node "${hookEntryPath}"`;
 
   // 读既有 settings.json（不存在 → null，视为 {}）——即便 dry-run 也读（只读不算副作用），
   // 用于打印"将要做的改动"摘要。
@@ -462,17 +562,32 @@ export function installGlobalBrain(opts = {}) {
 }
 
 function parseArgs(argv) {
-  const opts = { dryRun: false, target: undefined };
+  const opts = { dryRun: false, target: undefined, taskSource: undefined };
   for (const arg of argv) {
     if (arg === "--dry-run") opts.dryRun = true;
     else if (arg.startsWith("--target=")) opts.target = arg.slice("--target=".length);
+    else if (arg.startsWith("--task-source=")) {
+      const value = arg.slice("--task-source=".length);
+      // 值域只有 "github"（issue #103——见 installGlobalBrain() 头注释"taskSource"一节）；
+      // 其它任何值（含拼错的）fail-closed 拒绝整个安装，而不是静默当没传——这是往用户真实
+      // ~/.claude/settings.json 写东西的工具，"看不懂的输入就拒绝"和 mergeSettingsWithBrainHook()
+      // 对畸形 settings.json 的既有 fail-closed 取向一致，不因为这是命令行参数就降低标准。
+      // 复用 `assertValidTaskSourceOpt()`（同 `installGlobalBrain()` 内部用的那个）而不是各写
+      // 一份判断——CLI 和编程调用两个入口口径必须一致（Zorro 复审 🟡 finding，2026-07-24）。
+      try {
+        assertValidTaskSourceOpt(value);
+      } catch {
+        throw new Error(`--task-source 只接受 "github"（省略即默认 "none"），收到不认识的值："${value}"`);
+      }
+      opts.taskSource = value;
+    }
   }
   return opts;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const { dryRun, target } = parseArgs(process.argv.slice(2));
-  const result = installGlobalBrain({ dryRun, homeDir: target });
+  const { dryRun, target, taskSource } = parseArgs(process.argv.slice(2));
+  const result = installGlobalBrain({ dryRun, homeDir: target, taskSource });
   if (result.dryRun) {
     console.log("[install-global-brain] --dry-run，未写入任何文件。将要做的改动：");
   } else {

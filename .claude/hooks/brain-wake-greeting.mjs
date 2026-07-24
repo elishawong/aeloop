@@ -41,6 +41,11 @@
  *   - AELOOP_BRAIN_IDENTITY_NAME（可选）：显式覆盖身份名，优先级高于身份库里
  *     type:"identity", title:"identity:name" 的那条 memory——纯粹为了方便在身份库还没配置
  *     identity:name 记录时也能先跑通 demo，不是长期推荐路径（长期应该配进身份库本身）。
+ *   - AELOOP_BRAIN_TASK_SOURCE（issue #103，可选，见 `./lib/task-source.mjs` +
+ *     docs/enterprise-board-toggle/DESIGN.md）：在途任务来源选择器，值域 "none"（默认，shipped
+ *     零 GitHub）| "github"。省略/非法值时视为 "none"——正常渲染路径（状态 C）"现在在途"/
+ *     "Idea Queue 积压"/任务候选 整段不渲染（不是显示"无"占位）；只有身份/宪法候选（不碰 gh）
+ *     不受影响。非全局模式下也可以在 `.claude/brain.local.json` 里配 "taskSource" 字段。
  *
  * 首次醒来引导（issue #96，设计权威 docs/first-wake-onboarding/DESIGN.md，本文件不重复论证）：
  *   dbPath 解析出 null（两个配置源都没有）或解析出来但库是空的（`listMemories().length === 0`——
@@ -55,6 +60,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveIdentityDbPath } from "./lib/db-path.mjs";
+import { resolveTaskSource } from "./lib/task-source.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SPIKE_LIB_DIR = path.join(HERE, "..", "..", "docs", "conductor-brain-layer", "spike", "lib");
@@ -110,6 +116,13 @@ async function main() {
   // 分支都在 resolveIdentityDbPath() 内部处理，本文件这一行调用本身不需要跟着改。
   const dbPath = resolveIdentityDbPath();
 
+  // issue #103：在途任务来源选择器——"github" 时渲染层行为和加这个开关之前逐字节相同；省略/
+  // 任何其它值（shipped 默认 "none"）时"现在在途"/"Idea Queue 积压"整段不渲染、seed 不调 gh，
+  // 见 docs/enterprise-board-toggle/DESIGN.md。只在状态 C（正常渲染，下方）用到——状态 A/B 的
+  // 首次引导正文（onboarding-greeting.mjs）自己内部用同一个 resolveTaskSource() 独立解析措辞
+  // 分支（同 globalMode 的既有模式：调用方不显式传，模块自己读真实 env），这里不重复传参。
+  const taskSource = resolveTaskSource();
+
   // issue #96：两个配置源都没有 = 状态 A（未配置）——此前是安静跳过、不注入任何东西（#84 既有
   // 行为），本次改为注入首次引导正文（不是逐字复述用的开场白），理由见本文件头注释"首次醒来
   // 引导"一节 + docs/first-wake-onboarding/DESIGN.md。
@@ -164,7 +177,7 @@ async function main() {
 
   let data;
   try {
-    data = gatherGreetingData(store, { currentProjectKey });
+    data = gatherGreetingData(store, { currentProjectKey, taskSource });
   } finally {
     store.close();
   }

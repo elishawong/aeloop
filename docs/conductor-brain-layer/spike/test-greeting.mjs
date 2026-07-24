@@ -38,7 +38,7 @@ try {
   // ---- ① 空库 ----
   {
     const store = openIdentityStore(dbPath);
-    const data = gatherGreetingData(store);
+    const data = gatherGreetingData(store, { taskSource: "github" });
     assert.equal(data.identityName, DEFAULT_IDENTITY_NAME, "空库应给诚实占位符，不能编一个名字");
     assert.equal(data.statusRows.length, 0);
     assert.equal(data.backlogItems.length, 0);
@@ -96,7 +96,7 @@ try {
       confidenceState: "unconfirmed",
     });
 
-    const data = gatherGreetingData(store);
+    const data = gatherGreetingData(store, { taskSource: "github" });
     assert.equal(data.identityName, "测试身份名-xyz789");
     assert.equal(data.statusRows.length, 1);
     assert.equal(data.statusRows[0].task, "confirmed-active-task-marker-abc123");
@@ -155,7 +155,7 @@ try {
         confidenceState: "rejected",
       });
 
-      const data = gatherGreetingData(store);
+      const data = gatherGreetingData(store, { taskSource: "github" });
       // identity 采用要求 confirmed——rejected 的那条不该被当成身份名
       assert.equal(data.identityName, DEFAULT_IDENTITY_NAME, "rejected 的 identity:name 不能被采用为身份名");
       assert.equal(data.statusRows.length, 0, "rejected 的 active_task 不该出现在现在在途表格里");
@@ -207,7 +207,7 @@ try {
         confidenceState: "confirmed",
       });
 
-      const data = gatherGreetingData(store);
+      const data = gatherGreetingData(store, { taskSource: "github" });
       // lastStop 在没有 snapshot 兜底时取的是 focusTask.task（即 memory.title，不是 content——
       // 和 collectStatusRows() 的 "task" 字段定义一致，见 status-table.mjs）。
       assert.equal(data.lastStop, "in-progress-focus-marker-vwx234", "上次停在必须挑 in-progress 的那条，不能被最近更新带偏");
@@ -245,7 +245,7 @@ try {
         confidenceState: "confirmed",
       });
 
-      const data = gatherGreetingData(store);
+      const data = gatherGreetingData(store, { taskSource: "github" });
       assert.equal(
         data.followUp,
         NEUTRAL_FOLLOW_UP,
@@ -313,7 +313,7 @@ try {
         confidenceState: "unconfirmed",
       });
 
-      const data = gatherGreetingData(store);
+      const data = gatherGreetingData(store, { taskSource: "github" });
       assert.equal(data.backlogItems.length, 2, "Idea Queue 数据层本身应该是 2 条真实 idea");
       assert.equal(data.pendingDecisions.length, 1, "待你决策数据层本身应该是 1 条真实 decision");
 
@@ -408,7 +408,7 @@ try {
       });
 
       // --- 不传 currentProjectKey（向后兼容路径）：statusRows 是全部 5 条，不分组 ---
-      const dataNoCurrentProject = gatherGreetingData(store);
+      const dataNoCurrentProject = gatherGreetingData(store, { taskSource: "github" });
       assert.equal(dataNoCurrentProject.statusRows.length, 5, "未传 currentProjectKey 时应向后兼容——statusRows 是全部行，不分组");
       assert.deepEqual(dataNoCurrentProject.otherProjects, [], "未传 currentProjectKey 时 otherProjects 恒为空数组");
       assert.equal(dataNoCurrentProject.unassignedCount, 0, "未传 currentProjectKey 时 unassignedCount 恒为 0（不重复计数）");
@@ -417,7 +417,7 @@ try {
       assert.ok(!renderedNoCurrentProject.includes("**未分组任务："), "未传 currentProjectKey 时不该出现「未分组任务」段");
 
       // --- 传 currentProjectKey="ownerA/repoA"：分组生效 ---
-      const data = gatherGreetingData(store, { currentProjectKey: "ownerA/repoA" });
+      const data = gatherGreetingData(store, { currentProjectKey: "ownerA/repoA", taskSource: "github" });
       assert.equal(data.statusRows.length, 2, "当前项目（A）应只看到自己的 2 条");
       assert.ok(
         data.statusRows.every((r) => r.task.startsWith("project-a-")),
@@ -452,7 +452,7 @@ try {
   // ---- ⑦ issue #98：renderGreeting() 的 versionLine 字段（纯渲染层，不需要身份库）----
   {
     const store = openIdentityStore(dbPath);
-    const data = gatherGreetingData(store);
+    const data = gatherGreetingData(store, { taskSource: "github" });
     store.close();
 
     // 未传 versionLine（既有调用方的默认场景）—— 输出必须和加这个字段之前逐字节相同：不多
@@ -480,6 +480,104 @@ try {
     assert.equal(injectedLines[1], "aeloop 0.0.1+abc · FAKE BULLET ｜ extra", "换行折成空格、半角 | 换成全角 ｜（同 sanitizeText 既有红线）");
     assert.ok(!injectedLines[1].includes("|"), "清洗后不该残留任何真实半角 |");
   }
+
+  // ---- ⑧（issue #103）taskSource 门控：默认/"none"/未知值都是"board 关"，只有精确 "github"
+  //      才是"board 开"；关的时候"现在在途"/"Idea Queue 积压"整段不出现（不是渲染"无"占位）；
+  //      "待你决策"拆两类——身份/宪法候选（不碰 gh）不受影响，任务/idea 候选随 taskSource 收窄。
+  {
+    const dir8 = mkdtempSync(path.join(tmpdir(), "aeloop-test-greeting-tasksource-"));
+    const dbPath8 = path.join(dir8, "identity.db");
+    try {
+      const store = openIdentityStore(dbPath8);
+
+      store.insertMemory({
+        type: "active_task",
+        title: "tasksource-active-task-marker",
+        content: "只应该在 taskSource=github 时出现在现在在途表格里",
+        tags: ["status:in-progress"],
+        confidenceState: "confirmed",
+      });
+      store.insertMemory({
+        type: "idea",
+        title: "tasksource-idea-marker",
+        content: "tasksource-idea-content-marker 只应该在 taskSource=github 时出现在 Idea Queue",
+        tags: [],
+        confidenceState: "confirmed",
+      });
+      // 任务候选（unconfirmed active_task）：随 taskSource 收窄，taskSource=none 时不该出现在
+      // 待你决策段——即便它是通过三态确认流程产生、和 gh 完全无关，也和"现在在途"/"Idea Queue"
+      // 是同一个"任务看板"概念下的候选，一并收窄（DESIGN §4/§12①，指挥官已确认）。
+      store.insertMemory({
+        type: "active_task",
+        title: "tasksource-unconfirmed-task-candidate",
+        content: "任务候选，taskSource=none 时不该出现在待你决策段",
+        tags: [],
+        confidenceState: "unconfirmed",
+      });
+      // 身份候选（unconfirmed constraint）：不碰 gh，不受 taskSource 影响，任何 taskSource 下
+      // 都应该出现在待你决策段（TURNKEY-DESIGN.md §4(iii) 候选修宪通路）。
+      store.insertMemory({
+        type: "constraint",
+        title: "constraint:tasksource-test",
+        content: "身份候选，任何 taskSource 下都该出现在待你决策段",
+        tags: ["hardness:soft"],
+        confidenceState: "unconfirmed",
+      });
+
+      // --- 默认（不传 opts.taskSource）：应等同 "none"，board 关 ---
+      const dataDefault = gatherGreetingData(store);
+      assert.equal(dataDefault.taskSource, "none", "省略 taskSource 时应归一化为 'none'（shipped 默认）");
+      assert.equal(dataDefault.statusRows.length, 0, "taskSource 默认 none 时 statusRows 应强制为空");
+      assert.equal(dataDefault.backlogItems.length, 0, "taskSource 默认 none 时 backlogItems 应强制为空");
+      assert.equal(
+        dataDefault.pendingDecisions.length,
+        1,
+        "待你决策应只剩身份候选这 1 条（任务候选被收窄），不是 0 条（字面砍掉整段）也不是 2 条（没收窄任务候选）",
+      );
+      assert.ok(
+        dataDefault.pendingDecisions[0].label.includes("身份候选"),
+        "剩下的这条待你决策应该是身份候选，不是任务候选",
+      );
+
+      const textDefault = renderGreeting(dataDefault);
+      assert.ok(!textDefault.includes("**现在在途："), "taskSource=none 时「现在在途」标题必须整段不出现，不是渲染空表/无占位");
+      assert.ok(!textDefault.includes("**Idea Queue 积压："), "taskSource=none 时「Idea Queue 积压」标题必须整段不出现");
+      assert.ok(!textDefault.includes("当前没有在途任务。"), "taskSource=none 时不该出现「当前没有在途任务」这句——那是「有查但查到空」的措辞，这里是压根没查");
+      assert.ok(!textDefault.includes("tasksource-active-task-marker"), "taskSource=none 时不该泄露任何 active_task 内容");
+      assert.ok(!textDefault.includes("tasksource-idea-content-marker"), "taskSource=none 时不该泄露任何 idea 内容");
+      assert.ok(!textDefault.includes("tasksource-unconfirmed-task-candidate"), "taskSource=none 时任务候选不该出现在待你决策段");
+      assert.ok(textDefault.includes("**待你决策：**"), "「待你决策」标题本身不受 taskSource 门控，应该照常出现");
+      assert.ok(textDefault.includes("身份候选，任何 taskSource 下都该出现在待你决策段"), "身份候选应该照常出现在待你决策段");
+
+      // --- 显式 "none"：应和默认完全等价 ---
+      const dataExplicitNone = gatherGreetingData(store, { taskSource: "none" });
+      assert.deepEqual(dataExplicitNone, dataDefault, "显式传 taskSource:'none' 应和省略完全等价");
+
+      // --- 未知值（拼错）：fail-closed 到 "none"，不是 fail-open 到 "github" ---
+      const dataBogus = gatherGreetingData(store, { taskSource: "bogus-typo" });
+      assert.deepEqual(dataBogus, dataDefault, "未知 taskSource 值应 fail-closed 归一化到 'none'，行为和默认完全等价");
+
+      // --- 显式 "github"：board 开，两类候选都出现 ---
+      const dataGithub = gatherGreetingData(store, { taskSource: "github" });
+      assert.equal(dataGithub.taskSource, "github");
+      assert.equal(dataGithub.statusRows.length, 1, "taskSource=github 时 statusRows 应正常计算");
+      assert.equal(dataGithub.backlogItems.length, 1, "taskSource=github 时 backlogItems 应正常计算");
+      assert.equal(dataGithub.pendingDecisions.length, 2, "taskSource=github 时身份候选+任务候选都该出现，共 2 条");
+
+      const textGithub = renderGreeting(dataGithub);
+      assert.ok(textGithub.includes("**现在在途："), "taskSource=github 时「现在在途」标题应该出现");
+      assert.ok(textGithub.includes("tasksource-active-task-marker"), "taskSource=github 时 active_task 内容应该出现");
+      assert.ok(textGithub.includes("**Idea Queue 积压："), "taskSource=github 时「Idea Queue 积压」标题应该出现");
+      assert.ok(textGithub.includes("tasksource-idea-content-marker"), "taskSource=github 时 idea 内容应该出现");
+      assert.ok(textGithub.includes("tasksource-unconfirmed-task-candidate"), "taskSource=github 时任务候选应该出现在待你决策段");
+
+      store.close();
+    } finally {
+      rmSync(dir8, { recursive: true, force: true });
+    }
+  }
+
+  console.log("PASS: test-greeting.mjs（⑧ taskSource 门控：默认/none/未知值 board 关且整段不渲染，github 时 board 开，待你决策拆身份候选/任务候选两类，issue #103）");
 
   console.log("PASS: test-greeting.mjs");
 } finally {

@@ -146,7 +146,10 @@ try {
       const proc2 = spawnSync("node", [HOOK_PATH], {
         input: stdinPayload2,
         encoding: "utf8",
-        env: { ...process.env, AELOOP_BRAIN_IDENTITY_DB: dbPath },
+        // issue #103：shipped 默认 taskSource=none 会让整个「现在在途」/「其它项目」段不渲染——
+        // 这个块测的是 cwd 反查驱动的多项目分组渲染，需要显式 opt-in 成 github 才能真的走到
+        // 这条渲染路径，不然下面的断言会全部落空（不是因为分组逻辑坏了，是因为板块整个没渲染）。
+        env: { ...process.env, AELOOP_BRAIN_IDENTITY_DB: dbPath, AELOOP_BRAIN_TASK_SOURCE: "github" },
       });
       assert.equal(proc2.status, 0, `hook 必须 exit 0，实际 status=${proc2.status}，stderr=${proc2.stderr}`);
       const hookOutput2 = JSON.parse(proc2.stdout);
@@ -369,6 +372,65 @@ try {
   }
 
   console.log("PASS: test-hook-greeting.mjs（⑩ 状态 C 回归对照——哪怕只有 1 条 memory 也必须继续走正常渲染路径，issue #96）");
+
+  // ⑪（issue #103）端到端：真实 spawn 这个 hook，不设 AELOOP_BRAIN_TASK_SOURCE（shipped 默认），
+  //    库里确实有 active_task/idea 数据——「现在在途」/「Idea Queue 积压」必须整段不出现（不是
+  //    渲染出空表/无占位），身份行/待你决策/结尾追问句必须照常完整输出。这是 test-greeting.mjs
+  //    ⑧ 已经在单元测试层覆盖的同一条红线，这里补一条真实经过 resolveTaskSource() + hook 自己
+  //    的 opts 透传逻辑的端到端证明，不只是测 greeting-data.mjs/render-greeting.mjs 两个函数
+  //    本身对不对。
+  {
+    const dbDir11 = mkdtempSync(path.join(tmpdir(), "aeloop-test-hook-greeting-tasksource-default-"));
+    const dbPath11 = path.join(dbDir11, "identity.db");
+    try {
+      const { openIdentityStore: openStoreForSeed11 } = await import(
+        path.join(REPO_ROOT, "docs", "conductor-brain-layer", "spike", "lib", "wake.mjs")
+      );
+      const seedStore11 = openStoreForSeed11(dbPath11);
+      seedStore11.insertMemory({
+        type: "identity",
+        title: "identity:name",
+        content: "测试身份十一号",
+        tags: [],
+        confidenceState: "confirmed",
+      });
+      seedStore11.insertMemory({
+        type: "active_task",
+        title: "hook-default-tasksource-active-task",
+        content: "不该出现在默认 taskSource 的开场白里",
+        tags: ["status:in-progress"],
+        confidenceState: "confirmed",
+      });
+      seedStore11.insertMemory({
+        type: "idea",
+        title: "hook-default-tasksource-idea",
+        content: "hook-default-tasksource-idea-content 不该出现在默认 taskSource 的开场白里",
+        tags: [],
+        confidenceState: "confirmed",
+      });
+      seedStore11.close();
+
+      const env11 = { ...process.env, AELOOP_BRAIN_IDENTITY_DB: dbPath11 };
+      delete env11.AELOOP_BRAIN_TASK_SOURCE; // 显式确保没有从测试机器/CI 环境意外继承
+
+      const stdinPayload11 = JSON.stringify({ session_id: "test-hook-tasksource-default", cwd: REPO_ROOT });
+      const proc11 = spawnSync("node", [HOOK_PATH], { input: stdinPayload11, encoding: "utf8", env: env11 });
+      assert.equal(proc11.status, 0, `默认 taskSource 时 hook 必须 exit 0，实际 status=${proc11.status}，stderr=${proc11.stderr}`);
+      const additionalContext11 = JSON.parse(proc11.stdout).hookSpecificOutput.additionalContext;
+
+      assert.ok(additionalContext11.includes("意识已加载。我是 测试身份十一号。"), "身份行应照常渲染");
+      assert.ok(!additionalContext11.includes("**现在在途："), "默认 taskSource 时「现在在途」标题必须整段不出现");
+      assert.ok(!additionalContext11.includes("**Idea Queue 积压："), "默认 taskSource 时「Idea Queue 积压」标题必须整段不出现");
+      assert.ok(!additionalContext11.includes("hook-default-tasksource-active-task"), "默认 taskSource 时不该泄露 active_task 内容");
+      assert.ok(!additionalContext11.includes("hook-default-tasksource-idea-content"), "默认 taskSource 时不该泄露 idea 内容");
+      assert.ok(additionalContext11.includes("**待你决策：**"), "「待你决策」标题不受 taskSource 门控，应照常出现");
+      assert.ok(additionalContext11.includes("有什么想让我接手的？"), "结尾追问句应照常出现（statusRows 强制为空 → 无可续做焦点 → 中性问句，自然结果，不是被砍掉）");
+    } finally {
+      rmSync(dbDir11, { recursive: true, force: true });
+    }
+  }
+
+  console.log("PASS: test-hook-greeting.mjs（⑪ 端到端：默认不设 AELOOP_BRAIN_TASK_SOURCE 时「现在在途」/「Idea Queue 积压」整段不出现，issue #103）");
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

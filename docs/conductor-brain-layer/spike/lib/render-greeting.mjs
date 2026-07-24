@@ -28,6 +28,17 @@
 // 结尾）——呼应 issue 原文"便于用户截图排查时一眼看到"，截图排查场景下用户往往只截最上面
 // 几行。同样过 sanitizeText()（和其它每一条要拼进正文的字段同一红线，一律统一清洗，不因为这个
 // 值目前的构成看起来"安全"就开后门）。
+//
+// issue #103 新增：`taskSource`（`gatherGreetingData()` 归一化后透传，本文件不读任何 env——
+// 保持"纯函数，只读传进来的数据"这条红线）。`taskSource !== "github"`（含省略/`undefined`）时，
+// "现在在途"/"其它项目"/"未分组任务"/"Idea Queue 积压" 整块不进 `parts` 数组——**不是**让
+// `statusRows`/`backlogItems` 传空数组指望 `labeledSection()`/`renderStatusTable()` 自己渲染出
+// "无"/"当前没有在途任务。"这类占位符：那正是防幻觉红线明确禁止的"该省的段显示'暂无'"。数组
+// 为空（这个概念本身还在，只是碰巧没数据）和板块被整个关掉（这个概念在当前配置下压根不该出现）
+// 是两种不同语义，必须有不同的渲染结果——`taskSource` 门控的是"要不要进 parts"，不是"传给
+// labeledSection 的数组长什么样"。"待你决策"不受这个门控——`gatherGreetingData()` 已经把
+// 身份/宪法候选（不受 taskSource 影响）和任务/idea 候选（随 taskSource 收窄）合并成一个数组，
+// 本文件只管渲染，不重复判断（DESIGN §4/§5/§12①）。
 
 import { renderStatusTable } from "./status-table.mjs";
 import { sanitizeText } from "./sanitize.mjs";
@@ -58,6 +69,7 @@ export function renderGreeting(data) {
     otherProjects = [],
     unassignedCount = 0,
     versionLine,
+    taskSource = "none",
   } = data;
 
   const parts = [
@@ -68,32 +80,36 @@ export function renderGreeting(data) {
     ...(versionLine ? [sanitizeText(versionLine)] : []),
     "",
     `**上次停在：** ${sanitizeText(lastStop)}`,
-    "",
-    "**现在在途：**",
-    "",
-    renderStatusTable(statusRows),
   ];
 
-  if (otherProjects.length > 0) {
-    parts.push(
-      "",
-      labeledSection(
-        "其它项目",
-        otherProjects,
-        (p) => `${p.projectKey} — ${p.count} 条在途，最高优先级 = ${p.topStatusLabel}`,
-      ),
-    );
+  // issue #103：taskSource !== "github" 时这整块物理上不执行——不是靠空数组指望内层渲染函数
+  // 自己吐出"无"/"当前没有在途任务。"，见本文件头注释。
+  if (taskSource === "github") {
+    parts.push("", "**现在在途：**", "", renderStatusTable(statusRows));
+
+    if (otherProjects.length > 0) {
+      parts.push(
+        "",
+        labeledSection(
+          "其它项目",
+          otherProjects,
+          (p) => `${p.projectKey} — ${p.count} 条在途，最高优先级 = ${p.topStatusLabel}`,
+        ),
+      );
+    }
+
+    if (unassignedCount > 0) {
+      // 不静默丢弃（延续 status-table.mjs "未知值必须显式标注" 的红线精神）——但也不在这里展开
+      // 逐条列出（PRD §4.5 只要求一个计数提示，不是完整任务列表），提示怎么补齐归属。
+      parts.push("", `**未分组任务：** ${unassignedCount} 条（早于项目登记，跑一次 seed 脚本可补齐 project 归属）`);
+    }
+
+    parts.push("", labeledSection("Idea Queue 积压", backlogItems, (memory) => memory.content));
   }
 
-  if (unassignedCount > 0) {
-    // 不静默丢弃（延续 status-table.mjs "未知值必须显式标注" 的红线精神）——但也不在这里展开
-    // 逐条列出（PRD §4.5 只要求一个计数提示，不是完整任务列表），提示怎么补齐归属。
-    parts.push("", `**未分组任务：** ${unassignedCount} 条（早于项目登记，跑一次 seed 脚本可补齐 project 归属）`);
-  }
-
+  // "待你决策"不受 taskSource 门控——身份/宪法候选（不碰 gh）始终计算，`gatherGreetingData()`
+  // 已经把这部分和任务/idea 候选（随 taskSource 收窄）合并成一个数组，这里只管渲染。
   parts.push(
-    "",
-    labeledSection("Idea Queue 积压", backlogItems, (memory) => memory.content),
     "",
     labeledSection("待你决策", pendingDecisions, (item) => item.label),
     "",
