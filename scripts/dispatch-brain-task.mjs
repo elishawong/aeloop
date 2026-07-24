@@ -38,6 +38,17 @@
  * 的并发回归测试，断言两次的工具执行 cwd 都是 `REPO_ROOT`、结束后 `process.cwd()` 恢复正常。
  * 不走"改 `src/harness/**` 传 per-spawn cwd"那条路——超出片①范围，Zorro 已确认不用现在做。
  *
+ * 🔧 issue #2 batch 0 重构（2026-07-24，docs/conductor-mvp/DESIGN.md §7.3 方案 B）：
+ * "② 翻译意图 → ③ 真实 aeloop 执行（自动批 G1/G2，停 G3/Escalation 前）→ ④ EvidenceBundle →
+ * ⑤ 三态门折回" 这段核心逻辑抽到 `scripts/lib/conductor-dispatch-core.mjs`（不要求项目注册），
+ * 本文件现在只保留"多项目场景特有"的部分：① 项目注册校验（`assertProjectRegistered`）、
+ * cwd 互斥锁/chdir 保护（上面两轮 must-fix 的成果，**没有下沉到共享核心**——那是这个多项目 CLI
+ * 场景特有的并发保护，见 `conductor-dispatch-core.mjs` 头注释"调用方职责边界"）、⑥ 折回身份库时
+ * 打 `project:<owner>/<repo>` tag 这条 project-link memory。**这是一次纯重构，不改变本文件的
+ * 对外行为**——`scripts/test-dispatch-brain-task.mjs` 的既有断言（未注册项目报错/allowedPaths
+ * 不含目标项目路径/cwd 钉死/并发互斥）全部原样适用，重构前后各跑过一遍确认零回归。issue #2
+ * batch 1 的 `dispatch-conductor-task.mjs` 复用同一个共享核心，但不经过这里的项目注册语义。
+ *
  * 调用模式：库调（同 `run-spike.mjs` 已验证的路径，assembleProfileDeps + startRun/resumeRun），
  * 不走 `conductor-work.mjs` 子进程（那条路径今天必然停在 G1、没有 resume 命令，`run-spike.mjs`
  * 头注释已经记录过这条判断，本文件延续同一个结论，不重新论证）。
@@ -51,6 +62,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveIdentityDbPath } from "../.claude/hooks/lib/db-path.mjs";
 import { assertProjectRegistered, projectTagFor } from "../.claude/hooks/lib/project-registry.mjs";
+import { runConductorDispatch } from "./lib/conductor-dispatch-core.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.join(HERE, "..");
@@ -60,7 +72,10 @@ export const REPO_ROOT = path.join(HERE, "..");
  * 被 `--project` 参数覆盖——见文件头"🔒 Level 1 范围决定"。 */
 export const DEFAULT_ALLOWED_PATHS = ["docs/conductor-brain-multiproject/spike/**"];
 
-const AUTO_APPROVE_GATES = new Set(["G1_SEND_TO_TESTER", "G2_SEND_TO_FIX"]);
+/** TaskContract JSON 落盘目录——独立于 batch 0 抽取出的共享核心自己的默认值
+ *  （`conductor-dispatch-core.mjs` 的 `DEFAULT_CONTRACT_DIR` 是 #2 自己的安全区，两者刻意不同，
+ *  维持 #93 B5 既有的审计痕迹隔离，逐字节等于重构前本文件内联的旧路径）。 */
+const CONTRACT_DIR = path.join(REPO_ROOT, "docs", "conductor-brain-multiproject", "spike");
 
 // 🔒 module 级 async 互斥锁（见文件头"Zorro must-fix 第2轮"）——一条 promise 链，每次
 // `withDispatchMutex(fn)` 把 `fn` 接到链尾：必须等前一个排队的调用（无论成功/失败）完全落地，
@@ -132,113 +147,38 @@ async function runDispatchBrainTask(args, deps) {
       assertProjectRegistered(store, owner, repo);
       const projectTag = projectTagFor(owner, repo);
 
-      // ② 翻译意图 → TaskContract（allowedPaths 固定指向 B5 自己的安全区，见文件头）。
-      const { translateIntent } = await import(
-        path.join(REPO_ROOT, "docs", "conductor-brain-layer", "spike", "lib", "translator.mjs")
+      // ②-⑤ 翻译 → 真实 aeloop 执行（库调模式，G1/G2 自动放行、停在 G3 前）→ EvidenceBundle →
+      //      三态门折回——委托给 batch 0 抽出的共享核心（不要求项目注册，本文件在这之上包一层
+      //      多项目语义，见文件头"issue #2 batch 0 重构"）。
+      const result = await runConductorDispatch(
+        rawIntent,
+        { store, assembleDeps: deps.assembleDeps },
+        {
+          allowedPaths: DEFAULT_ALLOWED_PATHS,
+          objectivePrefix: `以下任务与项目 ${owner}/${repo} 相关，作为大脑多项目调度链路的冒烟验证：`,
+          contractDir: CONTRACT_DIR,
+          decidedByLabel: "dispatch-brain-task (auto, not a human decision)",
+        },
       );
-      const contract = translateIntent(rawIntent, {
-        allowedPaths: DEFAULT_ALLOWED_PATHS,
-        objectivePrefix: `以下任务与项目 ${owner}/${repo} 相关，作为大脑多项目调度链路的冒烟验证：`,
-      });
 
-      // ③ 真实 aeloop 执行（库调模式，同 run-spike.mjs）。
-      const contractPath = path.join(
-        REPO_ROOT,
-        "docs",
-        "conductor-brain-multiproject",
-        "spike",
-        `${contract.contractId}.json`,
-      );
-      const fs = await import("node:fs");
-      fs.writeFileSync(contractPath, JSON.stringify(contract, null, 2));
-
-      const assembleDeps =
-        deps.assembleDeps ??
-        (async (profileName, env) => {
-          const { assembleProfileDeps } = await import(path.join(REPO_ROOT, "dist", "cli", "assemble.js"));
-          return assembleProfileDeps(profileName, env, undefined);
-        });
-      const {
-        ConductorWorkApp,
-        companyBrainDirectory,
-        WorkflowRegistry,
-        coderTesterWorkflow,
-        renderTaskContract,
-        startRun,
-        resumeRun,
-        LoopEventEmitter,
-      } = await import(path.join(REPO_ROOT, "dist", "index.js"));
-
-      const workflows = new WorkflowRegistry();
-      workflows.register(coderTesterWorkflow);
-      const app = new ConductorWorkApp({ brainDirectory: companyBrainDirectory(REPO_ROOT), workflows });
-      const plan = app.planRun(contractPath);
-
-      const cliDeps = await assembleDeps("subscription", process.env);
-      const capturedEvents = [];
-      const emitter = new LoopEventEmitter();
-      emitter.on((event) => capturedEvents.push(event));
-      const decidedBy = "dispatch-brain-task (auto, not a human decision)";
-
-      let runError = null;
-      try {
-        const task = renderTaskContract(plan.contract.objective, plan.contract);
-        const injectedContext = cliDeps.injector.inject(plan.contract.objective);
-
-        let handle = await startRun(
-          { ...cliDeps, events: emitter },
-          {
-            task,
-            profile: cliDeps.profileConfig.profile,
-            workflowDefId: plan.workflow.id,
-            injectedContext,
-            rejectThreshold: 2,
-          },
-        );
-        while (handle.interrupt && AUTO_APPROVE_GATES.has(handle.interrupt.gate) && !handle.done) {
-          handle = await resumeRun(
-            { ...cliDeps, events: emitter },
-            handle.runId,
-            handle.threadId,
-            { decision: "approved" },
-            decidedBy,
-            handle.stepCounters,
-          );
-        }
-      } catch (err) {
-        runError = err instanceof Error ? err : new Error(String(err));
-      } finally {
-        cliDeps.audit.close();
-        cliDeps.memoryStore.close();
-        if (cliDeps.checkpointer && typeof cliDeps.checkpointer.db?.close === "function") {
-          cliDeps.checkpointer.db.close();
-        }
-      }
-
-      // ④ EvidenceBundle。
-      const evidenceBundle = app.projectEvents(capturedEvents, contractPath);
-
-      // ⑤ 三态门折回——写入的 memory 打上 project:<owner>/<repo> tag（区别于 three-state-gate.mjs
-      //    默认写法：直接在 tags 数组末尾追加，不改 applyThreeStateGate() 本身，见下方调用后处理）。
-      const { applyThreeStateGate } = await import(
-        path.join(REPO_ROOT, "docs", "conductor-brain-layer", "spike", "lib", "three-state-gate.mjs")
-      );
-      const gateResults = applyThreeStateGate(evidenceBundle, store, { actor: decidedBy });
-      // 给三态门刚写入的每一条 memory 补一个 project tag——applyThreeStateGate() 是 #75/#80 的
-      // 既有共享实现，本文件不改它（不新增 project 参数进去，避免影响 #75/#80 自己的调用点/测试），
-      // 改为在这里对它刚写的记录做一次追加 tag 的 update（memory-upsert.mjs 里没有"追加单个 tag
-      // 不动其它字段"的方法，直接用 store 原生的 insertMemory 覆盖写一条新记录不合适——这里选择
-      // 最小改动：单独再插入一条 active_task，明确标注属于哪个项目，不去 mutate three-state-gate
-      // 已经写好的记录本身）。
+      // ⑥ 给三态门刚写入的记录再补一条项目关联——applyThreeStateGate()（#75/#80 的既有共享实现，
+      //    本文件不改它）本身不知道"项目"这个多项目场景才有的概念，所以在共享核心返回之后，本文件
+      //    单独再插入一条 active_task，明确标注属于哪个项目，不去 mutate 共享核心已经写好的记录。
       const projectLinkMemory = store.insertMemory({
         type: "active_task",
-        title: `brain-dispatch-smoke-test:${contract.contractId}`,
-        content: `冒烟验证任务，contractId=${contract.contractId}，intent="${rawIntent}"`,
+        title: `brain-dispatch-smoke-test:${result.contract.contractId}`,
+        content: `冒烟验证任务，contractId=${result.contract.contractId}，intent="${rawIntent}"`,
         tags: ["status:done", "source:brain-dispatch-smoke-test", projectTag],
         confidenceState: "confirmed",
       });
 
-      return { contract, evidenceBundle, gateResults, projectLinkMemoryId: projectLinkMemory.id, runError };
+      return {
+        contract: result.contract,
+        evidenceBundle: result.evidenceBundle,
+        gateResults: result.gateResults,
+        projectLinkMemoryId: projectLinkMemory.id,
+        runError: result.runError,
+      };
     } finally {
       store.close();
     }

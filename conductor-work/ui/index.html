@@ -9,6 +9,28 @@
   <body>
     <header><div><small>CONDUCTOR WORK</small><h1>Company AI Workbench</h1></div><span class="pill">COMPANY BRAIN</span><span class="pill">DEMO DATA · 示例数据</span></header>
     <main>
+      <!-- issue #2 batch 1 — 多 workflow 总览看板（docs/conductor-mvp/DESIGN.md §3）。
+           GET /api/runs 轮询（2-3s），source:"live" 时是真实 workflow.db 数据，source:"static-fallback"
+           时给出诚实提示（还没有任何 run / dist/ 未 build），绝不假装有数据。batch 1 只到"总览"为止
+           ——不支持点开某一行看详情，那是后续 batch（DESIGN §3.6）。 -->
+      <section class="panel" id="board-panel">
+        <div class="heading">
+          <div><small>WORKFLOWS</small><h2>多 Workflow 总览</h2></div>
+          <span class="pill blue" id="board-source-pill">LOADING</span>
+        </div>
+        <table>
+          <thead><tr><th>Run</th><th>阶段</th><th>Loop 次数</th><th title="Coder 是否已完整跑完至少一轮——不代表一定有可查看的 diff，no_change 场景下同样会显示 ✓，见 board.ts 头注释">Coder 完成轮次</th><th>任务</th><th>更新时间</th></tr></thead>
+          <tbody id="board-rows"></tbody>
+        </table>
+        <p id="board-message" style="color:var(--muted);font-size:12px;margin-top:10px"></p>
+      </section>
+
+      <!-- 下方 summary/layout 两个 section 是 batch 1 之前既有的单 run fixture 演示（issue #29
+           follow-up）——batch 1 不改动它们的渲染逻辑，只是不再是整页首屏（上面新增的总览看板才
+           是）。batch 2 会把它们换成"点开总览某一行"的真实详情视图，目前先原样保留当占位/示例。 -->
+      <p style="color:var(--muted);font-size:12px;margin:4px 0 14px">
+        以下是单个 workflow 的详情示例（固定 fixture，issue #2 batch 2 会换成"点开上方总览某一行"的真实详情）：
+      </p>
       <section class="summary">
         <article><small>任务目标</small><h2>Implement the approved change</h2><p>PRD snapshot: <code>prd-2026-07-21-a13f</code></p></article>
         <article><small>运行状态</small><strong id="status">WAITING FOR G1</strong><p>coder-tester-loop · v1.0.0</p></article>

@@ -323,10 +323,36 @@ export class AuditStore {
   private readonly listStepMarkerStepRefsByRunStmt: Database.Statement<[number], { step_ref: string }>;
   private readonly listContextOmissionsByRunStmt: Database.Statement<[number], ContextOmissionRow>;
 
-  constructor(dbPath: string) {
-    this.db = new Database(dbPath);
+  /**
+   * `opts.readonly` (issue #2 batch 1, Zorro R1 blocker B2) — opens the
+   * underlying `better-sqlite3` connection with `{readonly: true,
+   * fileMustExist: true}` and **skips `createSchema()` entirely**, instead
+   * of the default read-write open + unconditional `CREATE TABLE IF NOT
+   * EXISTS` DDL. Without this, a read-only consumer (`conductor-work/ui/
+   * server.mjs`'s board endpoint) opening an *existing* `workflow.db` still
+   * physically writes to it via `createSchema()`'s DDL statement — `IF NOT
+   * EXISTS` makes it a schema no-op when the tables already exist, but the
+   * open itself still requests read-write access and still issues a real
+   * DDL statement against the file, which is not "read-only" in the sense
+   * the UI's own documentation (candidate-only, read-only board) claims.
+   * Every production caller (`assembleProfileDeps()`, `run-spike.mjs`,
+   * `dispatch-brain-task.mjs`'s driver, this file's own test suite)
+   * continues to call `new AuditStore(dbPath)` with `opts` omitted — this
+   * parameter is purely additive, defaulting to the exact prior behavior.
+   * A readonly connection against a path that doesn't exist throws
+   * (`fileMustExist: true`) rather than silently creating a fresh empty
+   * database — the caller (`server.mjs`) is expected to `fs.existsSync()`
+   * first and only construct a readonly `AuditStore` when the file is
+   * already known to exist, matching how it already guards this today.
+   */
+  constructor(dbPath: string, opts: { readonly readonly?: boolean } = {}) {
+    if (opts.readonly) {
+      this.db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    } else {
+      this.db = new Database(dbPath);
+      this.createSchema();
+    }
     this.db.pragma("foreign_keys = ON");
-    this.createSchema();
 
     this.insertRunStmt = this.db.prepare(
       `INSERT INTO workflow_runs

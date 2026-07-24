@@ -132,6 +132,106 @@ function cacheHitPct(usage) {
   return Math.round((usage.cacheReadTokens / denom) * 100);
 }
 
+/**
+ * 多 workflow 总览看板（issue #2 batch 1，docs/conductor-mvp/DESIGN.md §3）。
+ *
+ * 读哪个 profile 的 `workflow.db`：`CONDUCTOR_WORK_PROFILE` env（本页专属）优先，其次
+ * `AI_AGENT_PROFILE`（`src/profile/loader.ts` 既有的引擎级 profile 选择 env，同一约定，不新造
+ * 第二套命名），都没有时缺省 `"subscription"`——和 `run-spike.mjs`/`dispatch-brain-task.mjs` 的
+ * 既有默认一致。
+ *
+ * **Zorro R1 blocker B3 修复**：profile 目录解析**复用引擎自己的 `loadProfile()`**
+ * （`src/profile/loader.ts`，`assembleProfileDeps()` 内部调的同一个函数），不再手写
+ * `path.join(root, "..", "..", "profiles", profileName)`——旧写法忽略了 `AELOOP_PROFILES_ROOT`
+ * （外置 profile 场景下引擎实际读写的是另一个目录，看板硬编码仓库内 `profiles/` 会显示"无数据"，
+ * 不是真的没数据，是找错了目录）。`loadProfile()` 内部已有的 `isSinglePathSegment()`/
+ * `isContainedRealpath()` 检查同时把 `CONDUCTOR_WORK_PROFILE` 的路径穿越校验也一并解决了——不
+ * 需要另写一份检查。
+ *
+ * **只读**：只调用 `AuditStore.listRunsByStatus()`/`listStepRefsByRun()`，从不调用任何
+ * `insert*`/`update*` 方法——不新增任何写路径（DESIGN §3.3 candidate-only 关系说明）。
+ *
+ * **Zorro R1 blocker B2 修复**：`AuditStore` 默认构造器是 `new Database(dbPath)`（读写）+
+ * 无条件 `createSchema()`（`CREATE TABLE IF NOT EXISTS`）——对一个已存在的 `workflow.db` 而言，
+ * 这仍然是一次真实的写路径请求（哪怕 DDL 本身是 no-op），推翻"看板全程只读"这个声明。改用
+ * `new AuditStore(dbPath, { readonly: true })`（`src/loop/audit-store.ts` 新增的只读模式，
+ * `better-sqlite3` 的 `{readonly:true, fileMustExist:true}`，跳过 `createSchema()`）——已实测
+ * 确认：读操作正常、写操作真的抛 `SQLITE_READONLY`、文件 mtime 不变、对不存在的文件会抛错而不是
+ * 静默建一个空库（`fileMustExist:true`）。`fs.existsSync()` 判断依然保留在前面，双重保险。
+ */
+async function resolveWorkflowDbPath() {
+  // Zorro R2 yellow②：用 `||`（不是 `??`）把空字符串和"没设置"同等对待——`CONDUCTOR_WORK_
+  // PROFILE=""`（比如 shell 里 `export CONDUCTOR_WORK_PROFILE=` 忘了赋值）在 `??` 下会被当成
+  // "显式选择了一个名叫空字符串的 profile" 往下传，虽然 `loadProfile()` 自己的
+  // `isSinglePathSegment("")` 会安全拒绝它（不会崩溃/不会越权，走既有降级路径），但语义上更
+  // 合理的解读是"这其实等于没设置，应该退到下一优先级"——和下面 `AELOOP_PROFILES_ROOT` 已有的
+  // `||` 处理方式保持一致，不留一个只有这一个变量用 `??`、行为不对称的边角。
+  const profileName = process.env.CONDUCTOR_WORK_PROFILE || process.env.AI_AGENT_PROFILE || "subscription";
+  const distIndexPath = path.join(root, "..", "..", "dist", "index.js");
+  let loadProfile;
+  try {
+    ({ loadProfile } = await import(pathToFileUrl(distIndexPath)));
+  } catch (error) {
+    return { profileName, dbPath: null, loadError: `dist/ 未 build 或导入失败：${error.code ?? error.message}` };
+  }
+  // profilesRoot 解析和 assembleProfileDeps()（src/cli/assemble.ts）同一套优先级：显式传入
+  // （这里没有）→ AELOOP_PROFILES_ROOT env → loadProfile() 自己的包内相对默认值（undefined 时）。
+  const profilesRoot = process.env.AELOOP_PROFILES_ROOT || undefined;
+  try {
+    const result = loadProfile(profileName, profilesRoot);
+    if (!result.ok) {
+      return { profileName, dbPath: null, loadError: result.error.message };
+    }
+    return { profileName, dbPath: path.join(result.profileDir, "workflow.db") };
+  } catch (error) {
+    // InvalidProfileNameError（含路径穿越/非单段名）、ProfileConfigParseError 等——都是"这个
+    // profile 解析不出来"，走降级路径，不是服务器崩溃。
+    return { profileName, dbPath: null, loadError: error.message };
+  }
+}
+
+/**
+ * 组装看板总览的 `BoardRow[]`。`source` 字段区分真实数据（`"live"`）和降级空态
+ * （`"static-fallback"`，profile 解析不出来/`workflow.db` 不存在/`dist/` 未 build 时）——同既有
+ * `/api/state` 的 `source` 字段约定，不新造一套语义。
+ */
+async function getBoardRows() {
+  const { profileName, dbPath, loadError } = await resolveWorkflowDbPath();
+  if (!dbPath) {
+    return { source: "static-fallback", profile: profileName, dbPath: null, rows: [], message: loadError ?? "profile 解析失败。" };
+  }
+  if (!fs.existsSync(dbPath)) {
+    return { source: "static-fallback", profile: profileName, dbPath, rows: [], message: `未找到 ${dbPath}——还没有任何 run 用这个 profile 跑过。` };
+  }
+  let AuditStore;
+  let toBoardRow;
+  try {
+    ({ AuditStore } = await import(pathToFileUrl(path.join(root, "..", "..", "dist", "index.js"))));
+    ({ toBoardRow } = await import(pathToFileUrl(path.join(root, "..", "..", "dist", "conductor-work", "board.js"))));
+  } catch (error) {
+    console.warn(`[conductor-work-ui] /api/runs falling back — dist/ import failed (${error.code ?? error.message}). Run "pnpm run build" first.`);
+    return { source: "static-fallback", profile: profileName, dbPath, rows: [], message: "dist/ 未 build，运行 pnpm run build 后重启。" };
+  }
+
+  let audit;
+  try {
+    audit = new AuditStore(dbPath, { readonly: true });
+  } catch (error) {
+    // fileMustExist:true 理论上不该在这里触发（上面已经 fs.existsSync() 判断过），但 TOCTOU
+    // 窗口（判断之后、打开之前文件被删）不是不可能——同样走降级路径，不崩服务器。
+    console.warn(`[conductor-work-ui] /api/runs: readonly open failed (${error.code ?? error.message}).`);
+    return { source: "static-fallback", profile: profileName, dbPath, rows: [], message: `打开 ${dbPath} 失败：${error.message}` };
+  }
+  try {
+    // 只读：listRunsByStatus()/listStepRefsByRun()，从不调用任何 insert*/update* 方法。
+    const runs = [...audit.listRunsByStatus("running"), ...audit.listRunsByStatus("escalated")];
+    const rows = runs.map((run) => toBoardRow(run, audit.listStepRefsByRun(run.id)));
+    return { source: "live", profile: profileName, dbPath, rows };
+  } finally {
+    audit.close();
+  }
+}
+
 /** Static fallback used only when `dist/evidence/bundle.js` hasn't been built (run `pnpm run build` first). Clearly not projector output — see README.md. */
 function staticFallbackState() {
   return {
@@ -212,6 +312,23 @@ http
         console.error("[conductor-work-ui] /api/state failed:", error);
         response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
         response.end(JSON.stringify({ error: "state unavailable" }));
+      }
+      return;
+    }
+
+    if (request.url === "/api/runs") {
+      // issue #2 batch 1 — 总览看板端点。**不缓存**（不同于 /api/state 的 cachedStatePromise）：
+      // 前端每 2-3 秒轮询一次，每次都要反映 workflow.db 的最新内容，缓存会让看板卡在第一次快照。
+      try {
+        const board = await getBoardRows();
+        response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify(board));
+      } catch (error) {
+        // 同 /api/state 的既有惯例：/api/runs 失败绝不能拖垮整个 server 进程，前端拿到非 200
+        // 时保持上一次成功渲染的内容不变（app.js 的轮询循环自己处理这一层降级）。
+        console.error("[conductor-work-ui] /api/runs failed:", error);
+        response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ source: "error", rows: [], error: "runs unavailable" }));
       }
       return;
     }

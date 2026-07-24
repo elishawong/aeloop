@@ -107,3 +107,98 @@ refresh.onclick = () => {
 };
 
 loadState();
+
+// ---------------------------------------------------------------------------
+// issue #2 batch 1 — 多 workflow 总览看板（docs/conductor-mvp/DESIGN.md §3）。
+// 轮询 GET /api/runs（2-3s，DESIGN §3.4 方案 A：轮询而非 WebSocket/SSE）。这段代码和上面的
+// /api/state 单 run fixture 渲染逻辑完全独立，互不干扰——batch 1 明确不改动上面那段既有代码。
+// ---------------------------------------------------------------------------
+
+const BOARD_POLL_INTERVAL_MS = 2500;
+
+function phaseBadgeClass(phase) {
+  if (phase === "completed" || phase === "completed_no_change") return "verified";
+  if (phase === "cancelled" || phase === "escalated") return "unproven";
+  if (phase === "unknown") return "unproven";
+  return "";
+}
+
+/**
+ * 渲染一次成功拉取到的看板数据——只在真的有新数据时调用（`loadBoard()` 的成功分支）。
+ * Zorro R1 yellow②修复：拉取失败时**不调用这个函数**（见下方 `loadBoard()`），避免"文案说保留
+ * 上次、代码却把表清空"这种文案和行为不一致的情况——真正做到"失败就保留上一次成功渲染的内容"，
+ * 不是靠一句话承诺。
+ */
+function renderBoard(board) {
+  const pill = document.getElementById("board-source-pill");
+  const rowsEl = document.getElementById("board-rows");
+  const messageEl = document.getElementById("board-message");
+
+  pill.style.background = "";
+  if (board.source === "live") {
+    pill.textContent = "LIVE";
+    pill.className = "pill";
+  } else {
+    pill.textContent = "NO DATA";
+    pill.className = "pill blue";
+  }
+
+  messageEl.textContent = board.message ?? (board.rows.length === 0 && board.source === "live" ? "当前没有 running/escalated 状态的 workflow。" : "");
+
+  if (board.rows.length === 0) {
+    rowsEl.innerHTML = "";
+    return;
+  }
+
+  rowsEl.innerHTML = board.rows
+    .map(
+      (row) => `
+      <tr>
+        <td><code>#${row.runId}</code></td>
+        <td class="${phaseBadgeClass(row.phase)}">${escapeHtml(row.phaseLabel)}</td>
+        <td>${row.loopCount}</td>
+        <td>${row.coderRoundCompleted ? "✓" : "—"}</td>
+        <td>${escapeHtml(row.task)}</td>
+        <td><time>${escapeHtml(row.updatedAt)}</time></td>
+      </tr>`,
+    )
+    .join("");
+}
+
+/**
+ * 拉取失败时调用——只更新错误提示条，**不碰 `#board-rows` 这个表格 DOM**（不清空、不重渲染），
+ * 这样"保留上一次成功渲染的内容"这句话是代码行为本身保证的，不是靠一个从没被真正兑现的承诺
+ * 文案（Zorro R1 yellow②）。
+ */
+function renderBoardFetchError(message) {
+  const pill = document.getElementById("board-source-pill");
+  const messageEl = document.getElementById("board-message");
+  pill.textContent = "ERROR";
+  pill.className = "pill";
+  pill.style.background = "var(--red)";
+  messageEl.textContent = message;
+}
+
+// `row.task`/`row.phaseLabel` 最终来自 TaskContract.objective / 一个固定的枚举标签集合（server.mjs
+// 的 phaseLabelFor()），不是任意用户输入——但 objective 文本理论上可以包含任何字符（意图文本经
+// translateIntent() 原样拼接），插进 innerHTML 前统一转义，不假设"这来源可信所以不用转义"。
+function escapeHtml(value) {
+  const div = document.createElement("div");
+  div.textContent = String(value ?? "");
+  return div.innerHTML;
+}
+
+async function loadBoard() {
+  try {
+    const response = await fetch("/api/runs");
+    if (!response.ok) throw new Error(`status ${response.status}`);
+    const board = await response.json();
+    renderBoard(board);
+  } catch (error) {
+    console.warn("Conductor Work UI: /api/runs fetch failed.", error);
+    renderBoardFetchError("看板拉取失败（网络/服务端异常），下方列表保留上一次成功渲染的内容。");
+  }
+}
+
+loadBoard();
+setInterval(loadBoard, BOARD_POLL_INTERVAL_MS);
