@@ -716,3 +716,99 @@ describe("AuditStore — runInTransaction rollback", () => {
     }
   });
 });
+
+/**
+ * `opts.readonly` constructor mode (issue #2 batch 1, Zorro R1 blocker B2 — `conductor-work/ui/
+ * server.mjs`'s board endpoint needed a *physically* read-only way to open an existing
+ * `workflow.db`; the default constructor requests read-write and unconditionally runs
+ * `createSchema()`'s DDL even against an already-schema'd file). Zorro R2 yellow③: this was only
+ * verified with a one-off manual script during build, not as a persisted automated test — added
+ * here so the guarantee has real, repeatable test coverage, not just a build-time transcript.
+ */
+describe("AuditStore — opts.readonly constructor mode", () => {
+  it("reads succeed against an existing file written by a read-write instance", () => {
+    const rw = openStore();
+    const now = "2026-07-24T00:00:00.000Z";
+    rw.insertRun({
+      task: "readonly mode fixture",
+      workflowDefId: "coder-tester-loop",
+      profile: "subscription",
+      status: "running",
+      rejectCount: 0,
+      rejectThreshold: 2,
+      currentState: "draft",
+      langgraphThreadId: "thread-readonly-fixture",
+    }, now);
+    rw.close();
+
+    const ro = new AuditStore(dbPath, { readonly: true });
+    try {
+      const runs = ro.listRunsByStatus("running");
+      expect(runs).toHaveLength(1);
+      expect(runs[0]!.task).toBe("readonly mode fixture");
+    } finally {
+      ro.close();
+    }
+    // `afterEach` calls `store?.close()` on the module-level `store` variable, which `openStore()`
+    // already reassigned away from `rw` — `ro` above is closed explicitly in this test's own
+    // `finally`, so nothing double-closes.
+  });
+
+  it("write attempts on a readonly instance throw (SQLITE_READONLY), never silently succeed", () => {
+    openStore().close(); // create the file with a real schema, then close the read-write handle.
+    const ro = new AuditStore(dbPath, { readonly: true });
+    try {
+      expect(() =>
+        ro.insertRun({
+          task: "should never be written",
+          workflowDefId: "coder-tester-loop",
+          profile: "subscription",
+          status: "running",
+          rejectCount: 0,
+          rejectThreshold: 2,
+          currentState: "draft",
+          langgraphThreadId: "thread-should-fail",
+        }),
+      ).toThrow(/readonly/i);
+    } finally {
+      ro.close();
+    }
+  });
+
+  it("does not modify the file's mtime — opening readonly is physically a no-op on disk", () => {
+    openStore().close();
+    const mtimeBefore = fs.statSync(dbPath).mtimeMs;
+
+    const ro = new AuditStore(dbPath, { readonly: true });
+    ro.listRunsByStatus("running"); // a real read, not a no-op call
+    ro.close();
+
+    const mtimeAfter = fs.statSync(dbPath).mtimeMs;
+    expect(mtimeAfter).toBe(mtimeBefore);
+  });
+
+  it("throws rather than silently creating an empty db when the file does not exist (fileMustExist:true)", () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aeloop-audit-store-readonly-missing-"));
+    const missingPath = path.join(tmpDir, "does-not-exist.sqlite");
+
+    expect(() => new AuditStore(missingPath, { readonly: true })).toThrow();
+    expect(fs.existsSync(missingPath)).toBe(false);
+  });
+
+  it("omitting opts entirely still opens read-write and creates schema (existing default behavior, unchanged)", () => {
+    // This is the "behaviorally equivalent to before this parameter existed" guarantee referenced
+    // in docs/conductor-mvp/PRD.md — not asserted there, asserted here.
+    const rw = openStore();
+    const run = rw.insertRun({
+      task: "default constructor still read-write",
+      workflowDefId: "coder-tester-loop",
+      profile: "subscription",
+      status: "running",
+      rejectCount: 0,
+      rejectThreshold: 2,
+      currentState: "draft",
+      langgraphThreadId: "thread-default-rw",
+    });
+    expect(rw.getRunById(run.id)?.task).toBe("default constructor still read-write");
+  });
+});

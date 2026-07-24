@@ -97,6 +97,34 @@ const REPO_ROOT = path.join(HERE, "..", "..");
 
 const VALID_HOOK_EVENT_NAMES = new Set(["SessionStart", "UserPromptSubmit"]);
 
+/**
+ * issue #2 batch 1 新增——"工作请求识别与派发"这条标准指令的正文，完整版本见
+ * `docs/conductor-brain-layer/BRAIN.md` §6(本节只放精简可执行版,不是逐字复述该文档)。
+ *
+ * **和 `greeting`/首次引导正文的关键区别**:那些是要模型**逐字复述/照做引导脚本**给用户看的
+ * 文本;这段是要模型**读了照做的行为指引**,不是给用户看的——三事件路径(#106)下,这段只拼进
+ * **状态 C**(正常醒来)的 `injected` 文本里,拼接时用一段清楚的分隔措辞区分"这两段角色不同",
+ * 避免模型把这段行为指引也当成开场白的一部分念给用户听。
+ *
+ * 只在状态 C(正常醒来,本文件唯一会拼接这段指令的分支)注入——状态 A/B(首次引导/空库)走的是
+ * `onboarding-greeting.mjs` 的问答式配置脚本,用户此刻还没有一个配置好的环境可以派发任务,硬塞
+ * 这段指令只会制造混乱,不注入(同 #96 既有的"不同状态注入不同内容"原则,#106 三事件分派不改变
+ * 这条三态判断本身,见文件头注释)。
+ */
+const CONDUCTOR_DISPATCH_INSTRUCTION =
+  "[brain-wake-greeting] 以下不是开场白的一部分，不要念给用户听——这是给你自己看的标准工作指令" +
+  "（issue #2 batch 1，完整版见 docs/conductor-brain-layer/BRAIN.md §6）：如果用户接下来的话明显是" +
+  "在要求你做一件具体的工作（实现一个功能、修一个 bug、跑一次调研这类有明确产出的请求，不是闲聊/" +
+  "提问/讨论想法），考虑通过 Bash 工具运行 `node scripts/dispatch-conductor-task.mjs " +
+  '"<意图文本>"`（这个命令会自动翻译成任务契约、派 coder 生成候选、独立 tester 复核、停在 G3/' +
+  "Escalation 人工批准前——G3/Escalation 恒人工，绝不会自动 commit/push/合并）。拿不准这句话是不是" +
+  "一个工作请求时，直接问用户，不要凭猜测硬派或硬不派。命令跑完后，把 stdout 的 JSON 结果原样解读" +
+  "给用户——重点讲清楚候选实际改了什么（`pendingGate.diff`/`evidence.claims`，不是只报一个数字）、" +
+  "有没有停在某个 gate 前等待批准、有没有报错，不要编造没有出现在结果里的内容，也不要暗示任务已经" +
+  "全部做完。诚实边界：candidate-only 今天只是 prompt/契约层约束，不是运行时机械强制（issue #31 " +
+  "开放风险，详见 BRAIN.md §6）——所以这条派发路径只在 aeloop 自己仓库这个沙箱内跑，你不应该建议" +
+  "用户拿它去处理其它真实业务项目的任务。";
+
 function emitAdditionalContext(text, hookEventName) {
   process.stdout.write(
     JSON.stringify({
@@ -326,7 +354,7 @@ async function main() {
     `[brain-wake-greeting] 请把下面这段开场白原样作为你对用户第一句话的` +
     `回复——逐字复述，不要改写措辞、不要新增其中没有出现过的条目、不要省略"现在在途"/"Idea Queue 积压"` +
     `/"待你决策"里列出的任何一行。若用户第一句话直接是任务指令而不是打招呼，仍先完整给出以下开场白，` +
-    `再回应任务内容：\n\n${greeting}`;
+    `再回应任务内容：\n\n${greeting}\n\n${CONDUCTOR_DISPATCH_INSTRUCTION}`;
 
   claimAndEmit({ text: injected, hookEventName, sessionId, pid, standalone });
 }

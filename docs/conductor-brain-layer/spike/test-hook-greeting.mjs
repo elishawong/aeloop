@@ -315,6 +315,10 @@ try {
       assert.ok(additionalContext8.includes("scripts/seed-brain-identity.mjs"), "未配置引导应提到 seed 脚本");
       assert.ok(additionalContext8.includes("issue #102"), "未配置引导应带 #102 troubleshooting 提示");
       assert.ok(proc8.stderr.includes("身份库未配置"), "stderr 应有可排查的诊断信息，说明走的是状态 A 引导分支");
+      // Zorro R1 yellow④（issue #2 batch 1）：状态 A（首次引导）绝不能包含工作请求派发指令——
+      // 用户此刻还没有一个配置好的环境可以派发任务，塞这条指令只会制造混乱（BRAIN.md §6 头注释
+      // 已有这条设计理由，这里是它的自动化回归）。
+      assert.ok(!additionalContext8.includes("dispatch-conductor-task.mjs"), "状态 A 不该包含派发指令（用户还没配置好环境）");
     } finally {
       rmSync(cwd8, { recursive: true, force: true });
     }
@@ -345,6 +349,8 @@ try {
       assert.ok(proc9.stderr.includes("已连上身份库"), "stderr 诊断行不能丢——只是移到 stderr，不是删掉");
       assert.ok(proc9.stderr.includes(dbPath9), "stderr 里的诊断信息应该带真实 dbPath，方便排查");
       assert.ok(proc9.stderr.includes("首次引导脚本"), "stderr 应说明走的是状态 B 引导分支，不是正常渲染路径");
+      // Zorro R1 yellow④（issue #2 batch 1）：状态 B（空库引导）同样不该包含派发指令，理由同状态 A。
+      assert.ok(!additionalContext9.includes("dispatch-conductor-task.mjs"), "状态 B 不该包含派发指令（库还是空的）");
     } finally {
       rmSync(dbDir9, { recursive: true, force: true });
     }
@@ -382,6 +388,10 @@ try {
       const additionalContext10 = JSON.parse(proc10.stdout).hookSpecificOutput.additionalContext;
       assert.ok(additionalContext10.includes("意识已加载。我是 测试身份十号。"), "只要有 1 条 memory 就必须走正常渲染路径，不能被误判成空库引导");
       assert.ok(!additionalContext10.includes("首次醒来引导") && !additionalContext10.includes("引导脚本"), "有数据时不该出现任何引导脚本措辞");
+      // Zorro R1 yellow④（issue #2 batch 1）：状态 C（正常醒来）**必须**包含派发指令——这是
+      // BRAIN.md §6/DESIGN §7.2 方案 A 真正生效的地方，也是三态里唯一注入这段指令的分支。
+      assert.ok(additionalContext10.includes("dispatch-conductor-task.mjs"), "状态 C 必须包含派发指令——这是 issue #2 batch 1 会话触发的真实生效点");
+      assert.ok(additionalContext10.includes("不要念给用户听"), "派发指令必须明确标注'不是开场白的一部分'，防止模型把它念给用户听");
     } finally {
       rmSync(dbDir10, { recursive: true, force: true });
     }
