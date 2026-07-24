@@ -19,6 +19,24 @@
 //   不是被悄悄当真报了。这正是要和 Verity 那套 markdown persistence（无 confidence gate，
 //   什么都当真报）拉开的地方。
 //
+// issue #103（在途来源可插拔，默认关，docs/enterprise-board-toggle/DESIGN.md §4）：`opts.taskSource`
+// 新增——`"github"` 时行为和今天完全一致；省略或任何非 `"github"` 的值（含 `"none"`）时，
+// `statusRows`/`otherProjects`/`unassignedCount`/`backlogItems` 强制为空、`pendingDecisions` 里的
+// 任务/idea 候选（`unconfirmedActiveTasks`/`unconfirmedIdeas`）不计算——**不是查出来再丢弃，是
+// 压根不查**（`collectStatusRows(store)` 整个不调用），纵深防御：万一渲染层某个分支漏了
+// `taskSource` 判断，数据层至少不会意外递出任何"任务看板"数据。**这打破了本文件其它可选参数
+// （如 `currentProjectKey`）"省略=行为字节级不变"的一贯惯例**——这是刻意的默认值翻转（指挥官
+// 2026-07-24 已确认：shipped 默认零 GitHub 是本需求要的行为变更，不是需要掩盖的破坏性改动），
+// 如实标注在这里，不假装它和既有惯例吻合。
+//
+// **`pendingDecisions` 拆两类，是本次改动对"待你决策"最关键的一处收口**（DESIGN §1/§4/§12①，
+// 指挥官已确认这个拆分）：`wakeResult.pendingDecisions`（identity/constraint/decision 的
+// 候选修宪，`wake.mjs` 产出，从不碰 gh，对应 `docs/conductor-brain-layer/TURNKEY-DESIGN.md` §4(iii)
+// 已定盘的"人格真正加载"通路）**不受 `taskSource` 影响，始终计算**；只有
+// `unconfirmedActiveTasks`/`unconfirmedIdeas`（任务/idea 候选，间接依赖 seed 的 gh 同步）随
+// `taskSource` 一起收窄。字面砍掉整个"待你决策"会连带废掉一条和 GitHub 毫无关系、已经拍板的机制，
+// 本文件不做这个连带动作。
+//
 // 2026-07-22 Zorro/Codex 跨模型复审补丁（blocker 2 + blocker 3，同一批修复）：
 //   - blocker 2：ConfidenceState 是三态（unconfirmed|confirmed|rejected，src/context/types.ts:33）。
 //     "候选，未确认"这个桶只应该装 unconfirmed 的——rejected 是操作者已经明确否掉的，不是"还没
@@ -117,13 +135,17 @@ function summarizeOtherProject(projectKey, rows) {
 
 /**
  * @param {import("../../../../dist/context/store.js").MemoryStore} store
- * @param {{ queryHint?: string, currentProjectKey?: string|null }} [opts] `currentProjectKey`
- *   （issue #93 B4 新增，`owner/repo` 形式，通常由 `brain-wake-greeting.mjs` 从 SessionStart
- *   stdin 的 `cwd` 反查 `getOriginOwnerRepo()` 算出）——**省略或传 `null`/`undefined` 时行为
- *   字节级不变**（今天所有既有调用点都是这样调的）：`statusRows` 仍是全部 confirmed
- *   active_task（不分组），`otherProjects` 恒为 `[]`，`unassignedCount` 恒为 `0`——这是刻意的
- *   向后兼容设计，不是"忘了处理未知项目"的疏漏；只有传入非空 `currentProjectKey` 才会真的按
- *   `project:*` tag 分组渲染（DESIGN §1.3/PRD §4.5）。
+ * @param {{ queryHint?: string, currentProjectKey?: string|null, taskSource?: "none"|"github" }} [opts]
+ *   `currentProjectKey`（issue #93 B4 新增，`owner/repo` 形式，通常由 `brain-wake-greeting.mjs`
+ *   从 SessionStart stdin 的 `cwd` 反查 `getOriginOwnerRepo()` 算出）——**省略或传 `null`/
+ *   `undefined` 时行为字节级不变**（今天所有既有调用点都是这样调的）：`statusRows` 仍是全部
+ *   confirmed active_task（不分组），`otherProjects` 恒为 `[]`，`unassignedCount` 恒为 `0`——
+ *   这是刻意的向后兼容设计，不是"忘了处理未知项目"的疏漏；只有传入非空 `currentProjectKey` 才会
+ *   真的按 `project:*` tag 分组渲染（DESIGN §1.3/PRD §4.5）。`taskSource`（issue #103 新增）——
+ *   **`"github"` 时行为和加这个参数之前逐字节相同；省略/`undefined`/任何其它值时默认按 `"none"`
+ *   处理**（`statusRows`/`otherProjects`/`unassignedCount`/`backlogItems` 强制为空，
+ *   `pendingDecisions` 只保留身份/宪法候选），这是本次改动刻意翻转的默认值，不是向后兼容——
+ *   见本文件头注释 + `docs/enterprise-board-toggle/DESIGN.md` §4/§11。
  * @returns {{
  *   identityName: string,
  *   lastStop: string,
@@ -134,11 +156,19 @@ function summarizeOtherProject(projectKey, rows) {
  *   pendingDecisions: Array<{ label: string }>,
  *   followUp: string,
  *   openingSummary: string,
+ *   taskSource: "none"|"github",
  * }}
  */
 export function gatherGreetingData(store, opts = {}) {
   const wakeResult = wake(store, opts.queryHint);
   const all = store.listMemories();
+
+  // issue #103：归一化成两值枚举——只有精确等于 "github" 才算板块开启，任何其它值（含
+  // undefined/"none"/拼错的值）一律当 "none" 处理。fail-closed，和 task-source.mjs 的
+  // resolveTaskSource() 同一条红线，这里是第二道纵深防御（调用方即便没走 resolveTaskSource()
+  // 也不会意外开启板块）。
+  const taskSource = opts.taskSource === "github" ? "github" : "none";
+  const boardEnabled = taskSource === "github";
 
   // ---- 身份名：identity 类型 + 固定 title 约定 + 必须 confirmed ----
   const identityMemory = all.find(
@@ -150,7 +180,10 @@ export function gatherGreetingData(store, opts = {}) {
   const identityName = identityMemory ? identityMemory.content : DEFAULT_IDENTITY_NAME;
 
   // ---- 现在在途：复用 status-table.mjs，两个消费方同一份实现 ----
-  const allStatusRows = collectStatusRows(store);
+  // issue #103：taskSource !== "github" 时压根不查（不是查出来再丢弃）——下面 currentProjectKey
+  // 分组逻辑基于 allStatusRows 计算，allStatusRows 为空时 statusRows/otherProjects/
+  // unassignedCount 自然全部收窄为空，不需要在每个分支各自重复判断 boardEnabled。
+  const allStatusRows = boardEnabled ? collectStatusRows(store) : [];
   const currentProjectKey = opts.currentProjectKey ?? null;
 
   /** @type {ReturnType<typeof collectStatusRows>} */
@@ -199,20 +232,27 @@ export function gatherGreetingData(store, opts = {}) {
       : "当前没有可回溯的断点。";
 
   // ---- Idea Queue 积压：idea 类型，confirmed，未打 "done" tag ----
-  const backlogItems = all
-    .filter(
-      (memory) => memory.type === "idea" && memory.confidenceState === "confirmed" && !memory.tags.includes("done"),
-    )
-    .sort(byRecencyDesc);
+  // issue #103：同 statusRows，taskSource !== "github" 时压根不查，不是查出来再丢弃。
+  const backlogItems = boardEnabled
+    ? all
+        .filter(
+          (memory) => memory.type === "idea" && memory.confidenceState === "confirmed" && !memory.tags.includes("done"),
+        )
+        .sort(byRecencyDesc)
+    : [];
 
-  // ---- 待你决策：wake() 的 pendingDecisions（identity/constraint/decision 里未确认的）
-  //      ∪ unconfirmed 的 active_task/idea 候选（不能进"现在在途"/"Idea Queue"当既定事实，
-  //      只能在这里露面，标明是"候选，未确认"）。显式只筛 "unconfirmed"——rejected 彻底
-  //      排除在外（blocker 2：rejected 是已经否掉的，不是待确认候选）。 ----
-  const unconfirmedActiveTasks = all.filter(
-    (memory) => memory.type === "active_task" && memory.confidenceState === "unconfirmed",
-  );
-  const unconfirmedIdeas = all.filter((memory) => memory.type === "idea" && memory.confidenceState === "unconfirmed");
+  // ---- 待你决策：wake() 的 pendingDecisions（identity/constraint/decision 里未确认的，从不碰
+  //      gh，**不受 taskSource 影响，始终计算**——见本文件头注释"拆两类"）∪ unconfirmed 的
+  //      active_task/idea 候选（不能进"现在在途"/"Idea Queue"当既定事实，只能在这里露面，标明
+  //      是"候选，未确认"；这部分随 taskSource 一起收窄，taskSource !== "github" 时不计算）。
+  //      显式只筛 "unconfirmed"——rejected 彻底排除在外（blocker 2：rejected 是已经否掉的，
+  //      不是待确认候选）。 ----
+  const unconfirmedActiveTasks = boardEnabled
+    ? all.filter((memory) => memory.type === "active_task" && memory.confidenceState === "unconfirmed")
+    : [];
+  const unconfirmedIdeas = boardEnabled
+    ? all.filter((memory) => memory.type === "idea" && memory.confidenceState === "unconfirmed")
+    : [];
 
   const pendingDecisions = [
     ...wakeResult.pendingDecisions.map((memory) => ({
@@ -240,5 +280,6 @@ export function gatherGreetingData(store, opts = {}) {
     pendingDecisions,
     followUp,
     openingSummary: wakeResult.openingSummary,
+    taskSource,
   };
 }

@@ -1,29 +1,41 @@
 #!/usr/bin/env node
 /**
- * seed-brain-identity.mjs — 一键 seed 脚本（issue #88 B8）。
+ * seed-brain-identity.mjs — 一键 seed 脚本（issue #88 B8；issue #103 起，第 3 类种子数据默认关）。
  *
- * 把去品牌化公司宪法（身份/铁律）+ 当前真实 GitHub issue 在途状态，种进 aeloop 身份
- * `MemoryStore`——目的是让开箱后 `.claude/hooks/brain-wake-greeting.mjs` 的醒来开场白能读出
- * 真身份（"我是你的 AI 调度员"）+ 真在途，而不是"(身份名未在身份库配置)"+ 空表这种 generic
- * 状态（DESIGN 权威：`docs/conductor-brain-layer/TURNKEY-DESIGN.md` §3.c；铁律内容对齐
+ * 把去品牌化公司宪法（身份/铁律）+（可选 opt-in）当前真实 GitHub issue 在途状态，种进 aeloop
+ * 身份 `MemoryStore`——目的是让开箱后 `.claude/hooks/brain-wake-greeting.mjs` 的醒来开场白能读出
+ * 真身份（"我是你的 AI 调度员"），而不是"(身份名未在身份库配置)"这种 generic 状态（DESIGN 权威：
+ * `docs/conductor-brain-layer/TURNKEY-DESIGN.md` §3.c；铁律内容对齐
  * `docs/conductor-brain-layer/BRAIN.md` §1.6）。
  *
- * ── 三类种子数据 ──────────────────────────────────────────────────────────────
+ * ── 三类种子数据（第 3 类默认不跑，见下方"issue #103：在途任务来源 gate"） ──────────────
  *   1. **身份**：`type:"identity", title:"identity:name"` 一条，内容 = "你的 AI 调度员"
  *      （issue #88 body 定盘的自我介绍角色化身份，不用人名）。
  *   2. **宪法约束**：`CONSTITUTION_CONSTRAINTS`（下方常量数组）——`type:"constraint"`，每条
  *      `title:"constraint:<slug>"`，`tags:["hardness:hard"|"hardness:soft"]`，逐条誊写自
  *      `BRAIN.md` §1.6 的七条铁律（4 条 🔒 + 3 条 👁，2026-07-23 operator 拍板新增"成本
  *      透明"一条 👁，见下方数组第 7 条）。
- *   3. **在途任务**：从 `gh issue list`（真实调用或注入的 stub）读出的每个 issue，映射成
- *      `type:"active_task"`，见下方"issue → active_task 映射"整段。
+ *   3. **在途任务**（仅 `AELOOP_BRAIN_TASK_SOURCE=github` 时才会跑）：从 `gh issue list`
+ *      （真实调用或注入的 stub）读出的每个 issue，映射成 `type:"active_task"`，见下方
+ *      "issue → active_task 映射"整段。shipped 默认（未 opt-in）这一步整个跳过，不反查 owner/
+ *      repo、不检查项目注册、不调 `gh` 二进制。
  *
  * ⚠️ **CONSTITUTION_CONSTRAINTS 和 `BRAIN.md` §1.6 是同一份铁律的两份独立表示，会漂移**
  * （`TURNKEY-DESIGN.md` §3.c 已经标注过这个代价，不是本文件新引入的问题）：`BRAIN.md` 改了
  * 铁律，这个数组不会自动跟着改，需要人工同步。不做自动解析 `BRAIN.md` 生成这个数组（Phase1
  * 不做 Markdown 解析器，成本不对，`TURNKEY-DESIGN.md` §3.c 已经拍板）。
  *
- * ── issue → active_task 映射 ────────────────────────────────────────────────
+ * ── issue #103：在途任务来源 gate（seed 解耦 gh） ───────────────────────────────
+ * `main()` 的"3. 在途 issue"这一整步现在挂在 `resolveTaskSource()`（`.claude/hooks/lib/
+ * task-source.mjs`）后面——`taskSource !== "github"`（shipped 默认 "none"）时**整个途③物理
+ * 跳过**：不反查 origin owner/repo、不检查目标项目是否已注册、不调 `gh` 二进制。不是只包一层
+ * try/catch 容忍 gh 调用失败（那是 #96 已经做过的更窄修复）——这次连"为了将来调 gh 而做的前置
+ * 检查"也不做，见 `docs/enterprise-board-toggle/DESIGN.md` §6。字段 `skippedTaskSync`
+ * （此前叫 `skippedIssueSync`，issue #103 改名——"issue"是 GitHub 特定词汇，渗进了本该通用的
+ * 字段名，值域现在不只是"gh 相关跳过原因"）在两种情况下都会被设置：taskSource 未 opt-in（本条）
+ * 和 taskSource=github 但反查/调用失败（下方既有逻辑，改名未改行为）。
+ *
+ * ── issue → active_task 映射（只在 taskSource==="github" 时会被用到） ──────────────
  *   - **issue 已关闭（`state === "CLOSED"`）** → `tags: ["status:done", "archived", "gh-issue:<n>"]`
  *     ——`archived` tag 是 `status-table.mjs`（`collectStatusRows`）已有的既定约定："打
  *     archived tag 的 active_task 完全不出现在'现在在途'表里"，本文件不新发明这条约定，只是
@@ -64,8 +76,10 @@
  *
  * 跑法：
  *   `node scripts/seed-brain-identity.mjs`（需要 `AELOOP_BRAIN_IDENTITY_DB` 或
- *   `.claude/brain.local.json` 已配置——见 `.claude/hooks/lib/db-path.mjs`；需要 `gh` 已登录、
- *   在 aeloop 仓库内跑，且先 `pnpm run build` 生成 `dist/`）。
+ *   `.claude/brain.local.json` 已配置——见 `.claude/hooks/lib/db-path.mjs`；在 aeloop 仓库内跑，
+ *   且先 `pnpm run build` 生成 `dist/`）。shipped 默认不需要 `gh`；想接回 GitHub issue 同步，
+ *   加 `AELOOP_BRAIN_TASK_SOURCE=github` 前缀（这时才需要 `gh` 已登录），见
+ *   `.claude/hooks/lib/task-source.mjs` + `docs/enterprise-board-toggle/DESIGN.md`。
  */
 
 import { execFileSync } from "node:child_process";
@@ -73,6 +87,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { upsertMemory } from "../.claude/hooks/lib/memory-upsert.mjs";
 import { assertProjectRegistered, projectTagFor } from "../.claude/hooks/lib/project-registry.mjs";
+import { resolveTaskSource } from "../.claude/hooks/lib/task-source.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(HERE, "..");
@@ -217,11 +232,15 @@ async function defaultFetchOpenIssues({ owner, repo }) {
 // ── main ──────────────────────────────────────────────────────────────────
 
 /**
- * @param {{fetchOpenIssues?: typeof defaultFetchOpenIssues, cwd?: string}} [opts]
- * @returns {Promise<{identity: object, constraints: object[], issues: object[], skippedIssueSync?: string}>}
+ * @param {{fetchOpenIssues?: typeof defaultFetchOpenIssues, cwd?: string, taskSource?: "none"|"github"}} [opts]
+ *   `taskSource` 省略时走 `resolveTaskSource({ cwd })`（真实 env/`.claude/brain.local.json` 解析，
+ *   issue #103）；测试可以直接注入具体值，不依赖真实环境变量/文件系统，同 `fetchOpenIssues` 的
+ *   既有注入模式。
+ * @returns {Promise<{identity: object, constraints: object[], issues: object[], skippedTaskSync?: string}>}
  */
 export async function main(opts = {}) {
   const { fetchOpenIssues = defaultFetchOpenIssues, cwd = REPO_ROOT } = opts;
+  const taskSource = opts.taskSource ?? resolveTaskSource({ cwd });
 
   const { resolveIdentityDbPath } = await import(path.join(REPO_ROOT, ".claude", "hooks", "lib", "db-path.mjs"));
   const dbPath = resolveIdentityDbPath({ cwd });
@@ -274,55 +293,63 @@ export async function main(opts = {}) {
       result.constraints.push({ slug: constraint.slug, title, ...outcome });
     }
 
-    // 3. 在途 issue（owner/repo 判不出时明确跳过，不静默假装同步过）。
-    const { getOriginOwnerRepo } = await import(path.join(REPO_ROOT, ".claude", "hooks", "lib", "git-remote.mjs"));
-    const origin = getOriginOwnerRepo(cwd);
-    if (!origin.ok) {
-      result.skippedIssueSync = "无法从 cwd 判定 owner/repo（非 git 目录 / 无 origin remote），跳过 issue 同步。";
+    // 3. 在途任务来源（issue #103：taskSource !== "github" 时整个途③物理跳过——不反查
+    //    owner/repo、不检查项目注册、不调 gh，见文件头注释"issue #103：在途任务来源 gate"）。
+    if (taskSource !== "github") {
+      result.skippedTaskSync =
+        '未配置在途任务来源（AELOOP_BRAIN_TASK_SOURCE 未设为 "github"），按设计跳过——' +
+        "身份 + 宪法约束已正常写入，不受影响。";
     } else {
-      const projectTag = projectTagFor(origin.owner, origin.repo);
+      // owner/repo 判不出时明确跳过，不静默假装同步过。
+      const { getOriginOwnerRepo } = await import(path.join(REPO_ROOT, ".claude", "hooks", "lib", "git-remote.mjs"));
+      const origin = getOriginOwnerRepo(cwd);
+      if (!origin.ok) {
+        result.skippedTaskSync = "无法从 cwd 判定 owner/repo（非 git 目录 / 无 origin remote），跳过 issue 同步。";
+      } else {
+        const projectTag = projectTagFor(origin.owner, origin.repo);
 
-      // issue #93 B3：目标项目必须先被 `scripts/onboard-project.mjs` 注册（存在对应
-      // `project_registry` 记录），否则明确报错、不进入 issue 同步循环——不静默写入孤儿
-      // `project:*` tag（PRD §4.4）。注意：这条检查只挡住途③的 issue 同步，不影响途①②已经
-      // 写完的身份/宪法约束（PRD §4.4 明确"在这一步 return/throw，不进入 issue 同步循环"）。
-      // 判据本身抽到 `.claude/hooks/lib/project-registry.mjs`（issue #93 B5 顺手抽出，供
-      // `scripts/dispatch-brain-task.mjs` 复用同一份，不各写一份，PRD §4.6 已定的共享方式）。
-      assertProjectRegistered(store, origin.owner, origin.repo);
+        // issue #93 B3：目标项目必须先被 `scripts/onboard-project.mjs` 注册（存在对应
+        // `project_registry` 记录），否则明确报错、不进入 issue 同步循环——不静默写入孤儿
+        // `project:*` tag（PRD §4.4）。注意：这条检查只挡住途③的 issue 同步，不影响途①②已经
+        // 写完的身份/宪法约束（PRD §4.4 明确"在这一步 return/throw，不进入 issue 同步循环"）。
+        // 判据本身抽到 `.claude/hooks/lib/project-registry.mjs`（issue #93 B5 顺手抽出，供
+        // `scripts/dispatch-brain-task.mjs` 复用同一份，不各写一份，PRD §4.6 已定的共享方式）。
+        assertProjectRegistered(store, origin.owner, origin.repo);
 
-      // issue #96（Zorro/Codex 跨模型二签 2026-07-23 FAIL 后补齐，🟡 项1）：`fetchOpenIssues()`
-      // 调用点此前没有任何错误处理——`gh` CLI 缺失（ENOENT）/未登录/网络失败等，会让整个
-      // `main()` 抛错冒泡到顶层 `.catch()`，进程以非零 exit code 中止。真实后果比看起来更糟：
-      // 途①②（身份+宪法约束）此时已经写进 store 了，只是途③（issue 同步）失败——一个"部分
-      // 成功但报错退出"的状态，容易被误读成"整个 seed 都没生效"。改成优雅降级：只包这一个调用
-      // 点（不改 `assertProjectRegistered()` 等其它任何错误路径的语义——项目未注册仍然是真实
-      // 应该中止的错误，继续抛错，这是本次改动明确限定的范围），失败时记 `skippedIssueSync`、
-      // `issues` 退化成空数组，`main()` 正常返回、进程 exit 0——身份/宪法已经种下这个事实不该
-      // 被一个和它无关的 issue 同步失败连累成"看起来整体失败了"。
-      let issues;
-      try {
-        issues = await fetchOpenIssues({ owner: origin.owner, repo: origin.repo });
-      } catch (err) {
-        result.skippedIssueSync =
-          `gh CLI 不可用（未安装/未登录/调用失败），已跳过 issue 在途同步——身份 + 宪法约束已正常` +
-          `写入，不受影响。原始错误：${err?.message ?? String(err)}`;
-        issues = [];
-      }
-      for (const issue of issues) {
-        const tags = resolveActiveTaskTags(issue, projectTag);
-        const outcome = upsertMemory(
-          store,
-          {
-            type: "active_task",
-            title: issue.title,
-            content: `#${issue.number}`,
-            tags,
-            confidenceState: "confirmed",
-            matchTag: `gh-issue:${issue.number}`, // 按稳定的 issue 号匹配，不按会变的标题（见 memory-upsert.mjs 头注释）
-          },
-          { actor: "seed-brain-identity" },
-        );
-        result.issues.push({ number: issue.number, tags, ...outcome });
+        // issue #96（Zorro/Codex 跨模型二签 2026-07-23 FAIL 后补齐，🟡 项1）：`fetchOpenIssues()`
+        // 调用点此前没有任何错误处理——`gh` CLI 缺失（ENOENT）/未登录/网络失败等，会让整个
+        // `main()` 抛错冒泡到顶层 `.catch()`，进程以非零 exit code 中止。真实后果比看起来更糟：
+        // 途①②（身份+宪法约束）此时已经写进 store 了，只是途③（issue 同步）失败——一个"部分
+        // 成功但报错退出"的状态，容易被误读成"整个 seed 都没生效"。改成优雅降级：只包这一个调用
+        // 点（不改 `assertProjectRegistered()` 等其它任何错误路径的语义——项目未注册仍然是真实
+        // 应该中止的错误，继续抛错，这是本次改动明确限定的范围），失败时记 `skippedTaskSync`、
+        // `issues` 退化成空数组，`main()` 正常返回、进程 exit 0——身份/宪法已经种下这个事实不该
+        // 被一个和它无关的 issue 同步失败连累成"看起来整体失败了"。
+        let issues;
+        try {
+          issues = await fetchOpenIssues({ owner: origin.owner, repo: origin.repo });
+        } catch (err) {
+          result.skippedTaskSync =
+            `gh CLI 不可用（未安装/未登录/调用失败），已跳过 issue 在途同步——身份 + 宪法约束已正常` +
+            `写入，不受影响。原始错误：${err?.message ?? String(err)}`;
+          issues = [];
+        }
+        for (const issue of issues) {
+          const tags = resolveActiveTaskTags(issue, projectTag);
+          const outcome = upsertMemory(
+            store,
+            {
+              type: "active_task",
+              title: issue.title,
+              content: `#${issue.number}`,
+              tags,
+              confidenceState: "confirmed",
+              matchTag: `gh-issue:${issue.number}`, // 按稳定的 issue 号匹配，不按会变的标题（见 memory-upsert.mjs 头注释）
+            },
+            { actor: "seed-brain-identity" },
+          );
+          result.issues.push({ number: issue.number, tags, ...outcome });
+        }
       }
     }
   } finally {
@@ -342,10 +369,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       };
       console.log("[seed-brain-identity] 身份：", result.identity.action);
       console.log("[seed-brain-identity] 宪法约束：", summarize(result.constraints), `（共 ${result.constraints.length} 条）`);
-      if (result.skippedIssueSync) {
-        console.log(`[seed-brain-identity] issue 同步已跳过：${result.skippedIssueSync}`);
+      if (result.skippedTaskSync) {
+        console.log(`[seed-brain-identity] 在途任务同步已跳过：${result.skippedTaskSync}`);
       } else {
-        console.log("[seed-brain-identity] issue 在途：", summarize(result.issues), `（共 ${result.issues.length} 条）`);
+        console.log("[seed-brain-identity] 在途任务：", summarize(result.issues), `（共 ${result.issues.length} 条）`);
       }
     })
     .catch((err) => {

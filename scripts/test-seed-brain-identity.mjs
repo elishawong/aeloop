@@ -81,7 +81,7 @@ try {
   //     （身份/宪法约束仍正常写入，不受影响——见 PRD §4.4"这条检查只挡 issue 同步"）。
   {
     await assert.rejects(
-      () => main({ cwd: TEST_REPO, fetchOpenIssues: async () => stubIssues() }),
+      () => main({ cwd: TEST_REPO, fetchOpenIssues: async () => stubIssues(), taskSource: "github" }),
       (err) => {
         assert.equal(err.code, "PROJECT_NOT_ONBOARDED");
         assert.match(err.message, /尚未注册/);
@@ -125,7 +125,7 @@ try {
   // ── ② 首次运行（已注册）：身份 + 全部宪法约束 + 全部 5 种 status 映射 + closed→archived
   //     + 每条 active_task 都带正确的 project:<owner>/<repo> tag ──────────────────
   {
-    const result = await main({ cwd: TEST_REPO, fetchOpenIssues: async () => stubIssues() });
+    const result = await main({ cwd: TEST_REPO, fetchOpenIssues: async () => stubIssues(), taskSource: "github" });
 
     assert.equal(result.identity.action, "unchanged", "身份在②a 已经写过，这里应 unchanged");
     assert.ok(
@@ -133,7 +133,7 @@ try {
       "宪法约束在②a 已经写过，这里应 unchanged",
     );
     assert.equal(result.issues.length, 6, "应处理全部 6 条 stub issue");
-    assert.ok(!result.skippedIssueSync, "有合法 origin 时不该跳过 issue 同步");
+    assert.ok(!result.skippedTaskSync, "有合法 origin 时不该跳过 issue 同步");
 
     const all = readAll();
 
@@ -169,7 +169,7 @@ try {
       .map((m) => ({ id: m.id, type: m.type, title: m.title, content: m.content, tags: [...m.tags].sort(), updatedAt: m.updatedAt }))
       .sort((a, b) => a.id - b.id);
 
-    const result = await main({ cwd: TEST_REPO, fetchOpenIssues: async () => stubIssues() });
+    const result = await main({ cwd: TEST_REPO, fetchOpenIssues: async () => stubIssues(), taskSource: "github" });
 
     assert.equal(result.identity.action, "unchanged", "二次运行身份应 unchanged");
     assert.ok(
@@ -195,7 +195,7 @@ try {
     const renamed = stubIssues();
     renamed[0] = { ...renamed[0], title: "issue in-progress（改过标题）" }; // #10 标题变了，号不变
 
-    const result = await main({ cwd: TEST_REPO, fetchOpenIssues: async () => renamed });
+    const result = await main({ cwd: TEST_REPO, fetchOpenIssues: async () => renamed, taskSource: "github" });
     const outcome10 = result.issues.find((i) => i.number === 10);
     assert.equal(outcome10.action, "replaced", "title 变化需要删除重建（title 也没有对应的 update 方法）");
 
@@ -214,7 +214,7 @@ try {
     const nowClosed = stubIssues();
     nowClosed[0] = { ...nowClosed[0], state: "CLOSED" }; // #10 关闭了
 
-    const result = await main({ cwd: TEST_REPO, fetchOpenIssues: async () => nowClosed });
+    const result = await main({ cwd: TEST_REPO, fetchOpenIssues: async () => nowClosed, taskSource: "github" });
     const outcome10 = result.issues.find((i) => i.number === 10);
     assert.equal(outcome10.action, "replaced", "状态变化（tags 变化）应触发 replaced");
 
@@ -245,7 +245,7 @@ try {
     assert.ok(tags2.includes("status:pending-decision"), "status:awaiting-commander 优先级最高，应命中它而不是 in-progress");
   }
 
-  // ── ⑦ 无 origin remote（非 git 目录或无 origin）→ skippedIssueSync，不假装同步过，
+  // ── ⑦ 无 origin remote（非 git 目录或无 origin）→ skippedTaskSync，不假装同步过，
   //     且 fetchOpenIssues 根本不该被调用（不该浪费一次不会被用到的调用） ────────────
   {
     const bareDir = mkdtempSync(join(tmpdir(), "brain-test-seed-bare-"));
@@ -257,8 +257,9 @@ try {
         fetchCalled = true;
         return [];
       },
+      taskSource: "github",
     });
-    assert.ok(result.skippedIssueSync, "无 origin remote 时应设置 skippedIssueSync，不假装同步过");
+    assert.ok(result.skippedTaskSync, "无 origin remote 时应设置 skippedTaskSync，不假装同步过");
     assert.equal(fetchCalled, false, "无 origin remote 时不该调用 fetchOpenIssues");
     rmSync(bareDir, { recursive: true, force: true });
   }
@@ -266,7 +267,7 @@ try {
   // ── ⑧（issue #96，Zorro/Codex 跨模型二签 2026-07-23 FAIL 后补齐，🟡 项1）：`gh` CLI 不可用
   //     （缺失/未登录/调用失败）时，`fetchOpenIssues()` 抛错——此前会让整个 main() 拒绝、进程以
   //     非零 exit code 中止（哪怕身份+宪法约束途①②已经写完）。现在应该优雅降级：main() 正常
-  //     resolve，`skippedIssueSync` 记下原因，`issues` 退化成空数组，不影响已经写完的身份/
+  //     resolve，`skippedTaskSync` 记下原因，`issues` 退化成空数组，不影响已经写完的身份/
   //     宪法约束 ────────────────────────────────────────────────────────────────
   {
     const simulatedGhError = new Error("spawnSync gh ENOENT"); // 真实 gh 缺失时 execFileSync 抛的错误形状
@@ -277,11 +278,12 @@ try {
       fetchOpenIssues: async () => {
         throw simulatedGhError;
       },
+      taskSource: "github",
     });
 
-    assert.ok(result.skippedIssueSync, "gh 调用失败时应设置 skippedIssueSync，不该让 main() 整体拒绝");
-    assert.match(result.skippedIssueSync, /gh CLI 不可用/, "skippedIssueSync 措辞应说明是 gh 不可用，不是别的原因");
-    assert.match(result.skippedIssueSync, /ENOENT/, "skippedIssueSync 应带上原始错误信息，方便排查");
+    assert.ok(result.skippedTaskSync, "gh 调用失败时应设置 skippedTaskSync，不该让 main() 整体拒绝");
+    assert.match(result.skippedTaskSync, /gh CLI 不可用/, "skippedTaskSync 措辞应说明是 gh 不可用，不是别的原因");
+    assert.match(result.skippedTaskSync, /ENOENT/, "skippedTaskSync 应带上原始错误信息，方便排查");
     assert.deepEqual(result.issues, [], "gh 调用失败时 issues 应退化成空数组，不是抛出未捕获异常");
     assert.equal(result.identity.action, "unchanged", "gh 失败不该影响已经写完的身份记录");
     assert.ok(
@@ -300,7 +302,59 @@ try {
     );
   }
 
-  console.log("PASS: test-seed-brain-identity.mjs (issue #88 B8 — 幂等 upsert + 5种status映射 + closed→archived + 无DB路径报错 + 改标题不产生孤儿 + 多label优先级 + 无origin跳过 + issue #96 gh失败优雅降级)");
+  // ── ⑨（issue #103）taskSource !== "github" → 整个途③物理跳过：不反查 owner/repo、不检查
+  //     项目注册、fetchOpenIssues 根本不该被调用——即便目标是一个"未注册"的仓库（②a 用的同一个
+  //     TEST_REPO，此时其实已经在②a之后注册过了，所以额外验证一个从未注册、也没有 origin
+  //     remote 的全新 bare repo，证明 taskSource:"none" 时这些前置检查压根不会被触发，不是
+  //     "触发了但恰好通过"） ──────────────────────────────────────────────────────
+  {
+    const bareDir9 = mkdtempSync(join(tmpdir(), "brain-test-seed-tasksource-none-"));
+    // 故意不 git init——taskSource:"none" 时不该反查 origin，这个目录甚至不是 git 仓库也该
+    // 正常跑完（如果实现漏掉了 gate，getOriginOwnerRepo() 会在这里真的报错/返回 not-ok，
+    // 暴露出"其实还是走到了 origin 反查这一步"）。
+    let fetchCalled9 = false;
+    const result9 = await main({
+      cwd: bareDir9,
+      fetchOpenIssues: async () => {
+        fetchCalled9 = true;
+        return stubIssues();
+      },
+      taskSource: "none",
+    });
+    assert.ok(result9.skippedTaskSync, "taskSource:none 时应设置 skippedTaskSync");
+    assert.match(result9.skippedTaskSync, /未配置在途任务来源/, "skippedTaskSync 措辞应说明是未配置来源，不是别的原因（比如 gh 失败/无 origin）");
+    assert.equal(fetchCalled9, false, "taskSource:none 时 fetchOpenIssues 根本不该被调用");
+    assert.deepEqual(result9.issues, [], "taskSource:none 时 issues 应是空数组");
+    assert.ok(result9.identity, "taskSource:none 时身份仍应正常写入，途①②不受影响");
+    assert.equal(result9.constraints.length, CONSTITUTION_CONSTRAINTS.length, "taskSource:none 时宪法约束仍应正常写入");
+    rmSync(bareDir9, { recursive: true, force: true });
+  }
+
+  // ── ⑩（issue #103）省略 taskSource（不传 opts.taskSource）→ 应等同 resolveTaskSource() 的
+  //     真实解析结果——测试进程没有设置 AELOOP_BRAIN_TASK_SOURCE，且 TEST_REPO 没有
+  //     `.claude/brain.local.json`，所以应该落到默认值 "none"，行为和显式传 "none" 一致 ──────
+  {
+    const originalTaskSourceEnv = process.env.AELOOP_BRAIN_TASK_SOURCE;
+    delete process.env.AELOOP_BRAIN_TASK_SOURCE;
+    try {
+      let fetchCalled10 = false;
+      const result10 = await main({
+        cwd: TEST_REPO,
+        fetchOpenIssues: async () => {
+          fetchCalled10 = true;
+          return stubIssues();
+        },
+        // 不传 taskSource——依赖 main() 内部 resolveTaskSource({ cwd }) 的真实解析。
+      });
+      assert.ok(result10.skippedTaskSync, "省略 taskSource 时应默认落到 none 分支，设置 skippedTaskSync");
+      assert.equal(fetchCalled10, false, "省略 taskSource 时不该调用 fetchOpenIssues（默认 none）");
+    } finally {
+      if (originalTaskSourceEnv === undefined) delete process.env.AELOOP_BRAIN_TASK_SOURCE;
+      else process.env.AELOOP_BRAIN_TASK_SOURCE = originalTaskSourceEnv;
+    }
+  }
+
+  console.log("PASS: test-seed-brain-identity.mjs (issue #88 B8 — 幂等 upsert + 5种status映射 + closed→archived + 无DB路径报错 + 改标题不产生孤儿 + 多label优先级 + 无origin跳过 + issue #96 gh失败优雅降级 + issue #103 taskSource gate：none 时整个途③物理跳过 + 省略时默认 none)");
 } finally {
   if (ORIGINAL_ENV_DB === undefined) delete process.env.AELOOP_BRAIN_IDENTITY_DB;
   else process.env.AELOOP_BRAIN_IDENTITY_DB = ORIGINAL_ENV_DB;

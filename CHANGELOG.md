@@ -6,6 +6,22 @@
 
 ## [Unreleased]
 
+- **2026-07-24** — 在途任务来源可插拔、默认关(#103):新增
+  `AELOOP_BRAIN_TASK_SOURCE`(`"none"` 默认 \| `"github"`)选择器
+  (`.claude/hooks/lib/task-source.mjs`),shipped 默认零 GitHub——开场白的"现在在途"/"Idea
+  Queue 积压"/任务候选整段不渲染(不是显示"无"),`scripts/seed-brain-identity.mjs` 整个
+  在途任务同步(反查 owner/repo、项目注册检查、`gh` 调用)物理跳过;身份/宪法候选("待你决策"
+  的一部分,来自三态确认流程、从不碰 gh)不受影响。首醒引导(#96)默认措辞同步改成不提 gh、
+  改讲怎么 opt-in。`install-global-brain.mjs` 新增 `--task-source=github` CLI flag 烘焙进
+  `hookCommand`;顺带修了一个真实 edge case——重装换 flag 此前会在 `settings.json` 里堆出
+  第二条 aeloop 的 SessionStart 条目,幂等判据从"command 完全相同"改成"按 `aeloop-brain`
+  标记子串定位、原地替换",和未来 #105(uninstall-global-brain)用同一个标记,两边判据对称。
+  **这是一处有意的默认值行为变更,不是零回归**:任何已经在跑这套 hook、且没有显式设置
+  `AELOOP_BRAIN_TASK_SOURCE=github`(或对应 CLI flag / `brain.local.json` 字段)的既有
+  安装,升级后开场白会从"带 GitHub 看板"变成"不带",这是本次要的产品决策的直接后果,详见
+  `docs/enterprise-board-toggle/impact.md`。`src/**` 零改动,`pnpm test` 634 个测试全绿,
+  `pnpm lint` 干净,全部既有 `test-*.mjs`(21 个)+ 本次新增/扩展的用例本地跑通。
+
 - **2026-07-23** — 首次醒来身份库为空时走交互式引导(#96):`brain-wake-greeting.mjs`
   新增两条状态检测——身份库未配置、或已配置但一条记忆都没有(`listMemories().length
   === 0`)——命中时不再彻底沉默/渲染诚实占位符开场白,改为注入一段引导脚本
