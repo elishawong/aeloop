@@ -1,0 +1,13 @@
+sequenceDiagram
+    participant Engine as Aeloop Loop
+    participant Harness
+    participant Context
+    participant Prompt
+    participant Model
+    Engine->>Context: 请求任务上下文
+    Context-->>Engine: memories + warnings + omitted
+    Engine->>Prompt: role + context + task
+    Prompt-->>Harness: persona + schema + context + task
+    Harness->>Model: adapter.invoke(request)
+    Model-->>Harness: raw response + usage + tool trace
+    Harness-->>Engine: validated structured result

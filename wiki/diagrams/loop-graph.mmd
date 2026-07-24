@@ -1,0 +1,19 @@
+flowchart TD
+    S((start)) --> D[draft / coder]
+    D -->|changed| G1[G1: send diff to tester?]
+    D -->|no_change| NC[no_change]
+    G1 -->|approved| R[review / tester]
+    G1 -->|rejected| D
+    R -->|pass| G3[G3: final sign-off]
+    R -->|reject and below threshold| G2[G2: send findings to coder?]
+    R -->|reject at threshold| E[escalation]
+    G2 -->|approved| D
+    G2 -->|escalate| E
+    G3 -->|approved| A[apply]
+    G3 -->|rejected| D
+    E -->|retry| D
+    E -->|approve final| G3
+    E -->|cancel| C[cancel]
+    A --> Z((end))
+    NC --> Z
+    C --> Z

@@ -1,0 +1,15 @@
+flowchart LR
+    subgraph P[产品层]
+      B[Brain]
+      C[Conductor / conductor-work]
+      B --> C
+    end
+    subgraph E[执行层]
+      L[Loop]
+      H[Harness]
+      X[Context]
+      R[Prompt]
+      L --> H --> X --> R
+    end
+    C -->|versioned TaskContract| L
+    L -->|EvidenceBundle + events| C

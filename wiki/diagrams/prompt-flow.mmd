@@ -1,0 +1,9 @@
+flowchart TD
+    A[Loop 提供 role/task] --> B[加载 persona.md]
+    C[ContextInjectionResult] --> D[渲染 memories 和 warnings]
+    E[SchemaRegistry] --> F[转成 JSON Schema]
+    B --> G[Prompt sections]
+    D --> G
+    F --> G
+    A --> G
+    G --> H[最终 prompt 字符串]

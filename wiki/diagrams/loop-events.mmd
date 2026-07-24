@@ -1,0 +1,8 @@
+flowchart LR
+    N[节点执行] --> E[LoopEvent]
+    G[Gate decision] --> E
+    T[Tool/usage metadata] --> E
+    E --> A[Audit store]
+    E --> P[Evidence projector]
+    P --> B[EvidenceBundle]
+    E --> U[Usage ledger]

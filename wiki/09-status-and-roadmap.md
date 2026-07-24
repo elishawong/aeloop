@@ -37,15 +37,9 @@ LiteLLM direct API 可以记录 provider usage 和模型结果，但通常无法
 
 ## 9.3 推荐路线
 
-```mermaid
-flowchart LR
-    A[基线：真实 company run] --> B[持久化 usage / evidence]
-    B --> C[真实事件流与外部 gate]
-    C --> D[PromptDelta / cache 测量]
-    D --> E[第二个真实 workflow]
-    E --> F[稳定的 workflow plugin API]
-    F --> G[可视化 workflow builder]
-```
+![推荐路线](./diagrams/status-roadmap.svg)
+
+图源：[status-roadmap.mmd](./diagrams/status-roadmap.mmd)。
 
 优先级建议：
 
